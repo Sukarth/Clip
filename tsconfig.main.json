@@ -1,0 +1,18 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "outDir": "dist/main",
+        "rootDir": "src",
+        "module": "commonjs",
+        "target": "ES2020",
+        "esModuleInterop": true,
+        "types": [
+            "node"
+        ],
+        "noEmit": false
+    },
+    "include": [
+        "src/main.ts",
+        "src/preload.js"
+    ]
+}

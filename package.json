@@ -1,0 +1,61 @@
+{
+  "name": "clip",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build:main": "tsc --project src/tsconfig.main.json && node -e \"require('fs').copyFileSync('src/preload.js','dist/main/preload.js')\" && node scripts/copy-clipmsg.js",
+    "build:renderer": "webpack --mode production",
+    "build:all": "npm run build:main && npm run build:renderer",
+    "dist": "npm run build:all && electron-builder",
+    "start": "npm run build:main && npm run build:renderer && echo \"starting electron...\" && electron .",
+    "dev": "npm run build:main && webpack --mode development --watch & electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "fuse.js": "^7.1.0",
+    "node-addon-api": "^8.3.1",
+    "node-key-sender": "^1.0.11",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.18",
+    "@types/react": "^19.1.4",
+    "@types/react-dom": "^19.1.5",
+    "electron": "^36.2.1",
+    "electron-builder": "^26.0.12",
+    "html-webpack-plugin": "^5.6.3",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.99.8",
+    "webpack-cli": "^6.0.1"
+  },
+  "build": {
+    "appId": "com.sukarth.clip",
+    "productName": "Clip",
+    "files": [
+      "dist/**/*",
+      "src/preload.js",
+      "assets/icon256.ico",
+      "native/SendPaste.exe"
+    ],
+    "directories": {
+      "buildResources": "."
+    },
+    "win": {
+      "icon": "assets/icon256.ico",
+      "target": "nsis"
+    },
+    "mac": {
+      "sign": false
+    }
+  }
+}
