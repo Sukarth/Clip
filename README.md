@@ -174,8 +174,9 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - [x] Portable and installer versions
 
 ### Planned Features
-- [ ] Cloud synchronization (optional)
-- [ ] Plugin system for custom processors
+- [ ] Cloud synchronization
+- [ ] Performance improvements
+- [ ] Color Theme customization options
 - [ ] Advanced search filters and tags
 - [ ] Clipboard templates and snippets
 - [ ] Multi-monitor support improvements

@@ -184,7 +184,6 @@ Contributors will be recognized in:
 
 - **GitHub Issues** - For bugs and feature requests
 - **GitHub Discussions** - For questions and general discussion
-- **Email** - sukarthacharya@gmail.com for private matters
 
 ## 📄 License
 
