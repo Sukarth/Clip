@@ -3,7 +3,7 @@
   "description": "A fast, modern clipboard manager for Windows.",
   "version": "1.0.0-beta",
   "author": "Sukarth Acharya",
-  "copyright": "© 2025 Sukarth",
+  "copyright": "© 2025 Sukarth Acharya",
   "homepage": "https://github.com/Sukarth/Clip",
   "repository": {
     "type": "git",
@@ -17,17 +17,14 @@
     "build:main": "tsc --project src/tsconfig.main.json && node -e \"require('fs').copyFileSync('src/preload.js','dist/main/preload.js')\" && node scripts/copy-clipmsg.js",
     "build:renderer": "webpack --mode production",
     "build:all": "npm run build:main && npm run build:renderer",
-    "dist": "npm run build:all && electron-builder --config.win.target=zip",
-    "dist:installer": "npm run build:all && electron-builder --config.win.target=nsis",
-    "dist:portable": "npm run build:all && electron-builder --config.win.target=zip",
-    "dist:both": "npm run build:all && electron-builder",
+    "dist": "npm run build:all && electron-builder",
     "dist:fast": "npm run build:all && electron-builder --config.compression=store",
     "dist:fast-installer": "npm run build:all && electron-builder --config.compression=store --config.win.target=nsis",
-    "dist:fast-portable": "npm run build:all && electron-builder --config.compression=store --config.win.target=zip",
+    "dist:fast-zip": "npm run build:all && electron-builder --config.compression=store --config.win.target=zip",
     "build:dir": "npm run build:all && electron-builder --dir",
-    "test:build": "npm run build:all && electron-builder --dir --config.compression=store",
+    "build:dir-fast": "npm run build:all && electron-builder --dir --config.compression=store",
     "start": "npm run build:all && echo \"starting electron...\" && electron .",
-    "dev": "npm run build:main && webpack --mode development --watch & electron .",
+    "dev": "npm run build:main && webpack --mode development --watch && echo \"starting electron...\" && electron .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -57,7 +54,7 @@
   "build": {
     "appId": "com.sukarth.clip",
     "productName": "Clip",
-    "copyright": "© 2025 Sukarth",
+    "copyright": "© 2025 Sukarth Acharya",
     "icon": "assets/icon.ico",
     "files": [
       "dist/**/*",
@@ -101,13 +98,36 @@
         {
           "target": "nsis",
           "arch": [
-            "x64"
+            "x64",
+            "ia32"
           ]
         },
         {
-          "target": "portable",
+          "target": "nsis-web",
           "arch": [
-            "x64"
+            "x64",
+            "ia32"
+          ]
+        },
+        {
+          "target": "msi",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        },
+        {
+          "target": "7z",
+          "arch": [
+            "x64",
+            "ia32"
           ]
         }
       ],
@@ -141,9 +161,13 @@
         "to": "clipmsg.node"
       }
     ],
-    "mac": {
-      "sign": false
-    },
-    "linux": {}
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Sukarth",
+        "repo": "Clip",
+        "releaseType": "draft"
+      }
+    ]
   }
 }

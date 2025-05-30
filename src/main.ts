@@ -731,31 +731,31 @@ function createMainWindow() {
         }
     });
 
-    // Hide window when it loses focus (same behavior as pressing ESC)
-    mainWindow.on('blur', () => {
-        if (mainWindow && mainWindow.isVisible()) {
-            // Don't hide if triggered by AHK (give AHK time to focus)
-            if (isAhkTriggered) {
-                console.log('[main] Window lost focus but AHK is active, not hiding...');
-                return;
-            }
+    // // Hide window when it loses focus (same behavior as pressing ESC)
+    // mainWindow.on('blur', () => {
+    //     if (mainWindow && mainWindow.isVisible()) {
+    //         // Don't hide if triggered by AHK (give AHK time to focus)
+    //         if (isAhkTriggered) {
+    //             console.log('[main] Window lost focus but AHK is active, not hiding...');
+    //             return;
+    //         }
 
-            console.log('[main] Window lost focus, hiding...');
+    //         console.log('[main] Window lost focus, hiding...');
 
-            // Restore focus to the previous window before hiding
-            restorePreviousWindow();
+    //         // Restore focus to the previous window before hiding
+    //         restorePreviousWindow();
 
-            if (windowHideBehavior === 'hide') {
-                mainWindow.setSkipTaskbar(true);
-                mainWindow.hide();
-                removeTray();
-            } else if (windowHideBehavior === 'tray') {
-                mainWindow.hide();
-                mainWindow.setSkipTaskbar(true);
-                ensureTray(mainWindow);
-            }
-        }
-    });
+    //         if (windowHideBehavior === 'hide') {
+    //             mainWindow.setSkipTaskbar(true);
+    //             mainWindow.hide();
+    //             removeTray();
+    //         } else if (windowHideBehavior === 'tray') {
+    //             mainWindow.hide();
+    //             mainWindow.setSkipTaskbar(true);
+    //             ensureTray(mainWindow);
+    //         }
+    //     }
+    // });
 }
 
 function pollClipboard() {

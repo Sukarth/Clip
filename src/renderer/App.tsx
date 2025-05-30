@@ -159,7 +159,7 @@ const getSliderStyles = (accentColor: string) => `
         transform: scale(1.1);
         background: ${accentColor} !important;
     }
-    
+
     /* Firefox styles */
     input[type="range"]::-moz-range-track {
         background: #333;
@@ -650,7 +650,7 @@ const App: React.FC = () => {
             log.renderer(`Scrollbar check: scrollHeight=${el.scrollHeight}, clientHeight=${el.clientHeight}, hasScroll=${hasScroll}, items=${items.length}, filtered=${filteredItems.length}, animating=${isAnimatingList}`);
             setHasScrollbar(hasScroll);
         };
-        
+
         // Delayed check to ensure DOM has updated after item changes
         const delayedCheck = () => {
             setTimeout(() => {
@@ -658,7 +658,7 @@ const App: React.FC = () => {
                 updateScrollbarPresence();
             }, 10);
         };
-        
+
         // Initial check
         delayedCheck();
         // Observe size changes in the container
@@ -824,13 +824,13 @@ const App: React.FC = () => {
     const useCacheIfValid = useCallback(() => {
         const now = Date.now();
         const cacheAge = now - lastCacheUpdate;
-        
+
         if (isCacheLoaded && cacheAge < cacheValidDuration && itemsCache.length > 0) {
             log.renderer(`Cache: Using valid cache (${cacheAge}ms old, ${itemsCache.length} items)`);
             setItems(itemsCache);
             setHasLoadedInitially(true);
             setIsDataLoading(false);
-            
+
             // Force scrollbar detection after cache load
             setTimeout(() => {
                 const el = listRef.current;
@@ -840,7 +840,7 @@ const App: React.FC = () => {
                     setHasScrollbar(hasScroll);
                 }
             }, 50); // Slightly longer delay to ensure DOM is updated
-            
+
             return true;
         }
         return false;
@@ -886,7 +886,7 @@ const App: React.FC = () => {
         const handler = () => {
             // Invalidate cache since we have new clipboard data
             setLastCacheUpdate(0); // Force cache refresh on next request
-            
+
             // Request updated history
             window.electronAPI?.requestClipboardHistory?.();
         };
@@ -909,7 +909,7 @@ const App: React.FC = () => {
         setLastCacheUpdate(0);
         setItemsCache([]);
         setIsCacheLoaded(false);
-        
+
         window.electronAPI?.clearClipboardHistory?.();
         setDangerAction(null);
         showToast('success', 'Clipboard history cleared successfully');
@@ -949,7 +949,7 @@ const App: React.FC = () => {
     function handleTogglePin(item: ClipboardItem) {
         // Invalidate cache since we're modifying data
         setLastCacheUpdate(0);
-        
+
         // If item.id is a string, try to parse as number for DB
         const dbId = typeof item.id === 'number' ? item.id : parseInt(item.id, 10);
         if (!isNaN(dbId)) {
@@ -969,10 +969,10 @@ const App: React.FC = () => {
 
     function confirmDelete(item: ClipboardItem) {
         setDeletingId(item.id);
-        
+
         // Invalidate cache since we're modifying data
         setLastCacheUpdate(0);
-        
+
         // Send delete request to main; main will reply with updated history
         // @ts-ignore
         window.electronAPI?.deleteClipboardItem?.(typeof item.id === 'number' ? item.id : parseInt(item.id, 10));
@@ -1100,7 +1100,7 @@ const App: React.FC = () => {
                 setIsWindowFocused(true);
                 setIsAnimatingList(true);
                 setListKey(k => k + 1); // Trigger animation IMMEDIATELY
-                
+
                 // Try cache first for instant display, then fetch fresh data
                 if (!useCacheIfValid()) {
                     // Cache miss or invalid - fetch fresh data
@@ -1109,7 +1109,7 @@ const App: React.FC = () => {
                         window.electronAPI?.requestClipboardHistory?.();
                     }, 50); // Reduced delay since cache wasn't available
                 }
-                
+
                 // Always request fresh data in background (but don't block UI)
                 setTimeout(() => {
                     window.electronAPI?.requestClipboardHistory?.();
@@ -1126,7 +1126,7 @@ const App: React.FC = () => {
                 setIsWindowFocused(true);
                 setIsAnimatingList(true);
                 setListKey(k => k + 1); // Trigger animation IMMEDIATELY
-                
+
                 // Try cache first for instant display, then fetch fresh data
                 if (!useCacheIfValid()) {
                     // Cache miss or invalid - fetch fresh data
@@ -1135,7 +1135,7 @@ const App: React.FC = () => {
                         window.electronAPI?.requestClipboardHistory?.();
                     }, 50); // Reduced delay since cache wasn't available
                 }
-                
+
                 // Always request fresh data in background
                 setTimeout(() => {
                     window.electronAPI?.requestClipboardHistory?.();
@@ -1155,7 +1155,7 @@ const App: React.FC = () => {
         if (document.visibilityState === 'visible' && document.hasFocus()) {
             setIsWindowFocused(true);
             setIsAnimatingList(true);
-            
+
             // Try cache first, then fetch if needed
             if (!useCacheIfValid()) {
                 setTimeout(() => {
@@ -1273,32 +1273,32 @@ const App: React.FC = () => {
 
                 <div className="clip-header" style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh' }}>
                     <span className="clip-title" style={{ fontWeight: 600, fontSize: 18 }}>
-                      Clipboard
-                      {isDev() ? (
-                        <span
-                          style={{
-                            marginLeft: 6,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            opacity: 0.85,
-                            verticalAlign: 'middle',
-                            position: 'relative'
-                          }}
-                          title={`Cache: ${itemsCache.length} items, age: ${Math.round((Date.now() - lastCacheUpdate) / 1000)}s`}
-                        >
-                          <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-                            <path
-                              d="M7 7v6a3 3 0 0 0 6 0V6a4 4 0 0 0-8 0v7a5 5 0 0 0 10 0V7"
-                              stroke="#9C27B0"
-                              strokeWidth="2"
-                              fill="none"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        </span>
-                      ) : null}
+                        Clipboard
+                        {isDev() ? (
+                            <span
+                                style={{
+                                    marginLeft: 6,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    opacity: 0.85,
+                                    verticalAlign: 'middle',
+                                    position: 'relative'
+                                }}
+                                title={`Cache: ${itemsCache.length} items, age: ${Math.round((Date.now() - lastCacheUpdate) / 1000)}s`}
+                            >
+                                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                                    <path
+                                        d="M7 7v6a3 3 0 0 0 6 0V6a4 4 0 0 0-8 0v7a5 5 0 0 0 10 0V7"
+                                        stroke="#9C27B0"
+                                        strokeWidth="2"
+                                        fill="none"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                </svg>
+                            </span>
+                        ) : null}
                     </span>
                     <button
                         className="clip-settings-btn"
@@ -1402,7 +1402,7 @@ const App: React.FC = () => {
                                 background: 'rgba(255,255,255,0.02)'
                             }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span style={{ fontWeight: 600, fontSize: 20, color: '#fff' }}>Settings</span>
+                                    <span id='settings-title' style={{ fontWeight: 600, fontSize: 20, color: '#fff' }}>Settings</span>
                                     <button
                                         style={{
                                             background: 'rgba(255,255,255,0.08)',
@@ -1437,6 +1437,7 @@ const App: React.FC = () => {
                                             <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Max clipboard items</span>
                                             <div style={{ position: 'relative' }}>
                                                 <input
+                                                    className="settings-input"
                                                     type="number"
                                                     min={10}
                                                     max={500}
@@ -1525,6 +1526,7 @@ const App: React.FC = () => {
                                         <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                             <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Window hide behavior</span>
                                             <select
+                                                className="settings-select"
                                                 value={settingsDraft?.windowHideBehavior ?? settings.windowHideBehavior}
                                                 onChange={e => setSettingsDraft(s => s ? { ...s, windowHideBehavior: e.target.value as Settings['windowHideBehavior'] } : null)}
                                                 style={{
@@ -1544,7 +1546,7 @@ const App: React.FC = () => {
                                                 <option value="tray">Minimize to tray (tray icon only)</option>
                                             </select>
                                         </label>
-                                        <label style={{
+                                        <label className="settings-container" style={{
                                             display: 'flex',
                                             flexDirection: 'row',
                                             alignItems: 'center',
@@ -1569,6 +1571,7 @@ const App: React.FC = () => {
                                                     {MODIFIER_OPTIONS.map(opt => (
                                                         <label
                                                             key={opt.value}
+                                                            className="settings-modifier-button"
                                                             style={{
                                                                 display: 'flex',
                                                                 alignItems: 'center',
@@ -1613,6 +1616,7 @@ const App: React.FC = () => {
                                                 </div>
                                             </label>
                                             <select
+                                                className="settings-select"
                                                 value={shortcutMainKey}
                                                 onChange={e => setShortcutMainKey(e.target.value)}
                                                 style={{
@@ -1633,7 +1637,7 @@ const App: React.FC = () => {
                                                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                                                 ))}
                                             </select>
-                                            <div style={{
+                                            <div className="settings-display-box" style={{
                                                 fontSize: 12,
                                                 color: '#888',
                                                 padding: '8px 12px',
@@ -1689,7 +1693,7 @@ const App: React.FC = () => {
                                 {/* Backups section */}
                                 <div>
                                     <h2 style={{ ...sectionHeaderStyle, color: '#e1e1e1', fontSize: 16, fontWeight: 600, marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.12)' }}>Backups</h2>
-                                    <label style={{
+                                    <label className="settings-container" style={{
                                         display: 'flex',
                                         flexDirection: 'row',
                                         alignItems: 'center',
@@ -1719,6 +1723,7 @@ const App: React.FC = () => {
                                         <label style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
                                             <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Backup interval</span>
                                             <select
+                                                className="settings-select"
                                                 value={settingsDraft?.backupInterval ?? settings.backupInterval}
                                                 onChange={e => setSettingsDraft(s => s ? { ...s, backupInterval: Number(e.target.value) } : null)}
                                                 style={{
@@ -1743,6 +1748,7 @@ const App: React.FC = () => {
                                         <label style={{ display: 'flex', flexDirection: 'column', gap: 8, width: 100 }}>
                                             <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Max backups</span>
                                             <input
+                                                className="settings-input"
                                                 type="number"
                                                 min={1}
                                                 max={50}
@@ -1764,6 +1770,7 @@ const App: React.FC = () => {
                                             />
                                         </label>
                                     </div>                                    <button
+                                        className="settings-button"
                                         style={{
                                             background: isBackingUp ? `${settingsDraft?.accentColor ?? settings.accentColor}44` : '#23252a',
                                             border: isBackingUp ? `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}` : '1px solid #444',
@@ -1828,6 +1835,7 @@ const App: React.FC = () => {
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                                         <h3 style={{ ...subHeaderStyle, margin: 0 }}>Backup Management</h3>
                                         <button
+                                            className="settings-button"
                                             style={{
                                                 background: 'rgba(255,255,255,0.08)',
                                                 border: '1px solid rgba(255,255,255,0.12)',
@@ -1849,7 +1857,7 @@ const App: React.FC = () => {
 
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
                                         {backupList.length === 0 ? (
-                                            <div style={{
+                                            <div className="settings-display-box" style={{
                                                 padding: 16,
                                                 background: 'rgba(255,255,255,0.03)',
                                                 borderRadius: 8,
@@ -1907,7 +1915,7 @@ const App: React.FC = () => {
                                                     )}
                                                 </div>
 
-                                                <div style={{
+                                                <div className="settings-display-box" style={{
                                                     maxHeight: 200,
                                                     overflowY: 'auto',
                                                     border: '1px solid rgba(255,255,255,0.12)',
@@ -2054,6 +2062,7 @@ const App: React.FC = () => {
 
                                                 <div style={{ display: 'flex', gap: 12 }}>
                                                     <button
+                                                        className="settings-button"
                                                         style={{
                                                             background: selectedBackup ? (settingsDraft?.accentColor ?? settings.accentColor) : '#23252a',
                                                             border: selectedBackup ? `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}` : '1px solid #444',
@@ -2111,6 +2120,7 @@ const App: React.FC = () => {
 
                                                     {showBackupManagement && selectedBackups.size > 0 && (
                                                         <button
+                                                            className="settings-button"
                                                             style={{
                                                                 background: '#ff4136',
                                                                 border: '1px solid #ff4136',
@@ -2142,17 +2152,20 @@ const App: React.FC = () => {
                                     <h2 style={sectionHeaderStyle}>Data</h2>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20, marginTop: 21 }}>
                                         <button
+                                            className="settings-button"
                                             style={{ background: '#23252a', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '7px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15, transition: 'background 0.2s, border 0.2s' }}
                                             onClick={handleExportSettings}
                                         >
                                             Export Settings
                                         </button>
                                         <button
+                                            className="settings-button"
                                             style={{ background: '#23252a', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '7px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15, transition: 'background 0.2s, border 0.2s' }}
                                             onClick={handleImportSettings}
                                         >
                                             Import Settings
                                         </button>                                        <button
+                                            className="settings-button"
                                             style={{ background: '#23252a', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '7px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15, transition: 'background 0.2s, border 0.2s' }}
                                             onClick={async (e) => {
                                                 const button = e.currentTarget;
@@ -2188,6 +2201,7 @@ const App: React.FC = () => {
                                         >
                                             Export Database
                                         </button>                                        <button
+                                            className="settings-button"
                                             style={{ background: '#23252a', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '7px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15, transition: 'background 0.2s, border 0.2s' }}
                                             onClick={async (e) => {
                                                 const button = e.currentTarget;
@@ -2267,12 +2281,14 @@ const App: React.FC = () => {
                                     <label style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                                         Accent color
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>                                            <input
+                                            className="settings-input"
                                             type="color"
                                             value={settingsDraft?.accentColor ?? settings.accentColor}
                                             onChange={e => setSettingsDraft(s => s ? { ...s, accentColor: e.target.value } : null)}
                                             style={{ width: 40, height: 40, border: '1px solid #444', borderRadius: 8, background: 'transparent', cursor: 'pointer' }}
                                         />
                                             <input
+                                                className="settings-input"
                                                 type="text"
                                                 value={settingsDraft?.accentColor ?? settings.accentColor}
                                                 onChange={e => setSettingsDraft(s => s ? { ...s, accentColor: e.target.value } : null)}
@@ -2292,6 +2308,7 @@ const App: React.FC = () => {
                                     <label style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                                         Theme
                                         <select
+                                            className="settings-select"
                                             value={settingsDraft?.theme ?? settings.theme}
                                             onChange={e => setSettingsDraft(s => s ? { ...s, theme: e.target.value as Settings['theme'] } : null)}
                                             style={{ borderRadius: 7, border: '1px solid #444', background: '#23252a', color: '#fff', padding: '6px 12px', width: 150, fontSize: 15 }}
@@ -2361,7 +2378,7 @@ const App: React.FC = () => {
                                     flexDirection: 'column',
                                     gap: 16,
                                 }}>
-                                    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#ff4136', margin: 0, marginBottom: 8 }}>Danger Area</h2>
+                                    <h2 id='danger-area' style={{ fontSize: 18, fontWeight: 700, color: '#ff4136', margin: 0, marginBottom: 8 }}>Danger Area</h2>
                                     <div style={{ fontSize: 15, color: '#ff4136', marginBottom: 8 }}>
                                         These actions are irreversible. Please proceed with caution.
                                     </div>
@@ -2380,7 +2397,7 @@ const App: React.FC = () => {
                                     >
                                         Reset Settings to Default
                                     </button>
-                                    <div style={{ fontSize: 13, color: '#ffb300', marginTop: -8 }}>
+                                    <div id='reset-settings-warning' style={{ fontSize: 13, color: '#ffb300', marginTop: -8 }}>
                                         This will reset all settings to their original defaults.
                                     </div>
                                 </div>
@@ -2646,9 +2663,10 @@ const App: React.FC = () => {
                                 Yes
                             </button>
                             <button
+                            className='no-btn'
                                 style={{
                                     background: '#ff4136',
-                                    color: '#fff',
+                                    color: '#fff !important',
                                     border: '1px solid #ff4136',
                                     borderRadius: 6,
                                     padding: '6px 18px',
@@ -2703,6 +2721,7 @@ const App: React.FC = () => {
                                 Yes
                             </button>
                             <button
+                                className='no-btn'
                                 style={{
                                     background: '#222',
                                     color: dangerAction === 'clear' ? '#ff4136' : '#ffb300',
@@ -2733,10 +2752,10 @@ const App: React.FC = () => {
                     -webkit-user-select: none;
                     user-select: none;
                 }
-                
+
                 /* Custom slider styles */
                 ${getSliderStyles(settings.accentColor)}
-                
+
                 /* Light theme slider styles */
                 .theme-light input[type="range"]::-webkit-slider-runnable-track {
                     background: #ccc !important;
@@ -2763,67 +2782,222 @@ const App: React.FC = () => {
                     backdrop-filter: blur(10px);
                     -webkit-backdrop-filter: blur(10px);
                 }
-                
+
+                /* Dark mode option styling */
+                option {
+                    background: #23252a !important;
+                    color: #fff !important;
+                }
+
+                select option {
+                    background: #23252a !important;
+                    color: #fff !important;
+                }
+
                 /* Theme-based styling */
                 .theme-light .clip-root {
-                    background: rgba(240,240,240,${settings.transparency});
-                    color: #333;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+                    background: rgba(250,250,250,${settings.transparency});
+                    color: #2c3e50;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
                     backdrop-filter: blur(10px);
                     -webkit-backdrop-filter: blur(10px);
                 }
-                
+
                 .theme-light .clip-item {
-                    background: rgba(255,255,255,0.6) !important;
-                    color: #333;
+                    background: rgba(255,255,255,0.85) !important;
+                    color: #2c3e50;
+                    border: 1px solid rgba(0,0,0,0.08) !important;
                 }
-                
+
                 .theme-light .clip-item:hover {
-                    background: rgba(255,255,255,0.8) !important;
+                    background: rgba(255,255,255,0.95) !important;
+                    border: 1px solid rgba(0,0,0,0.12) !important;
                 }
-                
+
                 .theme-light .clip-settings-page {
-                    background: rgba(240,240,240,${settings.transparency}) !important;
-                    color: #333;
+                    background: rgba(250,250,250,${settings.transparency}) !important;
+                    color: #2c3e50;
                 }
-                
-                
+
+
                 .theme-light .clip-settings-scroll::-webkit-scrollbar-thumb {
                     background: #aaa;
                     border: 2px solid #f0f0f0;
                     max-height: 90%;
                 }
-                
+
                 .theme-light .clip-settings-scroll::-webkit-scrollbar-thumb:hover {
                     background: ${settings.accentColor};
                 }
-                
+
                 .theme-light input, .theme-light select {
-                    background: rgba(255,255,255,0.8) !important;
-                    color: #333 !important;
-                    border-color: #ccc !important;
+                    background: rgba(255,255,255,0.95) !important;
+                    color: #2c3e50 !important;
+                    border: 1px solid #d1d5db !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
                 }
-                
-                .theme-light button {
-                    background: rgba(255,255,255,0.5) !important;
-                    color: #333 !important;
-                    border-color: #ccc !important;
+
+                /* Only apply input-like styling to labels that have background styling (container labels) */
+                .theme-light label[style*="background: rgba(255,255,255,0.03)"],
+                .theme-light label[style*="background: rgba(255,255,255,0.05)"],
+                .theme-light label[style*="background: rgba(255,255,255,0.08)"] {
+                    background: rgba(255,255,255,0.9) !important;
+                    border: 1px solid #e5e7eb !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
                 }
-                
+
+                .theme-light input:focus, .theme-light select:focus {
+                    border-color: ${settings.accentColor} !important;
+                    box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
+                    outline: none !important;
+                }
+
+                .theme-light option {
+                    background: rgba(255,255,255,0.98) !important;
+                    color: #2c3e50 !important;
+                }
+
+                /* Dark mode theme-specific option styling */
+                .theme-dark option {
+                    background: #23252a !important;
+                    color: #fff !important;
+                }
+
+                .theme-dark select option {
+                    background: #23252a !important;
+                    color: #fff !important;
+                }
+
+                .theme-light button:not(.no-btn, .clip-pin-btn, .clip-delete-btn) {
+                    color: #292e36a6 !important;
+                    border: 1px solid #d1d5db !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+                    transition: all 0.2s ease !important;
+                }
+
+                .theme-light button:hover:not(.clip-pin-btn, .clip-delete-btn) {
+                    border-color: #9ca3af !important;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15) !important;
+                }
+
                 .theme-light button.clip-settings-save-btn {
                     background: ${settings.accentColor} !important;
                     color: #fff !important;
+                    border-color: ${settings.accentColor} !important;
                 }
-                
+
+                .theme-light button.clip-settings-save-btn:hover {
+                    background: ${settings.accentColor}dd !important;
+                    box-shadow: 0 2px 8px rgba(70, 130, 180, 0.3) !important;
+                }
+
                 .theme-light h2 {
-                    color: #333 !important;
-                    border-bottom-color: #ccc !important;
+                    color: #2c3440e8 !important;
+                    border-bottom-color: #e5e7eb !important;
                 }
-                
+
                 .theme-light h3 {
-                    color: #555 !important;
+                    color: #374151 !important;
                 }
-                
+
+                .theme-light span:not(.toast-message>span) {
+                    color: #6b7280 !important;
+                }
+
+                /* Light mode text labels - only for text labels, not container labels */
+                .theme-light label:not([style*="background:"]) {
+                    color: #374151 !important;
+                }
+
+                /* Light mode simple class-based styling */
+
+                /* Settings inputs and selects */
+                .theme-light .settings-input,
+                .theme-light .settings-select {
+                    background: rgba(255,255,255,0.95) !important;
+                    color: #2c3e50 !important;
+                    border: 1px solid #d1d5db !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+                }
+
+                #danger-area, .theme-light #reset-settings-warning {
+                    color: #ff4136 !important;
+                }
+
+                .theme-light .settings-input:focus,
+                .theme-light .settings-select:focus {
+                    border-color: ${settings.accentColor} !important;
+                    box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
+                }
+
+                /* Settings container labels (switch containers) */
+                .theme-light .settings-container {
+                    background: rgba(255,255,255,0.9) !important;
+                    border: 1px solid #e5e7eb !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+                }
+
+                /* Settings buttons */
+                .theme-light .settings-button {
+                    background: rgba(255,255,255,0.9) !important;
+                    border: 1px solid #d1d5db !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+                }
+
+                .theme-light .settings-button:hover {
+                    border-color: #9ca3af !important;
+                }
+
+                /* Settings display boxes (shortcut display, backup list, etc.) */
+                .theme-light .settings-display-box {
+                    background: rgba(255,255,255,0.9) !important;
+                    color: #374151 !important;
+                    border: 1px solid #e5e7eb !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+                }
+
+                /* Danger zone styling for light mode */
+                .theme-light div[style*="background: rgba(255,65,54,0.08)"] {
+                    background: rgba(120,120,120,0.15) !important;
+                }
+
+                .theme-light div[style*="color: #ffb300"] {
+                    color: #ff4136 !important;
+                }
+
+                /* Shortcut modifier buttons */
+                .theme-light .settings-modifier-button {
+                    background: rgba(255,255,255,0.9) !important;
+                    color: #2c3e50 !important;
+                    border: 1px solid #d1d5db !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+                }
+                    
+                .theme-light #settings-title {
+                    color: #575f6c !important;
+                }
+
+                .theme-light .settings-modifier-button:hover {
+                    background: rgba(255,255,255,1) !important;
+                    border-color: #9ca3af !important;
+                }
+
+                /* Light mode section backgrounds */
+                .theme-light div[style*="background: rgba(255,255,255,0.03)"] {
+                    background: rgba(255,255,255,0.7) !important;
+                    border: 1px solid #e5e7eb !important;
+                }
+
+                .theme-light div[style*="background: rgba(255,255,255,0.05)"] {
+                    background: rgba(255,255,255,0.8) !important;
+                    border: 1px solid #e5e7eb !important;
+                }
+
+                .theme-light div[style*="background: rgba(255,255,255,0.08)"] {
+                    background: rgba(255,255,255,0.9) !important;
+                    border: 1px solid #d1d5db !important;
+                }
+
                 @keyframes clip-fadein {
                     from { opacity: 0; transform: translateY(16px) scale(0.98); }
                     to { opacity: 1; transform: none; }
@@ -2849,7 +3023,7 @@ const App: React.FC = () => {
                 .fade-out { animation: clip-fadeout 0.3s forwards; }
                 .fade-opacity-in { opacity: 1; transition: opacity 0.3s; }
                 .fade-opacity-out { opacity: 0; transition: opacity 0.3s; }
-                
+
                 /* Toast notifications */
                 @keyframes toast-in {
                     from { opacity: 0; transform: translateY(20px); }
@@ -2873,7 +3047,7 @@ const App: React.FC = () => {
                 .toast-message.removing {
                     animation: toast-out 0.3s ease-in forwards;
                 }
-                
+
                 /* Other elements */
                 .clip-item {
                     will-change: transform, opacity;
@@ -2937,7 +3111,7 @@ const App: React.FC = () => {
                 .clip-list::-webkit-scrollbar-thumb:hover {
                     background: #2ecc40;
                 }
-                
+
                 /* Backup list scrollbar styling */
                 .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar {
                     width: 6px;
