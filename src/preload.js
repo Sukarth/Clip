@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
     hideWindow: () => ipcRenderer.send('hide-window'),
+    restorePreviousWindow: () => ipcRenderer.send('restore-previous-window'),
     onClipboardItem: (callback) => ipcRenderer.on('clipboard-item', (_event, data) => callback(data)),
     onClipboardHistory: (callback) => ipcRenderer.on('clipboard-history', (_event, data) => callback(data)),
     requestClipboardHistory: () => ipcRenderer.send('request-clipboard-history'),
@@ -19,9 +20,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createBackup: () => ipcRenderer.invoke('create-backup'),
     listBackups: () => ipcRenderer.invoke('list-backups'),
     restoreBackup: (file) => ipcRenderer.invoke('restore-backup', file),
+    deleteBackup: (file) => ipcRenderer.invoke('delete-backup', file),
+    deleteMultipleBackups: (files) => ipcRenderer.invoke('delete-multiple-backups', files),
     exportDb: () => ipcRenderer.invoke('export-db'),
     importDb: (buffer) => ipcRenderer.invoke('import-db', buffer),
     deleteClipboardItem: (id) => ipcRenderer.send('delete-clipboard-item', id),
+    trimClipboardItems: (maxItems) => ipcRenderer.invoke('trim-clipboard-items', maxItems),
     onForceRefresh: (callback) => ipcRenderer.on('force-refresh', callback),
     setGlobalShortcut: (shortcut) => ipcRenderer.send('set-global-shortcut', shortcut),
     quitApp: () => ipcRenderer.send('quit-app'),
@@ -29,6 +33,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setWinVOverride: (enabled) => ipcRenderer.send('set-win-v-override', enabled),
     setBackendShortcut: (shortcut) => ipcRenderer.send('set-backend-shortcut', shortcut),
     restartApp: () => ipcRenderer.send('restart-app'),
+    saveSettingsToFile: (settings) => ipcRenderer.send('save-settings-to-file', settings),
+    isDevelopment: () => {
+        // Check multiple indicators for development mode
+        return !!(
+            process.env.NODE_ENV === 'development' ||
+            process.defaultApp ||
+            window.location.href.includes('localhost') ||
+            window.location.href.includes('127.0.0.1') ||
+            window.location.href.includes('file://')
+        );
+    },
 });
 
 

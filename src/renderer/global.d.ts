@@ -1,6 +1,7 @@
 // Type definitions for Electron contextBridge API exposed in preload.js
 interface ElectronAPI {
     hideWindow: () => void;
+    restorePreviousWindow: () => void;
     onClipboardItem: (callback: (data: any) => void) => void;
     onClipboardHistory: (callback: (data: any) => void) => void;
     pasteClipboardItem: (item: any) => void;
@@ -15,9 +16,12 @@ interface ElectronAPI {
     createBackup: () => Promise<string>;
     listBackups: () => Promise<{ file: string; time: number }[]>;
     restoreBackup: (file: string) => Promise<boolean>;
+    deleteBackup: (file: string) => Promise<boolean>;
+    deleteMultipleBackups: (files: string[]) => Promise<number>;
     exportDb: () => Promise<Uint8Array>;
     importDb: (buffer: ArrayBuffer) => Promise<boolean>;
     deleteClipboardItem: (id: number) => void;
+    trimClipboardItems: (maxItems: number) => Promise<boolean>;
     onForceRefresh: (callback: () => void) => void;
     setGlobalShortcut: (shortcut: string) => void;
     quitApp: () => void;
@@ -25,6 +29,8 @@ interface ElectronAPI {
     setWinVOverride: (enabled: boolean) => void;
     setBackendShortcut: (shortcut: string) => void;
     restartApp: () => void;
+    saveSettingsToFile: (settings: any) => void;
+    isDevelopment: () => boolean;
 }
 
 interface Window {

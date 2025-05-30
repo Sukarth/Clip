@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Fuse from 'fuse.js';
 import ThemeProvider from './ThemeProvider';
+import { log, logger, isDev } from '../logger';
 
 // Toast notification type
 interface ToastMessage {
@@ -21,7 +22,7 @@ interface ClipboardItem {
 
 interface Settings {
     maxItems: number;
-    windowHideBehavior: 'hide' | 'tray' | 'close';
+    windowHideBehavior: 'hide' | 'tray';
     showInTaskbar: boolean;
     enableBackups: boolean;
     backupInterval: number; // ms
@@ -64,7 +65,7 @@ const DEFAULT_SETTINGS: Settings = {
     // Visual Settings defaults
     borderRadius: 18,
     transparency: 0.95,
-    accentColor: '#2ecc40',
+    accentColor: '#4682b4', // Steel Blue - professional, calm
     theme: 'dark',
 
     // Behavior Settings defaults
@@ -137,37 +138,48 @@ const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void; disab
 const getSliderStyles = (accentColor: string) => `
     /* Slider style for webkit browsers (Chrome, Safari, Edge) */
     input[type="range"]::-webkit-slider-runnable-track {
-        background: linear-gradient(to right, ${accentColor}88, ${accentColor}44);
-        height: 6px;
-        border-radius: 3px;
+        background: #333;
+        height: 4px;
+        border-radius: 2px;
     }
     input[type="range"]::-webkit-slider-thumb {
         -webkit-appearance: none;
         appearance: none;
-        width: 16px;
-        height: 16px;
+        width: 18px;
+        height: 18px;
         border-radius: 50%;
-        background: ${accentColor};
+        background: ${accentColor} !important;
         cursor: pointer;
-        margin-top: -5px;
-        border: 2px solid white;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        margin-top: -7px;
+        border: none;
+        transition: transform 0.15s ease, background-color 0.15s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+        transform: scale(1.1);
+        background: ${accentColor} !important;
     }
     
     /* Firefox styles */
     input[type="range"]::-moz-range-track {
-        background: linear-gradient(to right, ${accentColor}88, ${accentColor}44);
-        height: 6px;
-        border-radius: 3px;
+        background: #333;
+        height: 4px;
+        border-radius: 2px;
+        border: none;
     }
     input[type="range"]::-moz-range-thumb {
-        width: 14px;
-        height: 14px;
+        width: 18px;
+        height: 18px;
         border-radius: 50%;
-        background: ${accentColor};
+        background: ${accentColor} !important;
         cursor: pointer;
-        border: 2px solid white;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        border: none;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        transition: transform 0.15s ease, background-color 0.15s ease;
+    }
+    input[type="range"]::-moz-range-thumb:hover {
+        transform: scale(1.1);
+        background: ${accentColor} !important;
     }
 `;
 
@@ -175,36 +187,38 @@ const getSliderStyles = (accentColor: string) => `
 const getCustomRangeStyles = (accentColor: string) => ({
     // Style the track
     '::-webkit-slider-runnable-track': {
-        background: `linear-gradient(to right, ${accentColor}88, ${accentColor}44)`,
-        height: '6px',
-        borderRadius: '3px',
+        background: '#333',
+        height: '4px',
+        borderRadius: '2px',
     },
     // Style the thumb
     '::-webkit-slider-thumb': {
         appearance: 'none',
-        width: '16px',
-        height: '16px',
+        width: '18px',
+        height: '18px',
         borderRadius: '50%',
         background: accentColor,
-        border: '2px solid white',
+        border: 'none',
         cursor: 'pointer',
-        marginTop: '-5px', // Centers the thumb on the track
-        boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+        marginTop: '-7px',
+        transition: 'transform 0.15s ease',
     },
     // Firefox specific styles
     '::-moz-range-track': {
-        background: `linear-gradient(to right, ${accentColor}88, ${accentColor}44)`,
-        height: '6px',
-        borderRadius: '3px',
+        background: '#333',
+        height: '4px',
+        borderRadius: '2px',
+        border: 'none',
     },
     '::-moz-range-thumb': {
-        width: '14px',
-        height: '14px',
+        width: '18px',
+        height: '18px',
         borderRadius: '50%',
         background: accentColor,
-        border: '2px solid white',
+        border: 'none',
         cursor: 'pointer',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+        boxShadow: 'none',
+        transition: 'transform 0.15s ease',
     },
 });
 
@@ -264,6 +278,25 @@ const MAIN_KEY_OPTIONS = [
 // For transparency to show as hex with percentage
 const transparencyToHex = (value: number): string => {
     return Math.round(value * 255).toString(16).padStart(2, '0');
+};
+
+// Helper function to format relative time
+const getRelativeTime = (timestamp: number): string => {
+    const now = Date.now();
+    const diff = now - timestamp;
+
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'Just now';
+    if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+    if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+    if (days < 7) return `${days} day${days !== 1 ? 's' : ''} ago`;
+    if (days < 30) return `${Math.floor(days / 7)} week${Math.floor(days / 7) !== 1 ? 's' : ''} ago`;
+    if (days < 365) return `${Math.floor(days / 30)} month${Math.floor(days / 30) !== 1 ? 's' : ''} ago`;
+    return `${Math.floor(days / 365)} year${Math.floor(days / 365) !== 1 ? 's' : ''} ago`;
 };
 
 // Toast notification component
@@ -334,6 +367,19 @@ const App: React.FC = () => {
     });
     const toastIdCounter = useRef(0); // For unique toast IDs
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
+    const [isWindowFocused, setIsWindowFocused] = useState(document.hasFocus()); // Track window focus state
+    const [isAnimatingList, setIsAnimatingList] = useState(true); // Track if list should animate
+    const [listKey, setListKey] = useState(0); // Key to trigger list remounting for animations
+    const [hasLoadedInitially, setHasLoadedInitially] = useState(false); // Track if we've loaded items at least once
+    const [showEmptyMessage, setShowEmptyMessage] = useState(false); // Control when to show empty message
+    const [isDataLoading, setIsDataLoading] = useState(false); // Track if we're currently loading data
+    const [isInitialLoading, setIsInitialLoading] = React.useState(true); // Track only the very first load
+
+    // High-performance persistent cache system
+    const [itemsCache, setItemsCache] = useState<ClipboardItem[]>([]);
+    const [isCacheLoaded, setIsCacheLoaded] = useState(false);
+    const [lastCacheUpdate, setLastCacheUpdate] = useState(0);
+    const cacheValidDuration = 30000; // 30 seconds cache validity
 
     // Restore settings modal state and draft from localStorage
     const [showSettings, setShowSettings] = useState(() => localStorage.getItem('clip-showSettings') === 'true');
@@ -341,6 +387,7 @@ const App: React.FC = () => {
         const draft = localStorage.getItem('clip-settingsDraft');
         return draft ? JSON.parse(draft) : null;
     });
+    const inputRef = useRef<HTMLInputElement>(null); // Ref for search input
 
     // Track if there are unsaved changes in settings
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -415,6 +462,13 @@ const App: React.FC = () => {
     // --- Backup restore dropdown state ---
     const [backupList, setBackupList] = useState<{ file: string; time: number }[]>([]);
     const [selectedBackup, setSelectedBackup] = useState<string>('');
+
+    // --- Backup selection and deletion state ---
+    const [selectedBackups, setSelectedBackups] = useState<Set<string>>(new Set());
+    const [showBackupManagement, setShowBackupManagement] = useState(false);
+    const [backupDeleteAction, setBackupDeleteAction] = useState<'single' | 'multiple' | null>(null);
+    const [backupToDelete, setBackupToDelete] = useState<string>('');
+    const [isBackupDeleteDialogClosing, setIsBackupDeleteDialogClosing] = useState(false);
     useEffect(() => {
         if (showSettings) {
             window.electronAPI?.listBackups?.().then(list => setBackupList(list || []));
@@ -509,6 +563,28 @@ const App: React.FC = () => {
         };
     }, [toasts, dismissToast]);
 
+    // Reset animation state after animations complete
+    useEffect(() => {
+        if (isAnimatingList) {
+            const timeout = setTimeout(() => {
+                setIsAnimatingList(false);
+            }, 400); // Allow time for all animations to complete (400ms duration)
+            return () => clearTimeout(timeout);
+        }
+    }, [isAnimatingList]);
+
+    // Control when to show empty message - only after we've had time to load and if truly empty
+    useEffect(() => {
+        if (hasLoadedInitially && items.length === 0) {
+            const timer = setTimeout(() => {
+                setShowEmptyMessage(true);
+            }, 800); // Wait 800ms before showing empty message
+            return () => clearTimeout(timer);
+        } else {
+            setShowEmptyMessage(false);
+        }
+    }, [hasLoadedInitially, items.length]);
+
     const clearAllToasts = () => {
         // Mark all toasts for fading out
         setToasts(prevToasts =>
@@ -569,19 +645,32 @@ const App: React.FC = () => {
         const el = listRef.current;
         if (!el) return;
         // Function to check if vertical scrollbar is present
-        const updateScrollbarPresence = () => setHasScrollbar(el.scrollHeight > el.clientHeight);
+        const updateScrollbarPresence = () => {
+            const hasScroll = el.scrollHeight > el.clientHeight;
+            log.renderer(`Scrollbar check: scrollHeight=${el.scrollHeight}, clientHeight=${el.clientHeight}, hasScroll=${hasScroll}, items=${items.length}, filtered=${filteredItems.length}, animating=${isAnimatingList}`);
+            setHasScrollbar(hasScroll);
+        };
+        
+        // Delayed check to ensure DOM has updated after item changes
+        const delayedCheck = () => {
+            setTimeout(() => {
+                log.renderer('Scrollbar delayed check triggered after 10ms');
+                updateScrollbarPresence();
+            }, 10);
+        };
+        
         // Initial check
-        updateScrollbarPresence();
+        delayedCheck();
         // Observe size changes in the container
-        const resizeObserver = new ResizeObserver(updateScrollbarPresence);
+        const resizeObserver = new ResizeObserver(delayedCheck);
         resizeObserver.observe(el);
         // Also update on window resize
-        window.addEventListener('resize', updateScrollbarPresence);
+        window.addEventListener('resize', delayedCheck);
         return () => {
             resizeObserver.disconnect();
             window.removeEventListener('resize', updateScrollbarPresence);
         };
-    }, [filteredItems.length]);    // Persist settings modal state and draft
+    }, [filteredItems.length, items.length, hasLoadedInitially]);    // Persist settings modal state and draft
     useEffect(() => {
         localStorage.setItem('clip-showSettings', showSettings ? 'true' : 'false');
     }, [showSettings]);
@@ -612,11 +701,36 @@ const App: React.FC = () => {
     const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
     // Add state for unsaved changes confirmation dialog
-    const [showUnsavedChangesConfirm, setShowUnsavedChangesConfirm] = useState<'cancel' | 'quit' | null>(null);    // ESC to close or cancel dialogs/popups
+    const [showUnsavedChangesConfirm, setShowUnsavedChangesConfirm] = useState<'cancel' | 'quit' | null>(null);
+
+    // Add state for max items warning dialog
+    const [showMaxItemsWarning, setShowMaxItemsWarning] = useState(false);
+    const [pendingMaxItems, setPendingMaxItems] = useState<number | null>(null);
+    const [isMaxItemsWarningClosing, setIsMaxItemsWarningClosing] = useState(false);
+    const [backupCreated, setBackupCreated] = useState(false);
+    const [maxItemsInputValue, setMaxItemsInputValue] = useState<number | null>(null);
+    const [hasMaxItemsChanges, setHasMaxItemsChanges] = useState(false);
     useEffect(() => {
         const escHandler = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
-                if (showUnsavedChangesConfirm) {
+                if (showMaxItemsWarning) {
+                    setIsMaxItemsWarningClosing(true);
+                    setTimeout(() => {
+                        setShowMaxItemsWarning(false);
+                        setPendingMaxItems(null);
+                        setBackupCreated(false); // Reset backup status
+                        setMaxItemsInputValue(null); // Reset input states
+                        setHasMaxItemsChanges(false);
+                        setIsMaxItemsWarningClosing(false);
+                    }, 300);
+                } else if (backupDeleteAction) {
+                    setIsBackupDeleteDialogClosing(true);
+                    setTimeout(() => {
+                        setBackupDeleteAction(null);
+                        setBackupToDelete('');
+                        setIsBackupDeleteDialogClosing(false);
+                    }, 300);
+                } else if (showUnsavedChangesConfirm) {
                     setIsUnsavedChangesDialogClosing(true);
                     setTimeout(() => {
                         setShowUnsavedChangesConfirm(null);
@@ -662,18 +776,23 @@ const App: React.FC = () => {
         };
         window.addEventListener('keydown', escHandler);
         return () => window.removeEventListener('keydown', escHandler);
-    }, [dangerAction, isDangerDialogClosing, showResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, restartReason, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges]);
+    }, [showMaxItemsWarning, isMaxItemsWarningClosing, dangerAction, isDangerDialogClosing, showResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, restartReason, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges, backupDeleteAction, isBackupDeleteDialogClosing]);
 
     // Force refresh when Ctrl+Shift+V is pressed (global shortcut)
-    useEffect(() => {
-        const handleShortcut = (e: KeyboardEvent) => {
-            if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
-                window.electronAPI?.requestClipboardHistory?.();
-            }
-        };
-        window.addEventListener('keydown', handleShortcut);
-        return () => window.removeEventListener('keydown', handleShortcut);
-    }, []);
+    // This effect is now primarily for development/debugging if needed,
+    // as visibility/focus handlers are the main triggers for refresh.
+    // useEffect(() => {
+    //     const handleShortcut = (e: KeyboardEvent) => {
+    //         if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+    //             // Potentially set isAnimatingList true here if this shortcut is a primary way to show window
+    //             // setIsAnimatingList(true);
+    //             // setVisibilityKey(k => k + 1);
+    //             window.electronAPI?.requestClipboardHistory?.();
+    //         }
+    //     };
+    //     window.addEventListener('keydown', handleShortcut);
+    //     return () => window.removeEventListener('keydown', handleShortcut);
+    // }, []);
 
     // Listen for 'force-refresh' event from main process and request clipboard history
     useEffect(() => {
@@ -682,8 +801,10 @@ const App: React.FC = () => {
             window.electronAPI?.requestClipboardHistory?.();
         };
         window.electronAPI.onForceRefresh(handler);
-        return () => { /* no-op: Electron's .on is persistent */ };
-    }, []);
+        // No direct cleanup needed for removeListener with electronAPI,
+        // but if it returned a cleanup function, it would be used here.
+        return () => { /* window.electronAPI.offForceRefresh(handler); // If such API existed */ };
+    }, [items.length]); // Depend on items.length to know if we need animation
 
     // Click-away to close clipboard window (when hide is selected)
     useEffect(() => {
@@ -697,14 +818,60 @@ const App: React.FC = () => {
         };
         document.addEventListener('mousedown', handleClick);
         return () => document.removeEventListener('mousedown', handleClick);
-    }, [settings.windowHideBehavior, showSettings]);    // On mount, register clipboard history handler ONCE and always request latest history after any clipboard event
+    }, [settings.windowHideBehavior, showSettings]);
+
+    // Smart cache system for instant display when window shows
+    const useCacheIfValid = useCallback(() => {
+        const now = Date.now();
+        const cacheAge = now - lastCacheUpdate;
+        
+        if (isCacheLoaded && cacheAge < cacheValidDuration && itemsCache.length > 0) {
+            log.renderer(`Cache: Using valid cache (${cacheAge}ms old, ${itemsCache.length} items)`);
+            setItems(itemsCache);
+            setHasLoadedInitially(true);
+            setIsDataLoading(false);
+            
+            // Force scrollbar detection after cache load
+            setTimeout(() => {
+                const el = listRef.current;
+                if (el) {
+                    const hasScroll = el.scrollHeight > el.clientHeight;
+                    log.renderer(`Scrollbar cache load check: scrollHeight=${el.scrollHeight}, clientHeight=${el.clientHeight}, hasScroll=${hasScroll}`);
+                    setHasScrollbar(hasScroll);
+                }
+            }, 50); // Slightly longer delay to ensure DOM is updated
+            
+            return true;
+        }
+        return false;
+    }, [isCacheLoaded, lastCacheUpdate, cacheValidDuration, itemsCache]);
+
+    // Enhanced clipboard history handler with persistent cache
     useEffect(() => {
         let isMounted = true;
+
         const handleHistory = (history: any[]) => {
-            if (isMounted) setItems(history.map((item: any) => ({ ...item, id: String(item.id) })));
+            if (isMounted) {
+                const processedItems = history.map((item: any) => ({ ...item, id: String(item.id) }));
+
+                // Update cache immediately
+                setItemsCache(processedItems);
+                setLastCacheUpdate(Date.now());
+                setIsCacheLoaded(true);
+
+                // Update display items
+                setItems(processedItems);
+                setHasLoadedInitially(true);
+                setIsDataLoading(false);
+
+                // Only set isInitialLoading to false after the very first load
+                setIsInitialLoading(false);
+
+                log.renderer(`Cache: Updated cache with ${processedItems.length} items`);
+            }
         };
+
         window.electronAPI?.onClipboardHistory(handleHistory);
-        window.electronAPI?.requestClipboardHistory?.();
 
         // Show welcome message on startup
         setTimeout(() => {
@@ -714,9 +881,13 @@ const App: React.FC = () => {
         return () => { isMounted = false; };
     }, []);
 
-    // Listen for new clipboard items and always request latest history from main
+    // Listen for new clipboard items and intelligently refresh cache
     useEffect(() => {
         const handler = () => {
+            // Invalidate cache since we have new clipboard data
+            setLastCacheUpdate(0); // Force cache refresh on next request
+            
+            // Request updated history
             window.electronAPI?.requestClipboardHistory?.();
         };
         window.electronAPI?.onClipboardItem(handler);
@@ -730,8 +901,15 @@ const App: React.FC = () => {
             backupInterval: settings.backupInterval,
             maxBackups: settings.maxBackups,
         });
-    }, [settings.enableBackups, settings.backupInterval, settings.maxBackups]);    // Clear all clipboard items (send IPC to main, rely on main for update)
+    }, [settings.enableBackups, settings.backupInterval, settings.maxBackups]);
+
+    // Clear all clipboard items (send IPC to main, rely on main for update)
     const handleClearAll = () => {
+        // Invalidate cache since we're clearing all data
+        setLastCacheUpdate(0);
+        setItemsCache([]);
+        setIsCacheLoaded(false);
+        
         window.electronAPI?.clearClipboardHistory?.();
         setDangerAction(null);
         showToast('success', 'Clipboard history cleared successfully');
@@ -762,13 +940,16 @@ const App: React.FC = () => {
 
     // Paste clipboard item on click
     const handlePaste = (item: ClipboardItem) => {
-        console.log('[renderer] handlePaste called for', item);
+        log.renderer('handlePaste called for item', item);
         // @ts-ignore
         window.electronAPI?.pasteClipboardItem(item);
     };
 
     // Pin/unpin a clipboard item
     function handleTogglePin(item: ClipboardItem) {
+        // Invalidate cache since we're modifying data
+        setLastCacheUpdate(0);
+        
         // If item.id is a string, try to parse as number for DB
         const dbId = typeof item.id === 'number' ? item.id : parseInt(item.id, 10);
         if (!isNaN(dbId)) {
@@ -788,6 +969,10 @@ const App: React.FC = () => {
 
     function confirmDelete(item: ClipboardItem) {
         setDeletingId(item.id);
+        
+        // Invalidate cache since we're modifying data
+        setLastCacheUpdate(0);
+        
         // Send delete request to main; main will reply with updated history
         // @ts-ignore
         window.electronAPI?.deleteClipboardItem?.(typeof item.id === 'number' ? item.id : parseInt(item.id, 10));
@@ -858,6 +1043,9 @@ const App: React.FC = () => {
 
             // Persist settings immediately to localStorage
             localStorage.setItem('clip-settings', JSON.stringify(settingsDraft));
+
+            // Also save to file for main process to read at startup
+            window.electronAPI?.saveSettingsToFile?.(settingsDraft);
         }
 
         setIsSettingsDialogClosing(true);
@@ -905,20 +1093,89 @@ const App: React.FC = () => {
         }
     };
 
-    // Force refresh and re-render when window/tab becomes visible (fixes freeze/ghosting after background)
+    // Enhanced window visibility management with smart caching
     useEffect(() => {
-        const handleVisibility = () => {
-            if (document.visibilityState === 'visible') {
-                window.electronAPI?.requestClipboardHistory?.();
+        const handleFocus = () => {
+            if (!isWindowFocused) { // Only act if changing from unfocused to focused
+                setIsWindowFocused(true);
+                setIsAnimatingList(true);
+                setListKey(k => k + 1); // Trigger animation IMMEDIATELY
+                
+                // Try cache first for instant display, then fetch fresh data
+                if (!useCacheIfValid()) {
+                    // Cache miss or invalid - fetch fresh data
+                    setTimeout(() => {
+                        setIsDataLoading(true);
+                        window.electronAPI?.requestClipboardHistory?.();
+                    }, 50); // Reduced delay since cache wasn't available
+                }
+                
+                // Always request fresh data in background (but don't block UI)
+                setTimeout(() => {
+                    window.electronAPI?.requestClipboardHistory?.();
+                }, 200);
             }
         };
-        document.addEventListener('visibilitychange', handleVisibility);
-        window.addEventListener('focus', handleVisibility);
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibility);
-            window.removeEventListener('focus', handleVisibility);
+
+        const handleBlur = () => {
+            setIsWindowFocused(false);
         };
-    }, []);
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                setIsWindowFocused(true);
+                setIsAnimatingList(true);
+                setListKey(k => k + 1); // Trigger animation IMMEDIATELY
+                
+                // Try cache first for instant display, then fetch fresh data
+                if (!useCacheIfValid()) {
+                    // Cache miss or invalid - fetch fresh data
+                    setTimeout(() => {
+                        setIsDataLoading(true);
+                        window.electronAPI?.requestClipboardHistory?.();
+                    }, 50); // Reduced delay since cache wasn't available
+                }
+                
+                // Always request fresh data in background
+                setTimeout(() => {
+                    window.electronAPI?.requestClipboardHistory?.();
+                }, 200);
+            } else if (document.visibilityState === 'hidden') {
+                setIsWindowFocused(false);
+                // Keep items in DOM for better UX when window becomes visible again
+                // Items will be refreshed from cache on next show
+            }
+        };
+
+        window.addEventListener('focus', handleFocus);
+        window.addEventListener('blur', handleBlur);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        // Initial state check on mount
+        if (document.visibilityState === 'visible' && document.hasFocus()) {
+            setIsWindowFocused(true);
+            setIsAnimatingList(true);
+            
+            // Try cache first, then fetch if needed
+            if (!useCacheIfValid()) {
+                setTimeout(() => {
+                    setIsDataLoading(true);
+                    window.electronAPI?.requestClipboardHistory?.();
+                }, 50);
+            }
+        } else if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+            setIsWindowFocused(false);
+            setIsAnimatingList(false);
+            // Try to load from cache even when hidden for faster next show
+            useCacheIfValid();
+        }
+
+        return () => {
+            window.removeEventListener('focus', handleFocus);
+            window.removeEventListener('blur', handleBlur);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [isWindowFocused, useCacheIfValid]); // Add useCacheIfValid dependency
 
     // Listen for both focus and visibilitychange events to always request clipboard history
     useEffect(() => {
@@ -944,6 +1201,21 @@ const App: React.FC = () => {
         };
     }, [settings]);
 
+    // Note: isAnimatingList is no longer needed for controlling individual item animations
+    // Items animate naturally when the list key changes and the container remounts
+
+    const handleSearchChange = (newSearch: string) => {
+        setSearch(newSearch);
+        setIsAnimatingList(true);
+        setListKey(k => k + 1); // Trigger animation
+    };
+
+    const handleFilterChange = () => {
+        setFilteredType(t => t === 'all' ? 'text' : t === 'text' ? 'image' : 'all');
+        setIsAnimatingList(true);
+        setListKey(k => k + 1); // Trigger animation
+    };
+
     // UI: Add settings page/modal
     return (
         <ThemeProvider
@@ -952,6 +1224,9 @@ const App: React.FC = () => {
         >
             <div
                 className="clip-root"
+                // Conditionally apply a style to hide content if window is not focused/visible
+                // This is a fallback, primary control is via setItems([])
+                style={{ opacity: isWindowFocused || showSettings ? 1 : 0, transition: 'opacity 0.1s' }}
             >                {/* Toast notifications container */}
                 {toasts.length > 0 && (
                     <div
@@ -997,7 +1272,34 @@ const App: React.FC = () => {
                 )}
 
                 <div className="clip-header" style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh' }}>
-                    <span className="clip-title" style={{ fontWeight: 600, fontSize: 18 }}>Clipboard</span>
+                    <span className="clip-title" style={{ fontWeight: 600, fontSize: 18 }}>
+                      Clipboard
+                      {isDev() ? (
+                        <span
+                          style={{
+                            marginLeft: 6,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            opacity: 0.85,
+                            verticalAlign: 'middle',
+                            position: 'relative'
+                          }}
+                          title={`Cache: ${itemsCache.length} items, age: ${Math.round((Date.now() - lastCacheUpdate) / 1000)}s`}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                            <path
+                              d="M7 7v6a3 3 0 0 0 6 0V6a4 4 0 0 0-8 0v7a5 5 0 0 0 10 0V7"
+                              stroke="#9C27B0"
+                              strokeWidth="2"
+                              fill="none"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </span>
+                      ) : null}
+                    </span>
                     <button
                         className="clip-settings-btn"
                         style={{
@@ -1019,9 +1321,10 @@ const App: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, width: '100%' }}>
                     <div style={{ position: 'relative', flex: 1, minWidth: 0, height: 40 }}>
                         <input
+                            ref={inputRef}
                             type="text"
                             value={search}
-                            onChange={e => setSearch(e.target.value)}
+                            onChange={e => handleSearchChange(e.target.value)}
                             placeholder="Search clipboard..."
                             style={{
                                 width: '100%',
@@ -1057,7 +1360,7 @@ const App: React.FC = () => {
                             fontWeight: 500,
                             transition: 'background 0.2s, box-shadow 0.3s',
                         }}
-                        onClick={() => setFilteredType(t => t === 'all' ? 'text' : t === 'text' ? 'image' : 'all')}
+                        onClick={handleFilterChange}
                         title="Filter by type"
                     >
                         {filteredType === 'all' ? 'All' : filteredType === 'text' ? 'Text' : 'Images'}
@@ -1067,6 +1370,7 @@ const App: React.FC = () => {
                     <div className={`clip-settings-modal ${isSettingsDialogClosing ? 'fade-out' : 'fade-in'}`} style={{
                         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+                        borderRadius: `${settings.borderRadius}px`,
                         overflow: 'visible',
                         backdropFilter: 'blur(8px)',
                         background: 'rgba(0,0,0,0.4)'
@@ -1088,7 +1392,7 @@ const App: React.FC = () => {
                             position: 'relative',
                             overflow: 'hidden',
                             transition: 'border-radius 0.3s, background 0.3s',
-                            boxShadow: '0 20px 60px rgba(0,0,0,0.3), 0 8px 32px rgba(0,0,0,0.2)',
+                            // boxShadow: '0 20px 60px rgba(0,0,0,0.3), 0 8px 32px rgba(0,0,0,0.2)',
                             border: '1px solid rgba(255,255,255,0.08)'
                         }}>
                             <div style={{
@@ -1131,25 +1435,92 @@ const App: React.FC = () => {
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                                         <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                             <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Max clipboard items</span>
-                                            <input
-                                                type="number"
-                                                min={10}
-                                                max={500}
-                                                value={settingsDraft?.maxItems ?? settings.maxItems}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, maxItems: Number(e.target.value) } : null)}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    transition: 'border-color 0.2s, background 0.2s',
-                                                    outline: 'none'
-                                                }}
-                                                onFocus={e => e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor}
-                                                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.12)'}
-                                            />
+                                            <div style={{ position: 'relative' }}>
+                                                <input
+                                                    type="number"
+                                                    min={10}
+                                                    max={500}
+                                                    value={maxItemsInputValue ?? (settingsDraft?.maxItems ?? settings.maxItems)}
+                                                    onChange={e => {
+                                                        const newValue = Number(e.target.value);
+                                                        const currentMaxItems = settingsDraft?.maxItems ?? settings.maxItems;
+                                                        setMaxItemsInputValue(newValue);
+                                                        setHasMaxItemsChanges(newValue !== currentMaxItems);
+                                                    }}
+                                                    style={{
+                                                        borderRadius: 8,
+                                                        border: '1px solid rgba(255,255,255,0.12)',
+                                                        background: 'rgba(255,255,255,0.05)',
+                                                        color: '#fff',
+                                                        padding: hasMaxItemsChanges ? '10px 40px 10px 12px' : '10px 12px',
+                                                        fontSize: 14,
+                                                        transition: 'border-color 0.2s, background 0.2s, padding 0.2s',
+                                                        outline: 'none',
+                                                        width: '100%',
+                                                        boxSizing: 'border-box'
+                                                    }}
+                                                    onFocus={e => e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor}
+                                                    onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.12)'}
+                                                />
+                                                {hasMaxItemsChanges && (
+                                                    <button
+                                                        style={{
+                                                            position: 'absolute',
+                                                            right: 8,
+                                                            top: '50%',
+                                                            transform: 'translateY(-50%)',
+                                                            background: settingsDraft?.accentColor ?? settings.accentColor,
+                                                            border: 'none',
+                                                            borderRadius: 4,
+                                                            color: '#fff',
+                                                            padding: '4px 8px',
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            cursor: 'pointer',
+                                                            transition: 'all 0.2s',
+                                                            opacity: 0.9
+                                                        }}
+                                                        onClick={() => {
+                                                            const newValue = maxItemsInputValue!;
+                                                            const currentMaxItems = settingsDraft?.maxItems ?? settings.maxItems;
+
+                                                            // Always show warning when decreasing max items
+                                                            if (newValue < currentMaxItems) {
+                                                                setPendingMaxItems(newValue);
+                                                                setBackupCreated(false); // Reset backup status
+                                                                setShowMaxItemsWarning(true);
+                                                                // Don't reset input states yet - wait for warning dialog
+                                                            }
+                                                            // Show performance warning when increasing significantly beyond current count
+                                                            else if (newValue > currentMaxItems && items.length > 0 && newValue > items.length + 50) {
+                                                                setPendingMaxItems(newValue);
+                                                                setBackupCreated(false); // Reset backup status
+                                                                setShowMaxItemsWarning(true);
+                                                                // Don't reset input states yet - wait for warning dialog
+                                                            } else {
+                                                                // Safe change - apply immediately and reset input states
+                                                                const newSettings = settingsDraft ? { ...settingsDraft, maxItems: newValue } : { ...settings, maxItems: newValue };
+                                                                setSettingsDraft(newSettings);
+                                                                setSettings(newSettings);
+
+                                                                // Persist settings immediately to localStorage
+                                                                localStorage.setItem('clip-settings', JSON.stringify(newSettings));
+
+                                                                // Also save to file for main process to read at startup
+                                                                window.electronAPI?.saveSettingsToFile?.(newSettings);
+
+                                                                setMaxItemsInputValue(null);
+                                                                setHasMaxItemsChanges(false);
+                                                            }
+                                                        }}
+                                                        onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                                                        onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
+                                                        title="Apply changes"
+                                                    >
+                                                        ✓
+                                                    </button>
+                                                )}
+                                            </div>
                                         </label>
                                         <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                             <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Window hide behavior</span>
@@ -1169,9 +1540,8 @@ const App: React.FC = () => {
                                                 onFocus={e => e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor}
                                                 onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.12)'}
                                             >
-                                                <option value="hide">Hide (no taskbar, no tray)</option>
-                                                <option value="tray">Minimize to tray (show tray icon)</option>
-                                                <option value="close">Close window (re-create on show)</option>
+                                                <option value="hide">Hide (completely hidden)</option>
+                                                <option value="tray">Minimize to tray (tray icon only)</option>
                                             </select>
                                         </label>
                                         <label style={{
@@ -1315,7 +1685,7 @@ const App: React.FC = () => {
                                             )}
                                         </div>
                                     </div>
-                               </div>
+                                </div>
                                 {/* Backups section */}
                                 <div>
                                     <h2 style={{ ...sectionHeaderStyle, color: '#e1e1e1', fontSize: 16, fontWeight: 600, marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.12)' }}>Backups</h2>
@@ -1428,7 +1798,7 @@ const App: React.FC = () => {
                                                     showToast('error', 'Could not create backup');
                                                 }
                                             } catch (error) {
-                                                console.error('Backup error:', error);
+                                                log.error('Backup error', error instanceof Error ? error.message : String(error));
                                                 showToast('error', `Backup failed: ${error instanceof Error ? error.message : String(error)}`);
                                             } finally {
                                                 setIsBackingUp(false);
@@ -1453,68 +1823,318 @@ const App: React.FC = () => {
                                         )}
                                     </button>
                                 </div>
-                                {/* Restore section */}
+                                {/* Backup Management section */}
                                 <div>
-                                    <h3 style={subHeaderStyle}>Restore</h3>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', marginBottom: 20 }}>
-                                        <select
-                                            value={selectedBackup}
-                                            onChange={e => setSelectedBackup(e.target.value)}
-                                            style={{ borderRadius: 7, border: '1px solid #444', background: '#23252a', color: '#fff', padding: '7px 12px', fontSize: 15, width: '100%' }}
-                                        >
-                                            <option value="">Select backup to restore</option>
-                                            {backupList.map(b => (
-                                                <option key={b.file} value={b.file}>{b.file.replace('clip-backup-', '').replace('.db', '')}</option>
-                                            ))}
-                                        </select>                                        <button
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                                        <h3 style={{ ...subHeaderStyle, margin: 0 }}>Backup Management</h3>
+                                        <button
                                             style={{
-                                                background: '#23252a',
-                                                border: '1px solid #444',
-                                                width: '100%',
-                                                borderRadius: 8,
+                                                background: 'rgba(255,255,255,0.08)',
+                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                borderRadius: 6,
                                                 color: '#fff',
-                                                padding: '7px 18px',
-                                                cursor: selectedBackup ? 'pointer' : 'not-allowed',
-                                                fontWeight: 600,
-                                                fontSize: 15,
-                                                transition: 'all 0.2s',
-                                                opacity: selectedBackup ? 1 : 0.5
+                                                padding: '6px 12px',
+                                                cursor: 'pointer',
+                                                fontSize: 12,
+                                                fontWeight: 500,
+                                                transition: 'background 0.2s'
                                             }}
-                                            disabled={!selectedBackup}
-                                            onClick={async () => {
-                                                if (selectedBackup) {
-                                                    // Use the button itself as a loading indicator
-                                                    const button = document.activeElement as HTMLButtonElement;
-                                                    const originalText = button.textContent;
-
-                                                    try {
-                                                        button.textContent = "Restoring...";
-                                                        button.style.opacity = "0.7";
-                                                        button.disabled = true;
-
-                                                        const success = await window.electronAPI?.restoreBackup?.(selectedBackup);
-
-                                                        if (success) {
-                                                            setRestartReason('restore'); // Set reason
-                                                            setShowRestartConfirm(true);
-                                                            showToast('success', 'Backup restored successfully!');
-                                                        } else {
-                                                            showToast('error', 'Failed to restore backup.');
-                                                        }
-                                                    } catch (error) {
-                                                        console.error('Restore error:', error);
-                                                        showToast('error', `Restore failed: ${error instanceof Error ? error.message : String(error)}`);
-                                                    } finally {
-                                                        // Reset button state
-                                                        button.textContent = originalText;
-                                                        button.style.opacity = "1";
-                                                        button.disabled = false;
-                                                    }
-                                                }
-                                            }}
+                                            onClick={() => setShowBackupManagement(!showBackupManagement)}
+                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
                                         >
-                                            Restore
+                                            {showBackupManagement ? 'Simple View' : 'Advanced'}
                                         </button>
+                                    </div>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+                                        {backupList.length === 0 ? (
+                                            <div style={{
+                                                padding: 16,
+                                                background: 'rgba(255,255,255,0.03)',
+                                                borderRadius: 8,
+                                                border: '1px solid rgba(255,255,255,0.08)',
+                                                textAlign: 'center',
+                                                color: '#888',
+                                                fontSize: 14
+                                            }}>
+                                                No backups found. Create a backup first.
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div style={{
+                                                    fontSize: 13,
+                                                    color: '#aaa',
+                                                    marginBottom: 8,
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center'
+                                                }}>
+                                                    <span>Found {backupList.length} backup{backupList.length !== 1 ? 's' : ''}</span>
+                                                    {showBackupManagement && (
+                                                        <div style={{ display: 'flex', gap: 8 }}>
+                                                            <button
+                                                                style={{
+                                                                    background: 'rgba(255,255,255,0.05)',
+                                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                                    borderRadius: 4,
+                                                                    color: '#ccc',
+                                                                    padding: '4px 8px',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: 11,
+                                                                    transition: 'all 0.2s'
+                                                                }}
+                                                                onClick={() => setSelectedBackups(new Set(backupList.map(b => b.file)))}
+                                                            >
+                                                                Select All
+                                                            </button>
+                                                            <button
+                                                                style={{
+                                                                    background: 'rgba(255,255,255,0.05)',
+                                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                                    borderRadius: 4,
+                                                                    color: '#ccc',
+                                                                    padding: '4px 8px',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: 11,
+                                                                    transition: 'all 0.2s'
+                                                                }}
+                                                                onClick={() => setSelectedBackups(new Set())}
+                                                            >
+                                                                Clear All
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div style={{
+                                                    maxHeight: 200,
+                                                    overflowY: 'auto',
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    borderRadius: 8,
+                                                    background: 'rgba(255,255,255,0.03)',
+                                                    scrollbarWidth: 'thin',
+                                                    scrollbarColor: '#444 transparent'
+                                                }}>
+                                                    {backupList.map((backup, index) => {
+                                                        const date = new Date(backup.time);
+                                                        const isSelected = selectedBackup === backup.file;
+                                                        const isChecked = selectedBackups.has(backup.file);
+                                                        const formattedDate = date.toLocaleDateString();
+                                                        const formattedTime = date.toLocaleTimeString();
+                                                        const relativeTime = getRelativeTime(backup.time);
+
+                                                        return (
+                                                            <div
+                                                                key={backup.file}
+                                                                style={{
+                                                                    padding: '12px 16px',
+                                                                    borderBottom: index < backupList.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                                                                    background: isSelected ? settingsDraft?.accentColor + '22' : isChecked ? 'rgba(255,255,255,0.08)' : 'transparent',
+                                                                    borderLeft: isSelected ? `3px solid ${settingsDraft?.accentColor ?? settings.accentColor}` : '3px solid transparent',
+                                                                    transition: 'all 0.2s ease',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: 12
+                                                                }}
+                                                            >
+                                                                {showBackupManagement && (
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={isChecked}
+                                                                        onChange={(e) => {
+                                                                            const newSelected = new Set(selectedBackups);
+                                                                            if (e.target.checked) {
+                                                                                newSelected.add(backup.file);
+                                                                            } else {
+                                                                                newSelected.delete(backup.file);
+                                                                            }
+                                                                            setSelectedBackups(newSelected);
+                                                                        }}
+                                                                        style={{
+                                                                            accentColor: settingsDraft?.accentColor ?? settings.accentColor,
+                                                                            width: 16,
+                                                                            height: 16,
+                                                                            cursor: 'pointer'
+                                                                        }}
+                                                                    />
+                                                                )}
+
+                                                                <div
+                                                                    style={{
+                                                                        flex: 1,
+                                                                        cursor: 'pointer',
+                                                                        display: 'flex',
+                                                                        flexDirection: 'column',
+                                                                        gap: 4
+                                                                    }}
+                                                                    onClick={() => setSelectedBackup(isSelected ? '' : backup.file)}
+                                                                    onMouseEnter={e => {
+                                                                        if (!isSelected && !isChecked) {
+                                                                            e.currentTarget.parentElement!.style.background = 'rgba(255,255,255,0.05)';
+                                                                        }
+                                                                    }}
+                                                                    onMouseLeave={e => {
+                                                                        if (!isSelected && !isChecked) {
+                                                                            e.currentTarget.parentElement!.style.background = 'transparent';
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    <div style={{
+                                                                        display: 'flex',
+                                                                        justifyContent: 'space-between',
+                                                                        alignItems: 'flex-start'
+                                                                    }}>
+                                                                        <div style={{
+                                                                            fontWeight: 500,
+                                                                            fontSize: 14,
+                                                                            color: isSelected ? '#fff' : '#ccc'
+                                                                        }}>
+                                                                            {formattedDate} at {formattedTime}
+                                                                        </div>
+                                                                        {isSelected && (
+                                                                            <div style={{
+                                                                                fontSize: 12,
+                                                                                color: settingsDraft?.accentColor ?? settings.accentColor,
+                                                                                fontWeight: 600
+                                                                            }}>
+                                                                                SELECTED
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <div style={{
+                                                                        fontSize: 12,
+                                                                        color: '#888',
+                                                                        fontStyle: 'italic'
+                                                                    }}>
+                                                                        {relativeTime}
+                                                                    </div>
+                                                                    <div style={{
+                                                                        fontSize: 11,
+                                                                        color: '#666',
+                                                                        fontFamily: 'monospace',
+                                                                        marginTop: 2
+                                                                    }}>
+                                                                        {backup.file}
+                                                                    </div>
+                                                                </div>
+
+                                                                <button
+                                                                    style={{
+                                                                        background: 'none',
+                                                                        border: 'none',
+                                                                        color: '#ff4136',
+                                                                        cursor: 'pointer',
+                                                                        padding: '4px 8px',
+                                                                        borderRadius: 4,
+                                                                        fontSize: 18,
+                                                                        lineHeight: 1,
+                                                                        transition: 'background 0.2s',
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center',
+                                                                        minWidth: 32,
+                                                                        height: 32
+                                                                    }}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setBackupToDelete(backup.file);
+                                                                        setBackupDeleteAction('single');
+                                                                    }}
+                                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,65,54,0.15)'}
+                                                                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                                                    title="Delete this backup"
+                                                                >
+                                                                    🗑️
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+
+                                                <div style={{ display: 'flex', gap: 12 }}>
+                                                    <button
+                                                        style={{
+                                                            background: selectedBackup ? (settingsDraft?.accentColor ?? settings.accentColor) : '#23252a',
+                                                            border: selectedBackup ? `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}` : '1px solid #444',
+                                                            flex: 1,
+                                                            borderRadius: 8,
+                                                            color: selectedBackup ? '#000' : '#fff',
+                                                            padding: '12px 18px',
+                                                            cursor: selectedBackup ? 'pointer' : 'not-allowed',
+                                                            fontWeight: 600,
+                                                            fontSize: 15,
+                                                            transition: 'all 0.2s',
+                                                            opacity: selectedBackup ? 1 : 0.5,
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: 8
+                                                        }}
+                                                        disabled={!selectedBackup}
+                                                        onClick={async () => {
+                                                            if (selectedBackup) {
+                                                                const button = document.activeElement as HTMLButtonElement;
+                                                                const originalText = button.textContent;
+
+                                                                try {
+                                                                    button.textContent = "Restoring...";
+                                                                    button.style.opacity = "0.7";
+                                                                    button.disabled = true;
+
+                                                                    const success = await window.electronAPI?.restoreBackup?.(selectedBackup);
+
+                                                                    if (success) {
+                                                                        showToast('success', 'Backup restored successfully!');
+                                                                        setSelectedBackup('');
+                                                                        // Refresh backup list
+                                                                        const newList = await window.electronAPI?.listBackups?.() || [];
+                                                                        setBackupList(newList);
+                                                                        // Note: No need to manually request clipboard history -
+                                                                        // the backend already sends updated history after restore
+                                                                    } else {
+                                                                        showToast('error', 'Failed to restore backup.');
+                                                                    }
+                                                                } catch (error) {
+                                                                    log.error('Restore error', error instanceof Error ? error.message : String(error));
+                                                                    showToast('error', `Restore failed: ${error instanceof Error ? error.message : String(error)}`);
+                                                                } finally {
+                                                                    button.textContent = originalText;
+                                                                    button.style.opacity = "1";
+                                                                    button.disabled = false;
+                                                                }
+                                                            }
+                                                        }}
+                                                    >
+                                                        {selectedBackup ? '↻ Restore Selected' : 'Select backup to restore'}
+                                                    </button>
+
+                                                    {showBackupManagement && selectedBackups.size > 0 && (
+                                                        <button
+                                                            style={{
+                                                                background: '#ff4136',
+                                                                border: '1px solid #ff4136',
+                                                                borderRadius: 8,
+                                                                color: '#fff',
+                                                                padding: '12px 18px',
+                                                                cursor: 'pointer',
+                                                                fontWeight: 600,
+                                                                fontSize: 15,
+                                                                transition: 'all 0.2s',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                gap: 8,
+                                                                minWidth: 140
+                                                            }}
+                                                            onClick={() => setBackupDeleteAction('multiple')}
+                                                        >
+                                                            🗑️ Delete {selectedBackups.size}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                                 {/* Data export/import section */}
@@ -1557,7 +2177,7 @@ const App: React.FC = () => {
                                                         showToast('error', 'Failed to export database');
                                                     }
                                                 } catch (error) {
-                                                    console.error('Export error:', error);
+                                                    log.error('Export error', error instanceof Error ? error.message : String(error));
                                                     showToast('error', `Export failed: ${error instanceof Error ? error.message : String(error)}`);
                                                 } finally {
                                                     // Reset button state
@@ -1585,15 +2205,16 @@ const App: React.FC = () => {
 
                                                     try {
                                                         const buffer = await file.arrayBuffer();
-                                                        const success = await window.electronAPI?.importDb?.(buffer); if (success) {
-                                                            setRestartReason('import'); // Set reason
-                                                            setShowRestartConfirm(true);
+                                                        const success = await window.electronAPI?.importDb?.(buffer);
+                                                        if (success) {
                                                             showToast('success', 'Database imported successfully!');
+                                                            // Note: No need to manually request clipboard history -
+                                                            // the backend already sends updated history after import
                                                         } else {
                                                             showToast('error', 'Failed to import database');
                                                         }
                                                     } catch (error) {
-                                                        console.error('Import error:', error);
+                                                        log.error('Import error', error instanceof Error ? error.message : String(error));
                                                         showToast('error', `Import failed: ${error instanceof Error ? error.message : String(error)}`);
                                                     } finally {
                                                         // Reset button state
@@ -1813,9 +2434,9 @@ const App: React.FC = () => {
                         </div>
                     </div>
                 )}
-                {/* Animate clipboard list and items */}
+                {/* Clipboard list with key-based remounting for animations */}
                 <div
-                    key={filteredType + '-' + search}
+                    key={listKey}
                     ref={listRef}
                     className="clip-list"
                     style={{
@@ -1830,15 +2451,77 @@ const App: React.FC = () => {
                         gap: 10,
                         scrollbarWidth: 'thin',
                         scrollbarColor: settings.theme === 'light' ? '#ccc #f0f0f0' : '#444 #23252a',
-                        paddingRight: hasScrollbar ? 8 : 0, // reserve space for scrollbar gutter
-                        animation: 'clip-fadein 0.5s',
+                        paddingRight: (() => {
+                            const padding = hasScrollbar ? 8 : 0;
+                            log.renderer(`Scrollbar: Applying paddingRight: ${padding} (hasScrollbar: ${hasScrollbar})`);
+                            return padding;
+                        })(), // reserve space for scrollbar gutter
                     }}
                 >
-                    {filteredItems.length === 0 && <div className="clip-empty" style={{ opacity: 0.7, textAlign: 'center', marginTop: '10%' }}>No clipboard items found.</div>}
+                    {/* Show skeleton loading only during the very first data load */}
+                    {isInitialLoading && (
+                        <>
+                            {[1, 2, 3, 4, 5].map((i) => (
+                                <div
+                                    key={`skeleton-${i}`}
+                                    className={`clip-item-skeleton ${isAnimatingList ? 'clip-item-animate' : ''}`}
+                                    style={{
+                                        background: 'rgba(255,255,255,0.02)',
+                                        borderRadius: 12,
+                                        margin: 0,
+                                        padding: '2.5% 3%',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 10,
+                                        height: 60,
+                                        animationDelay: `${i * 50}ms`
+                                    }}
+                                >
+                                    <div style={{
+                                        flex: 1,
+                                        height: 16,
+                                        background: 'rgba(255,255,255,0.06)',
+                                        borderRadius: 4,
+                                        position: 'relative',
+                                        overflow: 'hidden'
+                                    }}>
+                                        <div style={{
+                                            position: 'absolute',
+                                            top: 0,
+                                            left: '-100%',
+                                            width: '100%',
+                                            height: '100%',
+                                            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)',
+                                            animation: 'skeleton-shimmer 2s infinite'
+                                        }} />
+                                    </div>
+                                    <div style={{
+                                        width: 60,
+                                        height: 12,
+                                        background: 'rgba(255,255,255,0.04)',
+                                        borderRadius: 4
+                                    }} />
+                                </div>
+                            ))}
+                        </>
+                    )}
+
+                    {/* Show empty state message when not loading and no items in filtered list */}
+                    {filteredItems.length === 0 && !isInitialLoading && (
+                        <div className="clip-empty" style={{ opacity: 0.7, textAlign: 'center', marginTop: '10%' }}>
+                            {search.trim().length > 0
+                                ? 'No results found.'
+                                : filteredType === 'text'
+                                    ? 'No text found.'
+                                    : filteredType === 'image'
+                                        ? 'No images found.'
+                                        : 'No clipboard items found.'}
+                        </div>
+                    )}
                     {filteredItems.map((item, idx) => (
                         <div
                             key={item.id}
-                            className={`clip-item clip-item-${item.type}`}
+                            className={`clip-item clip-item-${item.type} ${isAnimatingList ? 'clip-item-animate' : ''}`}
                             onClick={() => handlePaste(item)}
                             style={{
                                 background: 'rgba(255,255,255,0.04)',
@@ -1850,7 +2533,6 @@ const App: React.FC = () => {
                                 boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
                                 transition: 'background 0.2s, transform 0.25s cubic-bezier(.4,2,.6,1), box-shadow 0.25s cubic-bezier(.4,2,.6,1)',
                                 cursor: 'pointer',
-                                animation: `clip-fadein 0.5s ${0.03 * idx}s both`,
                                 gap: 10
                             }}
                             onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.10)'}
@@ -2043,8 +2725,25 @@ const App: React.FC = () => {
                     </div>
                 )}
                 <style>{`
+                /* Global CSS for clean interface */
+                body {
+                    margin: 0;
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    overflow: hidden;
+                    -webkit-user-select: none;
+                    user-select: none;
+                }
+                
                 /* Custom slider styles */
                 ${getSliderStyles(settings.accentColor)}
+                
+                /* Light theme slider styles */
+                .theme-light input[type="range"]::-webkit-slider-runnable-track {
+                    background: #ccc !important;
+                }
+                .theme-light input[type="range"]::-moz-range-track {
+                    background: #ccc !important;
+                }
                 .clip-root {
                     background: rgba(30,32,36,${settings.transparency});
                     border-radius: ${settings.borderRadius}px;
@@ -2061,6 +2760,8 @@ const App: React.FC = () => {
                     flex-direction: column;
                     box-sizing: border-box; /* Include padding in dimensions */
                     padding-bottom: 7px;
+                    backdrop-filter: blur(10px);
+                    -webkit-backdrop-filter: blur(10px);
                 }
                 
                 /* Theme-based styling */
@@ -2068,6 +2769,8 @@ const App: React.FC = () => {
                     background: rgba(240,240,240,${settings.transparency});
                     color: #333;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+                    backdrop-filter: blur(10px);
+                    -webkit-backdrop-filter: blur(10px);
                 }
                 
                 .theme-light .clip-item {
@@ -2126,8 +2829,21 @@ const App: React.FC = () => {
                     to { opacity: 1; transform: none; }
                 }
                 @keyframes clip-fadeout {
-                from { opacity: 1; transform: none; } 
+                from { opacity: 1; transform: none; }
                 to { opacity: 0; transform: translateY(16px) scale(0.98); }
+                }
+                @keyframes clip-item-slide-in {
+                    from {
+                        opacity: 0;
+                        transform: translateY(20px) scale(0.95);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0) scale(1);
+                    }
+                }
+                .clip-item-animate {
+                    animation: clip-item-slide-in 0.4s ease-out forwards;
                 }
                 .fade-in { animation: clip-fadein 0.3s forwards; }
                 .fade-out { animation: clip-fadeout 0.3s forwards; }
@@ -2146,6 +2862,10 @@ const App: React.FC = () => {
                 @keyframes spin {
                     0% { transform: rotate(0deg); }
                     100% { transform: rotate(360deg); }
+                }
+                @keyframes skeleton-shimmer {
+                    0% { left: -100%; }
+                    100% { left: 100%; }
                 }
                 .toast-message {
                     animation: toast-in 0.3s ease-out forwards;
@@ -2216,6 +2936,20 @@ const App: React.FC = () => {
                 }
                 .clip-list::-webkit-scrollbar-thumb:hover {
                     background: #2ecc40;
+                }
+                
+                /* Backup list scrollbar styling */
+                .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar {
+                    width: 6px;
+                    background: transparent;
+                }
+                .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar-thumb {
+                    background: #444;
+                    border-radius: 3px;
+                    transition: background 0.2s;
+                }
+                .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar-thumb:hover {
+                    background: ${settings.accentColor};
                 }
             `}                </style>
                 {/* Restart confirmation dialog */}
@@ -2375,6 +3109,298 @@ const App: React.FC = () => {
                                     setTimeout(() => {
                                         setShowUnsavedChangesConfirm(null);
                                         setIsUnsavedChangesDialogClosing(false);
+                                    }, 300);
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Backup deletion confirmation dialog */}
+                {backupDeleteAction && (
+                    <div className={`fade-opacity-${isBackupDeleteDialogClosing ? 'out' : 'in'}`} style={{
+                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
+                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200, borderRadius: settings.borderRadius
+                    }}>
+                        <div
+                            className={`${isBackupDeleteDialogClosing ? 'fade-out' : 'fade-in'}`}
+                            style={{
+                                background: settings.theme === 'light' ? '#f0f0f0' : '#222',
+                                borderRadius: 10,
+                                padding: 24,
+                                minWidth: 280,
+                                maxWidth: 400,
+                                textAlign: 'center',
+                                boxShadow: '0 2px 12px #0008',
+                                border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`
+                            }}
+                        >
+                            <div style={{
+                                marginBottom: 18,
+                                color: '#ff4136',
+                                fontWeight: 600,
+                                fontSize: 17,
+                                lineHeight: 1.4
+                            }}>
+                                {backupDeleteAction === 'single'
+                                    ? `Delete backup permanently?`
+                                    : `Delete ${selectedBackups.size} backup${selectedBackups.size !== 1 ? 's' : ''} permanently?`
+                                }
+                                <div style={{
+                                    fontSize: 14,
+                                    fontWeight: 400,
+                                    color: '#ccc',
+                                    marginTop: 8
+                                }}>
+                                    This action cannot be undone.
+                                </div>
+                            </div>
+                            <button
+                                style={{
+                                    background: '#ff4136',
+                                    color: '#fff',
+                                    border: '1px solid #ff4136',
+                                    borderRadius: 6,
+                                    padding: '8px 18px',
+                                    marginRight: 10,
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                                onClick={async () => {
+                                    try {
+                                        let success = false;
+
+                                        if (backupDeleteAction === 'single' && backupToDelete) {
+                                            success = await window.electronAPI?.deleteBackup?.(backupToDelete);
+                                            if (success) {
+                                                showToast('success', 'Backup deleted successfully');
+                                                // Clear selection if the deleted backup was selected
+                                                if (selectedBackup === backupToDelete) {
+                                                    setSelectedBackup('');
+                                                }
+                                            } else {
+                                                showToast('error', 'Failed to delete backup');
+                                            }
+                                        } else if (backupDeleteAction === 'multiple' && selectedBackups.size > 0) {
+                                            const deletedCount = await window.electronAPI?.deleteMultipleBackups?.(Array.from(selectedBackups));
+                                            if (deletedCount > 0) {
+                                                showToast('success', `${deletedCount} backup${deletedCount !== 1 ? 's' : ''} deleted successfully`);
+                                                // Clear restore selection if it was in the deleted backups
+                                                if (selectedBackups.has(selectedBackup)) {
+                                                    setSelectedBackup('');
+                                                }
+                                                setSelectedBackups(new Set());
+                                            } else {
+                                                showToast('error', 'Failed to delete backups');
+                                            }
+                                        }
+
+                                        // Refresh backup list
+                                        const newList = await window.electronAPI?.listBackups?.() || [];
+                                        setBackupList(newList);
+
+                                    } catch (error) {
+                                        log.error('Delete backup error', error instanceof Error ? error.message : String(error));
+                                        showToast('error', `Delete failed: ${error instanceof Error ? error.message : String(error)}`);
+                                    }
+
+                                    // Close dialog
+                                    setIsBackupDeleteDialogClosing(true);
+                                    setTimeout(() => {
+                                        setBackupDeleteAction(null);
+                                        setBackupToDelete('');
+                                        setIsBackupDeleteDialogClosing(false);
+                                    }, 300);
+                                }}
+                            >
+                                Yes, Delete
+                            </button>
+                            <button
+                                style={{
+                                    background: '#222',
+                                    color: '#fff',
+                                    border: '1px solid #444',
+                                    borderRadius: 6,
+                                    padding: '8px 18px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                                onClick={() => {
+                                    setIsBackupDeleteDialogClosing(true);
+                                    setTimeout(() => {
+                                        setBackupDeleteAction(null);
+                                        setBackupToDelete('');
+                                        setIsBackupDeleteDialogClosing(false);
+                                    }, 300);
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Max items warning dialog */}
+                {showMaxItemsWarning && (
+                    <div className={`fade-opacity-${isMaxItemsWarningClosing ? 'out' : 'in'}`} style={{
+                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
+                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2300, borderRadius: settings.borderRadius
+                    }}>
+                        <div
+                            className={`${isMaxItemsWarningClosing ? 'fade-out' : 'fade-in'}`}
+                            style={{
+                                background: settings.theme === 'light' ? '#f0f0f0' : '#222',
+                                borderRadius: 10,
+                                padding: 24,
+                                minWidth: 320,
+                                maxWidth: 450,
+                                textAlign: 'center',
+                                boxShadow: '0 2px 12px #0008',
+                                border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`
+                            }}
+                        >
+                            <div style={{
+                                marginBottom: 18,
+                                color: pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) ? '#ff4136' : '#e67e22',
+                                fontWeight: 600,
+                                fontSize: 17,
+                                lineHeight: 1.4
+                            }}>
+                                {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems)
+                                    ? 'Data Loss Warning'
+                                    : 'Performance Warning'}
+                            </div>
+                            <div style={{
+                                fontSize: 14,
+                                color: settings.theme === 'light' ? '#666' : '#ccc',
+                                marginBottom: 18,
+                                lineHeight: 1.5
+                            }}>
+                                {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) ? (
+                                    <>
+                                        You're decreasing the max items from <strong>{settingsDraft?.maxItems ?? settings.maxItems}</strong> to <strong>{pendingMaxItems}</strong>.
+                                        <br /><br />
+                                        <span style={{ color: '#ff4136', fontWeight: 600 }}>⚠️ This will immediately delete {Math.max(0, items.length - pendingMaxItems)} clipboard items from the oldest entries.</span>
+                                        <br /><br />
+                                        <strong>This action is irreversible.</strong> Consider creating a backup first if you might want to restore these items later.
+                                    </>
+                                ) : (
+                                    <>
+                                        You're setting the max items to <strong>{pendingMaxItems}</strong>, which is significantly higher than your current {items.length} items.
+                                        <br /><br />
+                                        Large clipboard histories may impact performance. Are you sure you want to continue?
+                                    </>
+                                )}
+                            </div>
+                            {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) && !backupCreated && (
+                                <button
+                                    style={{
+                                        background: settingsDraft?.accentColor ?? settings.accentColor,
+                                        color: '#fff',
+                                        border: `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}`,
+                                        borderRadius: 6,
+                                        padding: '6px 16px',
+                                        marginBottom: 12,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        width: '100%',
+                                        fontSize: 13
+                                    }}
+                                    onClick={async () => {
+                                        try {
+                                            const backupPath = await window.electronAPI?.createBackup?.();
+                                            if (backupPath) {
+                                                const filename = backupPath.split('\\').pop() || 'backup';
+                                                showToast('success', `Backup created: ${filename}`);
+                                                setBackupCreated(true);
+                                            } else {
+                                                showToast('error', 'Failed to create backup');
+                                            }
+                                        } catch (error) {
+                                            log.error('Backup error', error instanceof Error ? error.message : String(error));
+                                            showToast('error', 'Backup failed');
+                                        }
+                                    }}
+                                >
+                                    📦 Create Backup First
+                                </button>
+                            )}
+                            <button
+                                style={{
+                                    background: settings.accentColor,
+                                    color: '#222',
+                                    border: `1px solid ${settings.accentColor}`,
+                                    borderRadius: 6,
+                                    padding: '8px 18px',
+                                    marginRight: 10,
+                                    marginBottom: 8,
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                                onClick={async () => {
+                                    if (pendingMaxItems !== null) {
+                                        const currentMaxItems = settingsDraft?.maxItems ?? settings.maxItems;
+
+                                        // Update both the settings draft and main settings
+                                        const newSettings = settingsDraft ? { ...settingsDraft, maxItems: pendingMaxItems } : { ...settings, maxItems: pendingMaxItems };
+                                        setSettingsDraft(newSettings);
+                                        setSettings(newSettings);
+
+                                        // Persist settings immediately to localStorage
+                                        localStorage.setItem('clip-settings', JSON.stringify(newSettings));
+
+                                        // Also save to file for main process to read at startup
+                                        window.electronAPI?.saveSettingsToFile?.(newSettings);
+
+                                        // If decreasing max items and we have more items than the new limit, trim them
+                                        if (pendingMaxItems < currentMaxItems && items.length > pendingMaxItems) {
+                                            try {
+                                                // Tell the main process to trim clipboard items to the new limit
+                                                await window.electronAPI?.trimClipboardItems?.(pendingMaxItems);
+                                                showToast('info', `Clipboard trimmed to ${pendingMaxItems} items`);
+                                            } catch (error) {
+                                                console.error('Failed to trim clipboard items:', error);
+                                                showToast('error', 'Failed to trim clipboard items');
+                                            }
+                                        }
+                                    }
+                                    setIsMaxItemsWarningClosing(true);
+                                    setTimeout(() => {
+                                        setShowMaxItemsWarning(false);
+                                        setPendingMaxItems(null);
+                                        setBackupCreated(false); // Reset backup status
+                                        setMaxItemsInputValue(null); // Reset input states
+                                        setHasMaxItemsChanges(false);
+                                        setIsMaxItemsWarningClosing(false);
+                                    }, 300);
+                                }}
+                            >
+                                {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems)
+                                    ? (backupCreated ? 'Continue' : 'Continue Anyway (not recommended)')
+                                    : 'Yes, Continue'
+                                }
+                            </button>
+                            <button
+                                style={{
+                                    background: '#222',
+                                    color: '#fff',
+                                    border: '1px solid #444',
+                                    borderRadius: 6,
+                                    padding: '8px 18px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                                onClick={() => {
+                                    setIsMaxItemsWarningClosing(true);
+                                    setTimeout(() => {
+                                        setShowMaxItemsWarning(false);
+                                        setPendingMaxItems(null);
+                                        setBackupCreated(false); // Reset backup status
+                                        setMaxItemsInputValue(null); // Reset input states
+                                        setHasMaxItemsChanges(false);
+                                        setIsMaxItemsWarningClosing(false);
                                     }, 300);
                                 }}
                             >

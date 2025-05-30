@@ -37,10 +37,27 @@ Napi::Value GetForegroundWindowWrapped(const Napi::CallbackInfo &info)
     return Napi::Number::New(info.Env(), reinterpret_cast<uintptr_t>(hwnd));
 }
 
+Napi::Value SetForegroundWindowWrapped(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 1) {
+        return Napi::Boolean::New(env, false);
+    }
+    
+    // Get HWND from the argument (should be a number)
+    uintptr_t hwndValue = info[0].As<Napi::Number>().Uint32Value();
+    HWND hwnd = reinterpret_cast<HWND>(hwndValue);
+    
+    // Call Windows API to set foreground window
+    BOOL result = SetForegroundWindow(hwnd);
+    return Napi::Boolean::New(env, result == TRUE);
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
     exports.Set("hookWindow", Napi::Function::New(env, HookWindow));
     exports.Set("getForegroundWindow", Napi::Function::New(env, GetForegroundWindowWrapped));
+    exports.Set("setForegroundWindow", Napi::Function::New(env, SetForegroundWindowWrapped));
     return exports;
 }
 
