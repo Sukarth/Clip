@@ -35,12 +35,8 @@ Clip is a powerful, modern clipboard manager for Windows built with Electron, Re
 
 ### 🎯 Beta Release Available Now!
 
-Choose your preferred installation method:
+**[Get it here...](https://github.com/Sukarth/Clip/releases/latest)**
 
-| Method | Description | Best For |
-|--------|-------------|----------|
-| **[📦 Portable ZIP](https://github.com/Sukarth/Clip/releases/latest)** | Extract and run, no installation | USB drives, temporary use |
-| **[🔧 Installer (NSIS)](https://github.com/Sukarth/Clip/releases/latest)** | Traditional Windows installer | Permanent installation |
 
 ### System Requirements
 
