@@ -1,7 +1,9 @@
 import * as React from 'react';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Fuse from 'fuse.js';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import ThemeProvider from './ThemeProvider';
+import ToastContainer from './components/ToastContainer';
 import { log, logger, isDev } from '../logger';
 
 // Toast notification type
@@ -468,26 +470,17 @@ const App: React.FC = () => {
     const [backupDeleteAction, setBackupDeleteAction] = useState<'single' | 'multiple' | null>(null);
     const [backupToDelete, setBackupToDelete] = useState<string>('');
     const [isBackupDeleteDialogClosing, setIsBackupDeleteDialogClosing] = useState(false);
+
+    const refreshBackupList = useCallback(async () => {
+        const list = await window.electronAPI?.listBackups?.();
+        setBackupList(list || []);
+    }, []);
+
     useEffect(() => {
         if (showSettings) {
-            window.electronAPI?.listBackups?.().then(list => setBackupList(list || []));
+            refreshBackupList();
         }
-    }, [showSettings]);
-
-    // Refresh backup list periodically
-    useEffect(() => {
-        const refreshBackupList = async () => {
-            if (showSettings) {
-                const list = await window.electronAPI?.listBackups?.();
-                if (list) {
-                    setBackupList(list);
-                }
-            }
-        };
-
-        const intervalId = setInterval(refreshBackupList, 2000);
-        return () => clearInterval(intervalId);
-    }, [showSettings]);
+    }, [showSettings, refreshBackupList]);
 
     // Toast notification helpers
     const showToast = (type: 'success' | 'error' | 'info', messageText: string) => {
@@ -638,6 +631,12 @@ const App: React.FC = () => {
 
     // Track if the clipboard list is scrollable via a sentinel IntersectionObserver
     const listRef = useRef<HTMLDivElement>(null);
+    const rowVirtualizer = useVirtualizer({
+        count: filteredItems.length,
+        getScrollElement: () => listRef.current,
+        estimateSize: () => 78,
+        overscan: 8,
+    });
     // Detect if vertical scrollbar is present to adjust right padding
     const [hasScrollbar, setHasScrollbar] = useState(false);
     useEffect(() => {
@@ -1216,49 +1215,13 @@ const App: React.FC = () => {
                 // Conditionally apply a style to hide content if window is not focused/visible
                 // This is a fallback, primary control is via setItems([])
                 style={{ opacity: isWindowFocused || showSettings ? 1 : 0, transition: 'opacity 0.1s' }}
-            >                {/* Toast notifications container */}
-                {toasts.length > 0 && (
-                    <div
-                        style={{
-                            position: 'fixed',
-                            bottom: 20,
-                            left: '50%',
-                            transform: 'translateX(-50%)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            zIndex: 9999,
-                        }}
-                    >
-                        {toasts.length > 1 && (
-                            <div
-                                onClick={clearAllToasts}
-                                style={{
-                                    fontSize: 12,
-                                    color: '#ccc',
-                                    padding: '4px 8px',
-                                    background: 'rgba(0,0,0,0.3)',
-                                    borderRadius: 4,
-                                    marginBottom: 5,
-                                    cursor: 'pointer',
-                                    transition: 'background 0.2s',
-                                }}
-                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0,0,0,0.5)'}
-                                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(0,0,0,0.3)'}
-                            >
-                                Clear all notifications
-                            </div>
-                        )}
-                        {toasts.map(toast => (
-                            <Toast
-                                key={toast.id}
-                                message={toast}
-                                onDismiss={dismissToast}
-                                accentColor={settings.accentColor}
-                            />
-                        ))}
-                    </div>
-                )}
+            >
+                <ToastContainer
+                    toasts={toasts}
+                    accentColor={settings.accentColor}
+                    onDismiss={dismissToast}
+                    onClearAll={clearAllToasts}
+                />
 
                 <div className="clip-header" style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh' }}>
                     <span className="clip-title" style={{ fontWeight: 600, fontSize: 18 }}>
@@ -1823,25 +1786,46 @@ const App: React.FC = () => {
                                 <div>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                                         <h3 style={{ ...subHeaderStyle, margin: 0 }}>Backup Management</h3>
-                                        <button
-                                            className="settings-button"
-                                            style={{
-                                                background: 'rgba(255,255,255,0.08)',
-                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                borderRadius: 6,
-                                                color: '#fff',
-                                                padding: '6px 12px',
-                                                cursor: 'pointer',
-                                                fontSize: 12,
-                                                fontWeight: 500,
-                                                transition: 'background 0.2s'
-                                            }}
-                                            onClick={() => setShowBackupManagement(!showBackupManagement)}
-                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
-                                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
-                                        >
-                                            {showBackupManagement ? 'Simple View' : 'Advanced'}
-                                        </button>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.08)',
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    borderRadius: 6,
+                                                    color: '#fff',
+                                                    padding: '6px 12px',
+                                                    cursor: 'pointer',
+                                                    fontSize: 12,
+                                                    fontWeight: 500,
+                                                    transition: 'background 0.2s'
+                                                }}
+                                                onClick={refreshBackupList}
+                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
+                                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+                                            >
+                                                Refresh
+                                            </button>
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.08)',
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    borderRadius: 6,
+                                                    color: '#fff',
+                                                    padding: '6px 12px',
+                                                    cursor: 'pointer',
+                                                    fontSize: 12,
+                                                    fontWeight: 500,
+                                                    transition: 'background 0.2s'
+                                                }}
+                                                onClick={() => setShowBackupManagement(!showBackupManagement)}
+                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
+                                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+                                            >
+                                                {showBackupManagement ? 'Simple View' : 'Advanced'}
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
@@ -2523,94 +2507,112 @@ const App: React.FC = () => {
                                         : 'No clipboard items found.'}
                         </div>
                     )}
-                    {filteredItems.map((item, idx) => (
+                    {filteredItems.length > 0 && !isInitialLoading && (
                         <div
-                            key={item.id}
-                            className={`clip-item clip-item-${item.type} ${isAnimatingList ? 'clip-item-animate' : ''}`}
-                            onClick={() => handlePaste(item)}
                             style={{
-                                background: 'rgba(255,255,255,0.04)',
-                                borderRadius: 12,
-                                margin: 0,
-                                padding: '2.5% 3%',
-                                display: 'flex',
-                                alignItems: 'center',
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-                                transition: 'background 0.2s, transform 0.25s cubic-bezier(.4,2,.6,1), box-shadow 0.25s cubic-bezier(.4,2,.6,1)',
-                                cursor: 'pointer',
-                                gap: 10
+                                height: `${rowVirtualizer.getTotalSize()}px`,
+                                width: '100%',
+                                position: 'relative',
                             }}
-                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.10)'}
-                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
                         >
-                            {item.type === 'image' ? (
-                                <img className="clip-item-image" src={item.content} alt="clip" style={{ width: '13%', minWidth: 36, maxWidth: 48, height: 'auto', aspectRatio: '1/1', borderRadius: 8, objectFit: 'cover', marginRight: '4%' }} />
-                            ) : (
-                                <div className="clip-item-text" style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '1rem', lineHeight: 1.4 }}>{item.content.length > 120 ? item.content.slice(0, 120) + '…' : item.content}</div>
-                            )}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', minWidth: 60 }}>
-                                <span className="clip-item-time" style={{ opacity: 0.5, fontSize: '0.85rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{new Date(item.timestamp).toLocaleTimeString()}</span>
-                                {(settings.pinFavoriteItems) && (
-                                    <button
-                                        className="clip-pin-btn"
-                                        tabIndex={-1}
+                            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                                const item = filteredItems[virtualRow.index];
+                                return (
+                                    <div
+                                        key={item.id}
+                                        className={`clip-item clip-item-${item.type} ${isAnimatingList ? 'clip-item-animate' : ''}`}
+                                        onClick={() => handlePaste(item)}
                                         style={{
-                                            background: 'none',
-                                            border: 'none',
-                                            padding: 0,
-                                            marginLeft: 2,
-                                            marginTop: 2,
-                                            cursor: 'pointer',
-                                            outline: 'none',
+                                            position: 'absolute',
+                                            top: 0,
+                                            left: 0,
+                                            width: '100%',
+                                            transform: `translateY(${virtualRow.start}px)`,
+                                            background: 'rgba(255,255,255,0.04)',
+                                            borderRadius: 12,
+                                            margin: 0,
+                                            padding: '2.5% 3%',
                                             display: 'flex',
                                             alignItems: 'center',
-                                            opacity: item.pinned ? 1 : 0.6,
-                                            transition: 'opacity 0.2s',
-                                            height: 25,
-                                            width: 25,
+                                            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                                            transition: 'background 0.2s, transform 0.25s cubic-bezier(.4,2,.6,1), box-shadow 0.25s cubic-bezier(.4,2,.6,1)',
+                                            cursor: 'pointer',
+                                            gap: 10
                                         }}
-                                        title={item.pinned ? 'Unpin' : 'Pin'}
-                                        onClick={e => {
-                                            e.stopPropagation();
-                                            if (settings.pinFavoriteItems) handleTogglePin(item);
-                                        }}
-                                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                                        onMouseLeave={e => (e.currentTarget.style.opacity = item.pinned ? '1' : '0.6')}
+                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.10)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
                                     >
-                                        <PinIcon pinned={!!item.pinned} />
-                                    </button>
-                                )}
-                                <button
-                                    className="clip-delete-btn"
-                                    tabIndex={-1}
-                                    style={{
-                                        background: 'none',
-                                        border: 'none',
-                                        padding: 0,
-                                        marginLeft: 2,
-                                        marginTop: 2,
-                                        cursor: 'pointer',
-                                        outline: 'none',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        opacity: 0.7,
-                                        transition: 'opacity 0.2s',
-                                        height: 25,
-                                        width: 25,
-                                    }}
-                                    title="Delete"
-                                    onClick={e => {
-                                        e.stopPropagation();
-                                        handleDeleteItem(item);
-                                    }}
-                                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-                                >
-                                    <DustbinIcon />
-                                </button>
-                            </div>
+                                        {item.type === 'image' ? (
+                                            <img className="clip-item-image" src={item.content} alt="clip" style={{ width: '13%', minWidth: 36, maxWidth: 48, height: 'auto', aspectRatio: '1/1', borderRadius: 8, objectFit: 'cover', marginRight: '4%' }} />
+                                        ) : (
+                                            <div className="clip-item-text" style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '1rem', lineHeight: 1.4 }}>{item.content.length > 120 ? item.content.slice(0, 120) + '…' : item.content}</div>
+                                        )}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', minWidth: 60 }}>
+                                            <span className="clip-item-time" style={{ opacity: 0.5, fontSize: '0.85rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{new Date(item.timestamp).toLocaleTimeString()}</span>
+                                            {(settings.pinFavoriteItems) && (
+                                                <button
+                                                    className="clip-pin-btn"
+                                                    tabIndex={-1}
+                                                    style={{
+                                                        background: 'none',
+                                                        border: 'none',
+                                                        padding: 0,
+                                                        marginLeft: 2,
+                                                        marginTop: 2,
+                                                        cursor: 'pointer',
+                                                        outline: 'none',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        opacity: item.pinned ? 1 : 0.6,
+                                                        transition: 'opacity 0.2s',
+                                                        height: 25,
+                                                        width: 25,
+                                                    }}
+                                                    title={item.pinned ? 'Unpin' : 'Pin'}
+                                                    onClick={e => {
+                                                        e.stopPropagation();
+                                                        if (settings.pinFavoriteItems) handleTogglePin(item);
+                                                    }}
+                                                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                                                    onMouseLeave={e => (e.currentTarget.style.opacity = item.pinned ? '1' : '0.6')}
+                                                >
+                                                    <PinIcon pinned={!!item.pinned} />
+                                                </button>
+                                            )}
+                                            <button
+                                                className="clip-delete-btn"
+                                                tabIndex={-1}
+                                                style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    padding: 0,
+                                                    marginLeft: 2,
+                                                    marginTop: 2,
+                                                    cursor: 'pointer',
+                                                    outline: 'none',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    opacity: 0.7,
+                                                    transition: 'opacity 0.2s',
+                                                    height: 25,
+                                                    width: 25,
+                                                }}
+                                                title="Delete"
+                                                onClick={e => {
+                                                    e.stopPropagation();
+                                                    handleDeleteItem(item);
+                                                }}
+                                                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                                                onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+                                            >
+                                                <DustbinIcon />
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
-                    ))}
+                    )}
                 </div>
                 {deleteTarget && (
                     <div className={`fade-opacity-${isDeleteDialogClosing ? 'out' : 'in'}`} style={{

@@ -32,10 +32,10 @@ if (process.platform === 'win32') {
 }
 
 const MAX_HISTORY = 100;
-const USE_STABLE_WINDOW_CONFIG = false;
 let mainWindow: BrowserWindow | null = null;
 let lastText = '';
 let lastImageDataUrl = '';
+let lastImageSizeKey = '';
 let tray: Tray | null = null;
 let windowHideBehavior: 'hide' | 'tray' = 'hide';
 let showInTaskbar: boolean = false;
@@ -672,24 +672,7 @@ function removeTray() {
 }
 
 function createMainWindow() {
-    const windowOptions = USE_STABLE_WINDOW_CONFIG ? {
-        width: 400,
-        height: 600,
-        resizable: false,
-        show: false,
-        skipTaskbar: !showInTaskbar,
-        icon: fs.existsSync(path.join(__dirname, '../assets/icon.ico'))
-            ? path.join(__dirname, '../assets/icon.ico')
-            : path.join(app.getAppPath(), 'assets', 'icon.ico'),
-        autoHideMenuBar: true,
-        title: 'Clip - Clipboard Manager',
-        webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
-            nodeIntegration: false,
-            contextIsolation: true,
-            backgroundThrottling: false,
-        },
-    } : { // Store options in a variable
+    const windowOptions = {
         width: 400,
         height: 600,
         resizable: false,
@@ -715,9 +698,10 @@ function createMainWindow() {
     console.log('[main] Creating main window with options:', JSON.stringify(windowOptions, null, 2)); // Log the options
     mainWindow = new BrowserWindow(windowOptions);
 
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
     mainWindow.loadURL(
         process.env.NODE_ENV === 'development'
-            ? 'http://localhost:8080'
+            ? devServerUrl
             : `file://${path.resolve(__dirname, '../index.html')}`
     );
 
@@ -814,7 +798,15 @@ function pollClipboard() {
         const image = clipboard.readImage();
         let imageDataUrl = '';
         if (!image.isEmpty()) {
-            imageDataUrl = image.toDataURL();
+            // Fast bailout: avoid expensive toDataURL unless image size changed.
+            const size = image.getSize();
+            const sizeKey = `${size.width}x${size.height}`;
+            if (sizeKey !== lastImageSizeKey) {
+                imageDataUrl = image.toDataURL();
+                lastImageSizeKey = sizeKey;
+            } else {
+                imageDataUrl = lastImageDataUrl;
+            }
         }
 
         // Track last seen clipboard content to avoid unnecessary DB/cache/log updates
@@ -862,6 +854,7 @@ function pollClipboard() {
             }
         } else if (!imageDataUrl) {
             lastImageDataUrl = '';
+            lastImageSizeKey = '';
         }
 
         // If clipboard is empty and last seen was also empty, do nothing (prevents log spam)
