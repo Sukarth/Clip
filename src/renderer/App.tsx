@@ -369,7 +369,6 @@ const App: React.FC = () => {
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
     const [isWindowFocused, setIsWindowFocused] = useState(document.hasFocus()); // Track window focus state
     const [isAnimatingList, setIsAnimatingList] = useState(true); // Track if list should animate
-    const [listKey, setListKey] = useState(0); // Key to trigger list remounting for animations
     const [hasLoadedInitially, setHasLoadedInitially] = useState(false); // Track if we've loaded items at least once
     const [showEmptyMessage, setShowEmptyMessage] = useState(false); // Control when to show empty message
     const [isDataLoading, setIsDataLoading] = useState(false); // Track if we're currently loading data
@@ -668,7 +667,7 @@ const App: React.FC = () => {
         window.addEventListener('resize', delayedCheck);
         return () => {
             resizeObserver.disconnect();
-            window.removeEventListener('resize', updateScrollbarPresence);
+            window.removeEventListener('resize', delayedCheck);
         };
     }, [filteredItems.length, items.length, hasLoadedInitially]);    // Persist settings modal state and draft
     useEffect(() => {
@@ -681,17 +680,6 @@ const App: React.FC = () => {
             localStorage.removeItem('clip-settingsDraft');
         }
     }, [settingsDraft]);
-
-    // Track if there are unsaved changes in settings
-    useEffect(() => {
-        if (settingsDraft && settings) {
-            // Compare settings and settingsDraft to see if there are any differences
-            const isDifferent = JSON.stringify(settingsDraft) !== JSON.stringify(settings);
-            setHasUnsavedChanges(isDifferent);
-        } else {
-            setHasUnsavedChanges(false);
-        }
-    }, [settingsDraft, settings]);
 
     // Delete clipboard item
     const [deleteTarget, setDeleteTarget] = useState<ClipboardItem | null>(null);
@@ -800,11 +788,11 @@ const App: React.FC = () => {
         const handler = () => {
             window.electronAPI?.requestClipboardHistory?.();
         };
-        window.electronAPI.onForceRefresh(handler);
-        // No direct cleanup needed for removeListener with electronAPI,
-        // but if it returned a cleanup function, it would be used here.
-        return () => { /* window.electronAPI.offForceRefresh(handler); // If such API existed */ };
-    }, [items.length]); // Depend on items.length to know if we need animation
+        const dispose = window.electronAPI.onForceRefresh(handler);
+        return () => {
+            if (typeof dispose === 'function') dispose();
+        };
+    }, []);
 
     // Click-away to close clipboard window (when hide is selected)
     useEffect(() => {
@@ -871,14 +859,17 @@ const App: React.FC = () => {
             }
         };
 
-        window.electronAPI?.onClipboardHistory(handleHistory);
+        const dispose = window.electronAPI?.onClipboardHistory?.(handleHistory);
 
         // Show welcome message on startup
         setTimeout(() => {
             showToast('info', 'Welcome to Clip! Your clipboard history is ready.');
         }, 1000);
 
-        return () => { isMounted = false; };
+        return () => {
+            isMounted = false;
+            if (typeof dispose === 'function') dispose();
+        };
     }, []);
 
     // Listen for new clipboard items and intelligently refresh cache
@@ -890,8 +881,10 @@ const App: React.FC = () => {
             // Request updated history
             window.electronAPI?.requestClipboardHistory?.();
         };
-        window.electronAPI?.onClipboardItem(handler);
-        return () => { };
+        const dispose = window.electronAPI?.onClipboardItem?.(handler);
+        return () => {
+            if (typeof dispose === 'function') dispose();
+        };
     }, []);
 
     // Send backup settings to main process when settings change
@@ -1099,7 +1092,6 @@ const App: React.FC = () => {
             if (!isWindowFocused) { // Only act if changing from unfocused to focused
                 setIsWindowFocused(true);
                 setIsAnimatingList(true);
-                setListKey(k => k + 1); // Trigger animation IMMEDIATELY
 
                 // Try cache first for instant display, then fetch fresh data
                 if (!useCacheIfValid()) {
@@ -1125,7 +1117,6 @@ const App: React.FC = () => {
             if (document.visibilityState === 'visible') {
                 setIsWindowFocused(true);
                 setIsAnimatingList(true);
-                setListKey(k => k + 1); // Trigger animation IMMEDIATELY
 
                 // Try cache first for instant display, then fetch fresh data
                 if (!useCacheIfValid()) {
@@ -1177,16 +1168,16 @@ const App: React.FC = () => {
         };
     }, [isWindowFocused, useCacheIfValid]); // Add useCacheIfValid dependency
 
-    // Listen for both focus and visibilitychange events to always request clipboard history
     useEffect(() => {
-        const handleUpdate = () => {
+        if (!window.electronAPI?.onWindowWillShow) return;
+        const handleWillShow = () => {
+            setIsWindowFocused(true);
+            setIsAnimatingList(true);
             window.electronAPI?.requestClipboardHistory?.();
         };
-        window.addEventListener('focus', handleUpdate);
-        document.addEventListener('visibilitychange', handleUpdate);
+        const dispose = window.electronAPI.onWindowWillShow(handleWillShow);
         return () => {
-            window.removeEventListener('focus', handleUpdate);
-            document.removeEventListener('visibilitychange', handleUpdate);
+            if (typeof dispose === 'function') dispose();
         };
     }, []);
 
@@ -1195,9 +1186,9 @@ const App: React.FC = () => {
             // Persist current settings to localStorage (or other storage if needed)
             localStorage.setItem('clip-settings', JSON.stringify(settings));
         };
-        window.electronAPI?.onSaveSettingsBeforeQuit?.(saveSettingsBeforeQuit);
+        const dispose = window.electronAPI?.onSaveSettingsBeforeQuit?.(saveSettingsBeforeQuit);
         return () => {
-            // No cleanup needed
+            if (typeof dispose === 'function') dispose();
         };
     }, [settings]);
 
@@ -1207,13 +1198,11 @@ const App: React.FC = () => {
     const handleSearchChange = (newSearch: string) => {
         setSearch(newSearch);
         setIsAnimatingList(true);
-        setListKey(k => k + 1); // Trigger animation
     };
 
     const handleFilterChange = () => {
         setFilteredType(t => t === 'all' ? 'text' : t === 'text' ? 'image' : 'all');
         setIsAnimatingList(true);
-        setListKey(k => k + 1); // Trigger animation
     };
 
     // UI: Add settings page/modal
@@ -2178,7 +2167,7 @@ const App: React.FC = () => {
                                                     const data = await window.electronAPI?.exportDb?.();
 
                                                     if (data) {
-                                                        const blob = new Blob([data], { type: 'application/octet-stream' });
+                                                        const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/octet-stream' });
                                                         const url = URL.createObjectURL(blob);
                                                         const a = document.createElement('a');
                                                         a.href = url;
@@ -2451,9 +2440,8 @@ const App: React.FC = () => {
                         </div>
                     </div>
                 )}
-                {/* Clipboard list with key-based remounting for animations */}
+                {/* Clipboard list */}
                 <div
-                    key={listKey}
                     ref={listRef}
                     className="clip-list"
                     style={{
@@ -2663,7 +2651,7 @@ const App: React.FC = () => {
                                 Yes
                             </button>
                             <button
-                            className='no-btn'
+                                className='no-btn'
                                 style={{
                                     background: '#ff4136',
                                     color: '#fff !important',

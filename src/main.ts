@@ -1,29 +1,27 @@
-import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification } from 'electron';
+// @ts-nocheck
+import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification, screen } from 'electron';
 import * as path from 'path';
 import fs from 'fs';
-import Database from 'better-sqlite3';
 import os from 'os';
 import { execFile, spawn, ChildProcess, exec } from 'child_process';
-// @ts-ignore
-import keySender from 'node-key-sender';
 
 // --- Robust error logging for debugging startup crashes ---
 const logPath = path.join(
-  process.env.LOCALAPPDATA || os.homedir(),
-  'clip-main-error.log'
+    process.env.LOCALAPPDATA || os.homedir(),
+    'clip-main-error.log'
 );
 function logError(msg: string) {
-  try {
-    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {}
+    try {
+        fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
+    } catch { }
 }
 process.on('uncaughtException', (err) => {
-  logError('Uncaught Exception: ' + (err && err.stack ? err.stack : err));
-  console.error('Uncaught Exception:', err);
+    logError('Uncaught Exception: ' + (err && err.stack ? err.stack : err));
+    console.error('Uncaught Exception:', err);
 });
 process.on('unhandledRejection', (reason: any) => {
-  logError('Unhandled Rejection: ' + (reason && reason.stack ? reason.stack : reason));
-  console.error('Unhandled Rejection:', reason);
+    logError('Unhandled Rejection: ' + (reason && reason.stack ? reason.stack : reason));
+    console.error('Unhandled Rejection:', reason);
 });
 logError('--- Clip main process started ---');
 
@@ -34,6 +32,7 @@ if (process.platform === 'win32') {
 }
 
 const MAX_HISTORY = 100;
+const USE_STABLE_WINDOW_CONFIG = false;
 let mainWindow: BrowserWindow | null = null;
 let lastText = '';
 let lastImageDataUrl = '';
@@ -41,6 +40,8 @@ let tray: Tray | null = null;
 let windowHideBehavior: 'hide' | 'tray' = 'hide';
 let showInTaskbar: boolean = false;
 let showNotifications: boolean = false;
+let maxHistoryItems: number = MAX_HISTORY;
+let cachedAppDataPath: string | null = null;
 
 // --- PERFORMANCE OPTIMIZATIONS: Data Caching ---
 let cachedClipboardHistory: any[] = [];
@@ -52,6 +53,7 @@ let pendingHistoryRequests: Array<(data: any[]) => void> = [];
 // --- Win+V override state ---
 let winVOverrideEnabled = false;
 let backendShortcut = 'Control+Shift+V';
+const SAFE_SHORTCUT_FALLBACK = 'Control+Shift+V';
 
 // --- AHK process management ---
 let ahkProcess: ChildProcess | null = null;
@@ -122,21 +124,18 @@ function getAhkExePath(): string {
 
 const WM_CLIP_SHOW = 0x8001;
 
-// Use native clipmsg instead of ffi-napi for HWND tracking
 let lastForegroundHwnd: number | null = null;
-let clipmsg: any = null;
-try {
-    // Use absolute path resolution for the native module
-    const clipmsgPath = path.resolve(path.join(app.getAppPath(), 'native', 'clipmsg.node'));
-    console.log(`[main] Loading clipmsg from: ${clipmsgPath}`);
-    clipmsg = require(clipmsgPath);
-    console.log(`[main] Loaded clipmsg module, exports: ${Object.keys(clipmsg).join(', ')}`);
-} catch (e) {
-    console.error('[main] Failed to load native clipmsg addon:', e);
-}
 
 function usesWindowsKey(shortcut: string) {
     return /(^|\+)(Win|Windows|Super|Meta)(\+|$)/i.test(shortcut);
+}
+
+function sanitizeShortcut(shortcut: string) {
+    if (usesWindowsKey(shortcut)) {
+        console.warn(`[main] Windows-key shortcuts are temporarily disabled for stability; using ${SAFE_SHORTCUT_FALLBACK}`);
+        return SAFE_SHORTCUT_FALLBACK;
+    }
+    return shortcut;
 }
 
 function ahkShortcutString(shortcut: string) {
@@ -435,10 +434,15 @@ function updateGlobalShortcut() {
 
 // Determine if running in portable mode and get appropriate data directory
 function getAppDataPath() {
+    if (cachedAppDataPath) {
+        return cachedAppDataPath;
+    }
+
     const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
     if (isDev) {
-        return app.getPath('userData');
+        cachedAppDataPath = app.getPath('userData');
+        return cachedAppDataPath;
     }
 
     // Check if running from portable zip (no installation)
@@ -447,7 +451,8 @@ function getAppDataPath() {
 
     // If AppData folder exists next to exe, use portable mode
     if (fs.existsSync(portableDataDir)) {
-        return portableDataDir;
+        cachedAppDataPath = portableDataDir;
+        return cachedAppDataPath;
     }
 
     // Create portable data directory if we can write to the exe directory
@@ -462,11 +467,13 @@ function getAppDataPath() {
             fs.mkdirSync(portableDataDir, { recursive: true });
             console.log(`[main] Created portable AppData directory: ${portableDataDir}`);
         }
-        return portableDataDir;
+        cachedAppDataPath = portableDataDir;
+        return cachedAppDataPath;
     } catch (err) {
         // Can't write to exe directory, use standard user data (for installed version)
         console.log('[main] Cannot write to exe directory, using standard user data path');
-        return app.getPath('userData');
+        cachedAppDataPath = app.getPath('userData');
+        return cachedAppDataPath;
     }
 }
 
@@ -485,15 +492,23 @@ function loadStartupSettings() {
             windowHideBehavior = settings.windowHideBehavior || 'hide';
             showInTaskbar = settings.showInTaskbar || false;
             showNotifications = settings.showNotifications || false;
-            backendShortcut = settings.globalShortcut || 'Control+Shift+V';
+            backendShortcut = sanitizeShortcut(settings.globalShortcut || SAFE_SHORTCUT_FALLBACK);
+            const parsedMaxItems = Number(settings.maxItems);
+            if (Number.isFinite(parsedMaxItems)) {
+                maxHistoryItems = Math.min(500, Math.max(10, Math.floor(parsedMaxItems)));
+            }
         }
     } catch (error) {
         console.log('[main] Could not load startup settings, using defaults');
     }
 }
 
-let db: Database.Database;
+let Database: any = null;
+let db: any;
 function initDatabase() {
+    if (!Database) {
+        Database = require('better-sqlite3');
+    }
     const dbPath = getDatabasePath();
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
@@ -511,7 +526,7 @@ function initDatabase() {
 }
 
 // Insert clipboard item into DB
-function insertClipboardItem(item: { type: 'text' | 'image'; content: string; timestamp: number; pinned?: boolean }, maxItems: number = MAX_HISTORY) {
+function insertClipboardItem(item: { type: 'text' | 'image'; content: string; timestamp: number; pinned?: boolean }, maxItems: number = maxHistoryItems) {
     const last = db.prepare('SELECT content, type FROM history ORDER BY id DESC LIMIT 1').get() as { content?: string, type?: string } | undefined;
     if (last && last.content === item.content && last.type === item.type) return;
     db.prepare('INSERT INTO history (type, content, timestamp, pinned) VALUES (?, ?, ?, ?)')
@@ -520,7 +535,7 @@ function insertClipboardItem(item: { type: 'text' | 'image'; content: string; ti
     if (countRow && countRow.count > maxItems) {
         db.prepare('DELETE FROM history WHERE id IN (SELECT id FROM history WHERE pinned = 0 ORDER BY id DESC LIMIT -1 OFFSET ?)').run(maxItems);
     }
-    
+
     // Invalidate cache when new items are added
     invalidateHistoryCache();
 }
@@ -541,19 +556,19 @@ function deleteClipboardItem(id: number) {
 // Get clipboard history from DB (most recent first) with caching
 function getClipboardHistory() {
     const now = Date.now();
-    
+
     // Return cached data if still valid
     if (now - cacheTimestamp < CACHE_DURATION && cachedClipboardHistory.length > 0) {
         console.log('[main] Returning cached clipboard history');
         return cachedClipboardHistory;
     }
-    
+
     // Fetch fresh data and cache it
-    const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(MAX_HISTORY);
+    const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(maxHistoryItems);
     cachedClipboardHistory = history;
     cacheTimestamp = now;
     console.log(`[main] Cached ${history.length} clipboard items`);
-    
+
     return history;
 }
 
@@ -563,7 +578,7 @@ let lastHistoryLength: number | null = null;
 function getClipboardHistoryAsync(): Promise<any[]> {
     return new Promise((resolve) => {
         const now = Date.now();
-        
+
         // Return cached data if still valid
         if (now - cacheTimestamp < CACHE_DURATION && cachedClipboardHistory.length > 0) {
             // Only log if cache is non-empty or this is the first time
@@ -573,19 +588,19 @@ function getClipboardHistoryAsync(): Promise<any[]> {
             resolve(cachedClipboardHistory);
             return;
         }
-        
+
         // If already loading, queue the request
         if (isHistoryLoading) {
             pendingHistoryRequests.push(resolve);
             return;
         }
-        
+
         isHistoryLoading = true;
-        
+
         // Use setImmediate to avoid blocking the event loop
         setImmediate(() => {
             try {
-                const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(MAX_HISTORY);
+                const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(maxHistoryItems);
 
                 // Only log and update if the length has changed
                 if (lastHistoryLength !== history.length) {
@@ -595,10 +610,10 @@ function getClipboardHistoryAsync(): Promise<any[]> {
 
                 cachedClipboardHistory = history;
                 cacheTimestamp = Date.now();
-                
+
                 // Resolve current request
                 resolve(history);
-                
+
                 // Resolve any pending requests
                 pendingHistoryRequests.forEach(callback => callback(history));
                 pendingHistoryRequests = [];
@@ -622,7 +637,9 @@ function invalidateHistoryCache() {
 
 function ensureTray(mainWindow: BrowserWindow) {
     if (!tray) {
-        const iconPath = path.join(__dirname, '../assets/icon.ico');
+        const distIconPath = path.join(__dirname, '../assets/icon.ico');
+        const appIconPath = path.join(app.getAppPath(), 'assets', 'icon.ico');
+        const iconPath = fs.existsSync(distIconPath) ? distIconPath : appIconPath;
         tray = new Tray(iconPath);
         // tray = new Tray(''); // No icon provided
         tray.setToolTip('Clip - Clipboard Manager');
@@ -667,15 +684,34 @@ function removeTray() {
 }
 
 function createMainWindow() {
-    const windowOptions = { // Store options in a variable
+    const windowOptions = USE_STABLE_WINDOW_CONFIG ? {
+        width: 400,
+        height: 600,
+        resizable: false,
+        show: false,
+        skipTaskbar: !showInTaskbar,
+        icon: fs.existsSync(path.join(__dirname, '../assets/icon.ico'))
+            ? path.join(__dirname, '../assets/icon.ico')
+            : path.join(app.getAppPath(), 'assets', 'icon.ico'),
+        autoHideMenuBar: true,
+        title: 'Clip - Clipboard Manager',
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+            backgroundThrottling: false,
+        },
+    } : { // Store options in a variable
         width: 400,
         height: 600,
         resizable: false,
         transparent: true,
-        roundedCorners: true,
+        roundedCorners: false,
         show: false,
         skipTaskbar: !showInTaskbar,
-        icon: path.join(__dirname, '../assets/icon.ico'),
+        icon: fs.existsSync(path.join(__dirname, '../assets/icon.ico'))
+            ? path.join(__dirname, '../assets/icon.ico')
+            : path.join(app.getAppPath(), 'assets', 'icon.ico'),
         backgroundColor: 'rgba(0,0,0,0)',
         titleBarStyle: 'hidden' as const,
         frame: false, // Key setting
@@ -756,6 +792,29 @@ function createMainWindow() {
     //         }
     //     }
     // });
+}
+
+function ensureWindowBoundsVisible(win: BrowserWindow) {
+    const desiredWidth = 400;
+    const desiredHeight = 600;
+    const current = win.getBounds();
+    const target = {
+        x: current.x,
+        y: current.y,
+        width: desiredWidth,
+        height: desiredHeight,
+    };
+
+    const display = screen.getDisplayMatching(target);
+    const area = display.workArea;
+
+    const maxX = Math.max(area.x, area.x + area.width - desiredWidth);
+    const maxY = Math.max(area.y, area.y + area.height - desiredHeight);
+
+    const clampedX = Math.min(Math.max(target.x, area.x), maxX);
+    const clampedY = Math.min(Math.max(target.y, area.y), maxY);
+
+    win.setBounds({ x: clampedX, y: clampedY, width: desiredWidth, height: desiredHeight }, false);
 }
 
 function pollClipboard() {
@@ -911,7 +970,7 @@ function createBackup() {
 }
 function restoreBackup(backupFile: string) {
     const dbPath = getDatabasePath();
-    const backupPath = path.join(getBackupDir(), backupFile);
+    const backupPath = resolveBackupPath(backupFile);
 
     console.log(`[main] Starting restore from: ${backupPath}`);
 
@@ -965,6 +1024,15 @@ function restoreBackup(backupFile: string) {
 
     console.log('[main] Database connection reinitialized after restore');
 }
+
+function resolveBackupPath(file: string): string {
+    const safeName = path.basename(String(file));
+    if (safeName !== file || !/^clip-backup-[A-Za-z0-9_.-]+\.db$/.test(safeName)) {
+        throw new Error('Invalid backup filename');
+    }
+    return path.join(getBackupDir(), safeName);
+}
+
 ipcMain.handle('create-backup', () => {
     return createBackup();
 });
@@ -973,6 +1041,7 @@ ipcMain.handle('list-backups', () => {
 });
 ipcMain.handle('restore-backup', async (event, file) => {
     try {
+        resolveBackupPath(file);
         restoreBackup(file);
 
         // Small delay to ensure database operations are complete
@@ -994,7 +1063,7 @@ ipcMain.handle('restore-backup', async (event, file) => {
 });
 ipcMain.handle('delete-backup', (event, file) => {
     try {
-        const backupPath = path.join(getBackupDir(), file);
+        const backupPath = resolveBackupPath(file);
         if (fs.existsSync(backupPath)) {
             fs.unlinkSync(backupPath);
             console.log(`[main] Deleted backup: ${file}`);
@@ -1010,7 +1079,7 @@ ipcMain.handle('delete-multiple-backups', (event, files) => {
     try {
         let deletedCount = 0;
         for (const file of files) {
-            const backupPath = path.join(getBackupDir(), file);
+            const backupPath = resolveBackupPath(file);
             if (fs.existsSync(backupPath)) {
                 fs.unlinkSync(backupPath);
                 deletedCount++;
@@ -1096,82 +1165,21 @@ let isAhkTriggered = false;
 
 // Native Windows message handler for AHK trigger
 function registerNativeMessageHandler() {
-    if (process.platform !== 'win32' || !mainWindow || !clipmsg) return;
-    try {
-        const hwndBuf = mainWindow.getNativeWindowHandle();
-        clipmsg.hookWindow(hwndBuf, WM_CLIP_SHOW, () => {
-            // Show the window so AHK can then activate it
-            if (mainWindow && !mainWindow.isDestroyed()) {
-                console.log('[main] AHK message received, showing window for activation');
-                isAhkTriggered = true;
-                showMainWindow();
-
-                // Reset the flag after a short delay to allow AHK to focus
-                setTimeout(() => {
-                    isAhkTriggered = false;
-                    console.log('[main] AHK trigger timeout, re-enabling blur handling');
-                }, 1000);
-            }
-        });
-        console.log('[main] Native Windows message handler registered for AHK support');
-    } catch (e) {
-        console.error('[main] Failed to load native message handler:', e);
-    }
+    if (process.platform !== 'win32' || !mainWindow) return;
+    // Disabled intentionally for stability: this hook path is currently causing
+    // async-hook stack corruption on startup in this environment.
+    console.log('[main] Native Windows message handler disabled for stability');
 }
 
 
 function savePreviousHwnd() {
-    try {
-        // First make sure clipmsg is loaded
-        if (!clipmsg) {
-            const clipmsgPath = path.resolve(path.join(app.getAppPath(), 'native', 'clipmsg.node'));
-            console.log(`[main] Re-loading clipmsg from: ${clipmsgPath}`);
-            clipmsg = require(clipmsgPath);
-            console.log(`[main] Re-loaded clipmsg module, exports: ${Object.keys(clipmsg).join(', ')}`);
-        }
-
-        // Use the global clipmsg instance
-        if (clipmsg && typeof clipmsg.getForegroundWindow === 'function') {
-            let hwnd = clipmsg.getForegroundWindow();
-            if (typeof hwnd === 'object' && hwnd !== null && Buffer.isBuffer(hwnd)) {
-                // Handle Buffer (Node < v12 or some native modules)
-                lastForegroundHwnd = hwnd.readUInt32LE(0);
-            } else if (typeof hwnd === 'bigint') {
-                lastForegroundHwnd = Number(hwnd);
-            } else if (typeof hwnd === 'number') {
-                lastForegroundHwnd = hwnd;
-            } else {
-                lastForegroundHwnd = null;
-            }
-            console.log('[main] Saved HWND:', lastForegroundHwnd);
-        } else {
-            lastForegroundHwnd = null;
-            console.warn('[main] clipmsg.getForegroundWindow not available');
-        }
-    } catch (e) {
-        lastForegroundHwnd = null;
-        console.error('[main] Error in savePreviousHwnd:', e);
-    }
+    // Disabled intentionally: native focus tracking via clipmsg.node causes
+    // async hook corruption in Electron on some environments.
+    lastForegroundHwnd = null;
 }
 
 function restorePreviousWindow() {
-    try {
-        if (lastForegroundHwnd && typeof lastForegroundHwnd === 'number' && lastForegroundHwnd !== 0) {
-            if (clipmsg && typeof clipmsg.setForegroundWindow === 'function') {
-                const result = clipmsg.setForegroundWindow(lastForegroundHwnd);
-                if (result) {
-                    console.log('[main] Successfully restored previous window');
-                } else {
-                    console.log('[main] Focus restoration attempted but may not have succeeded');
-                }
-            } else {
-                console.log('[main] Native focus restoration not available');
-            }
-        }
-    } catch (e) {
-        // Fail silently - focus restoration is non-critical
-        console.log('[main] Focus restoration failed silently');
-    }
+    // Disabled intentionally: native focus restore path relies on clipmsg.node.
 }
 
 function showMainWindow() {
@@ -1186,10 +1194,14 @@ function showMainWindow() {
     }
     if (!mainWindow) return;
 
+    ensureWindowBoundsVisible(mainWindow);
+    mainWindow.webContents.send('window-will-show');
+
     // Show and focus the window immediately for smoother animation
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.setAlwaysOnTop(true);
     mainWindow.show();
+    mainWindow.webContents.invalidate();
     app.focus({ steal: true });
     mainWindow.focus();
     mainWindow.setAlwaysOnTop(false);
@@ -1289,13 +1301,10 @@ app.whenReady().then(() => {
             clipboard.writeImage(image);
         }
 
-        // Pass HWND to SendPaste.exe for reliable pasting
-        let hwndArg = '';
-        if (lastForegroundHwnd && typeof lastForegroundHwnd === 'number' && lastForegroundHwnd !== 0) {
-            hwndArg = lastForegroundHwnd.toString();
-        }
+        // Keep native fast paste, but let SendPaste resolve current focus itself.
+        const hwndArg = '';
         const sendPastePath = path.join(app.getAppPath(), 'native', 'SendPaste.exe');
-        require('child_process').execFile(sendPastePath, [hwndArg], (err: any, stdout: string, stderr: string) => {
+        execFile(sendPastePath, [hwndArg], (err: any, stdout: string, stderr: string) => {
             if (err) {
                 console.error('[main] SendPaste.exe error:', err);
             }
@@ -1486,7 +1495,7 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('set-global-shortcut', (_event, shortcut) => {
-        handleShortcutChange(shortcut).catch(err => {
+        handleShortcutChange(sanitizeShortcut(shortcut)).catch(err => {
             console.error('[main] Error handling shortcut change:', err);
         });
     });
@@ -1496,7 +1505,7 @@ app.whenReady().then(() => {
         updateGlobalShortcut();
     });
     ipcMain.on('set-backend-shortcut', (_event, shortcut) => {
-        backendShortcut = shortcut;
+        backendShortcut = sanitizeShortcut(shortcut);
         updateGlobalShortcut();
     });
 
@@ -1532,6 +1541,10 @@ app.whenReady().then(() => {
 
     ipcMain.on('save-settings-to-file', (_event, settings) => {
         try {
+            if (settings && Number.isFinite(Number(settings.maxItems))) {
+                maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(settings.maxItems))));
+                invalidateHistoryCache();
+            }
             const settingsPath = path.join(getAppDataPath(), 'clip-settings.json');
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
         } catch (error) {

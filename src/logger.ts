@@ -6,7 +6,7 @@
 // Development detection logic
 const isDevelopment = (): boolean => {
     // Method 1: Check if running via electron . (process.defaultApp exists)
-    if (typeof process !== 'undefined' && process.defaultApp) {
+    if (typeof process !== 'undefined' && (process as any).defaultApp) {
         return true;
     }
     

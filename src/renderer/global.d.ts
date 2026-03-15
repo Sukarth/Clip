@@ -2,8 +2,8 @@
 interface ElectronAPI {
     hideWindow: () => void;
     restorePreviousWindow: () => void;
-    onClipboardItem: (callback: (data: any) => void) => void;
-    onClipboardHistory: (callback: (data: any) => void) => void;
+    onClipboardItem: (callback: (data: any) => void) => (() => void) | void;
+    onClipboardHistory: (callback: (data: any) => void) => (() => void) | void;
     pasteClipboardItem: (item: any) => void;
     setWindowHideBehavior: (behavior: string) => void;
     setShowInTaskbar: (show: boolean) => void;
@@ -22,10 +22,11 @@ interface ElectronAPI {
     importDb: (buffer: ArrayBuffer) => Promise<boolean>;
     deleteClipboardItem: (id: number) => void;
     trimClipboardItems: (maxItems: number) => Promise<boolean>;
-    onForceRefresh: (callback: () => void) => void;
+    onForceRefresh: (callback: () => void) => (() => void) | void;
+    onWindowWillShow: (callback: () => void) => (() => void) | void;
     setGlobalShortcut: (shortcut: string) => void;
     quitApp: () => void;
-    onSaveSettingsBeforeQuit?: (callback: () => void) => void;
+    onSaveSettingsBeforeQuit?: (callback: () => void) => (() => void) | void;
     setWinVOverride: (enabled: boolean) => void;
     setBackendShortcut: (shortcut: string) => void;
     restartApp: () => void;
