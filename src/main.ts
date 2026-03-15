@@ -131,11 +131,9 @@ function usesWindowsKey(shortcut: string) {
 }
 
 function sanitizeShortcut(shortcut: string) {
-    if (usesWindowsKey(shortcut)) {
-        console.warn(`[main] Windows-key shortcuts are temporarily disabled for stability; using ${SAFE_SHORTCUT_FALLBACK}`);
-        return SAFE_SHORTCUT_FALLBACK;
-    }
-    return shortcut;
+    if (typeof shortcut !== 'string') return SAFE_SHORTCUT_FALLBACK;
+    const normalized = shortcut.trim();
+    return normalized.length > 0 ? normalized : SAFE_SHORTCUT_FALLBACK;
 }
 
 function ahkShortcutString(shortcut: string) {
@@ -156,25 +154,15 @@ function generateAhkScript(shortcut: string) {
 #SingleInstance Force
 
 ${ahkHotkey}:: {
-    ; First try to find and activate the window
+    ; Always route through WM_CLIP_SHOW so the app runs its normal show logic.
+    ; (WinActivate alone can focus a transparent window without making the UI visible.)
+    DetectHiddenWindows(true)
     hwnd := WinExist("Clip - Clipboard Manager")
     if (hwnd) {
-        ; Window exists, just activate it
+        PostMessage(0x8001, 0, 0, , "ahk_id " . hwnd)
+        Sleep(30)
         WinActivate("ahk_id " . hwnd)
         WinWaitActive("ahk_id " . hwnd, , 2)
-    } else {
-        ; Window not found, send PostMessage to show it first
-        DetectHiddenWindows(true)
-        hwnd := WinExist("Clip - Clipboard Manager")
-        if (hwnd) {
-            ; Send message to show window
-            PostMessage(0x8001, 0, 0, , "ahk_id " . hwnd)
-            ; Wait a moment for window to appear
-            Sleep(100)
-            ; Now try to activate it
-            WinActivate("ahk_id " . hwnd)
-            WinWaitActive("ahk_id " . hwnd, , 2)
-        }
     }
 }
 `;
@@ -1163,12 +1151,34 @@ setupAutoBackup();
 // Flag to temporarily disable blur hiding when triggered by AHK
 let isAhkTriggered = false;
 
+let wmClipShowHookedForWindowId: number | null = null;
+
 // Native Windows message handler for AHK trigger
 function registerNativeMessageHandler() {
     if (process.platform !== 'win32' || !mainWindow) return;
-    // Disabled intentionally for stability: this hook path is currently causing
-    // async-hook stack corruption on startup in this environment.
-    console.log('[main] Native Windows message handler disabled for stability');
+
+    // Important: use Electron's built-in hookWindowMessage (no native addon).
+    // This lets AHK trigger the *same* show path as tray click, ensuring the
+    // renderer receives 'window-will-show' and the window isn't invisible.
+    if (wmClipShowHookedForWindowId === mainWindow.id) return;
+
+    try {
+        mainWindow.hookWindowMessage(WM_CLIP_SHOW, () => {
+            // Run on next tick to avoid re-entrancy surprises.
+            setImmediate(() => {
+                try {
+                    showMainWindow();
+                } catch (e) {
+                    console.error('[main] Error handling WM_CLIP_SHOW:', e);
+                }
+            });
+        });
+
+        wmClipShowHookedForWindowId = mainWindow.id;
+        console.log('[main] Hooked WM_CLIP_SHOW via hookWindowMessage');
+    } catch (e) {
+        console.error('[main] Failed to hook WM_CLIP_SHOW:', e);
+    }
 }
 
 
@@ -1316,10 +1326,9 @@ app.whenReady().then(() => {
             }
         });
 
-        // Hide/minimize window first
+        // Hide window instead of minimize to fix fully transparent bug
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.blur();
-            mainWindow.minimize();
             if (windowHideBehavior === 'hide') {
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
