@@ -2772,7 +2772,6 @@ const App: React.FC = () => {
                 .clip-root {
                     background: rgba(30,32,36,${settings.transparency});
                     border-radius: ${settings.borderRadius}px;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
                     padding: 3%;
                     height: 600px; /* Fixed height instead of min-height */
                     width: 400px; /* Match main window width */
@@ -2804,7 +2803,6 @@ const App: React.FC = () => {
                 .theme-light .clip-root {
                     background: rgba(250,250,250,${settings.transparency});
                     color: #2c3e50;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
                     backdrop-filter: blur(10px);
                     -webkit-backdrop-filter: blur(10px);
                 }
