@@ -25,30 +25,31 @@
     "build:dir-fast": "npm run build:all && electron-builder --dir --config.compression=store",
     "start": "npm run build:all && echo \"starting electron...\" && electron .",
     "dev": "npm run build:main && webpack --mode development --watch && echo \"starting electron...\" && electron .",
+    "postinstall": "electron-builder install-app-deps",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "better-sqlite3": "^9.6.0",
+    "better-sqlite3": "^12.8.0",
     "fuse.js": "^7.1.0",
-    "node-addon-api": "^8.3.1",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "node-addon-api": "^8.6.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^22.15.18",
-    "@types/react": "^19.1.4",
-    "@types/react-dom": "^19.1.5",
-    "electron": "25.9.0",
-    "electron-builder": "^26.0.12",
-    "html-webpack-plugin": "^5.6.3",
-    "ts-loader": "^9.5.2",
-    "typescript": "^5.8.3",
-    "webpack": "^5.99.8",
-    "webpack-cli": "^6.0.1"
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "electron": "41.0.2",
+    "electron-builder": "^26.8.1",
+    "html-webpack-plugin": "^5.6.6",
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.9.3",
+    "webpack": "^5.105.4",
+    "webpack-cli": "^7.0.0"
   },
   "build": {
     "appId": "com.sukarth.clip",
