@@ -370,6 +370,7 @@ const App: React.FC = () => {
     const toastIdCounter = useRef(0); // For unique toast IDs
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
     const [isWindowFocused, setIsWindowFocused] = useState(document.hasFocus()); // Track window focus state
+    const [listForceKey, setListForceKey] = useState(0); // Force virtualizer remount on visibility changes
     const [isAnimatingList, setIsAnimatingList] = useState(true); // Track if list should animate
     const [hasLoadedInitially, setHasLoadedInitially] = useState(false); // Track if we've loaded items at least once
     const [showEmptyMessage, setShowEmptyMessage] = useState(false); // Control when to show empty message
@@ -636,6 +637,7 @@ const App: React.FC = () => {
         getScrollElement: () => listRef.current,
         estimateSize: () => 78,
         overscan: 8,
+        getItemKey: (index) => filteredItems[index]?.id ?? index,
     });
     // Detect if vertical scrollbar is present to adjust right padding
     const [hasScrollbar, setHasScrollbar] = useState(false);
@@ -1091,6 +1093,7 @@ const App: React.FC = () => {
             if (!isWindowFocused) { // Only act if changing from unfocused to focused
                 setIsWindowFocused(true);
                 setIsAnimatingList(true);
+                setListForceKey(k => k + 1);
 
                 // Try cache first for instant display, then fetch fresh data
                 if (!useCacheIfValid()) {
@@ -1116,6 +1119,7 @@ const App: React.FC = () => {
             if (document.visibilityState === 'visible') {
                 setIsWindowFocused(true);
                 setIsAnimatingList(true);
+                setListForceKey(k => k + 1);
 
                 // Try cache first for instant display, then fetch fresh data
                 if (!useCacheIfValid()) {
@@ -1172,6 +1176,7 @@ const App: React.FC = () => {
         const handleWillShow = () => {
             setIsWindowFocused(true);
             setIsAnimatingList(true);
+            setListForceKey(k => k + 1);
             window.electronAPI?.requestClipboardHistory?.();
         };
         const dispose = window.electronAPI.onWindowWillShow(handleWillShow);
@@ -1197,11 +1202,13 @@ const App: React.FC = () => {
     const handleSearchChange = (newSearch: string) => {
         setSearch(newSearch);
         setIsAnimatingList(true);
+        listRef.current?.scrollTo({ top: 0, behavior: 'instant' });
     };
 
     const handleFilterChange = () => {
         setFilteredType(t => t === 'all' ? 'text' : t === 'text' ? 'image' : 'all');
         setIsAnimatingList(true);
+        listRef.current?.scrollTo({ top: 0, behavior: 'instant' });
     };
 
     // UI: Add settings page/modal
@@ -2430,14 +2437,13 @@ const App: React.FC = () => {
                     className="clip-list"
                     style={{
                         overflowY: 'auto',
+                        overflowX: 'hidden',
                         marginTop: 0,
                         paddingTop: 0,
                         paddingBottom: 1,
                         position: 'relative',
-                        display: 'flex',
-                        flexDirection: 'column',
+                        display: 'block',
                         flex: 1,
-                        gap: 10,
                         scrollbarWidth: 'thin',
                         scrollbarColor: settings.theme === 'light' ? '#ccc #f0f0f0' : '#444 #23252a',
                         paddingRight: (() => {
@@ -2519,39 +2525,77 @@ const App: React.FC = () => {
                                 const item = filteredItems[virtualRow.index];
                                 return (
                                     <div
-                                        key={item.id}
-                                        className={`clip-item clip-item-${item.type} ${isAnimatingList ? 'clip-item-animate' : ''}`}
-                                        onClick={() => handlePaste(item)}
+                                        key={`${item.id}-${listForceKey}`}
+                                        data-index={virtualRow.index}
+                                        ref={rowVirtualizer.measureElement}
                                         style={{
                                             position: 'absolute',
                                             top: 0,
                                             left: 0,
-                                            width: '100%',
+                                            right: 0,
                                             transform: `translateY(${virtualRow.start}px)`,
-                                            background: 'rgba(255,255,255,0.04)',
-                                            borderRadius: 12,
-                                            margin: 0,
-                                            padding: '2.5% 3%',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-                                            transition: 'background 0.2s, transform 0.25s cubic-bezier(.4,2,.6,1), box-shadow 0.25s cubic-bezier(.4,2,.6,1)',
-                                            cursor: 'pointer',
-                                            gap: 10
+                                            paddingBottom: '10px', // spacing between items
+                                            boxSizing: 'border-box'
                                         }}
-                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.10)'}
-                                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
                                     >
-                                        {item.type === 'image' ? (
-                                            <img className="clip-item-image" src={item.content} alt="clip" style={{ width: '13%', minWidth: 36, maxWidth: 48, height: 'auto', aspectRatio: '1/1', borderRadius: 8, objectFit: 'cover', marginRight: '4%' }} />
-                                        ) : (
-                                            <div className="clip-item-text" style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '1rem', lineHeight: 1.4 }}>{item.content.length > 120 ? item.content.slice(0, 120) + '…' : item.content}</div>
-                                        )}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', minWidth: 60 }}>
-                                            <span className="clip-item-time" style={{ opacity: 0.5, fontSize: '0.85rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{new Date(item.timestamp).toLocaleTimeString()}</span>
-                                            {(settings.pinFavoriteItems) && (
+                                        <div
+                                            className={`clip-item clip-item-${item.type} ${isAnimatingList ? 'clip-item-animate' : ''}`}
+                                            onClick={() => handlePaste(item)}
+                                            style={{
+                                                background: 'rgba(255,255,255,0.04)',
+                                                borderRadius: 12,
+                                                margin: 0,
+                                                padding: '2.5% 3%',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                                                transition: 'background 0.2s, transform 0.25s cubic-bezier(.4,2,.6,1), box-shadow 0.25s cubic-bezier(.4,2,.6,1)',
+                                                cursor: 'pointer',
+                                                gap: 10,
+                                                boxSizing: 'border-box'
+                                            }}
+                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.10)'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                                        >
+                                            {item.type === 'image' ? (
+                                                <img className="clip-item-image" src={item.content} alt="clip" style={{ width: '13%', minWidth: 36, maxWidth: 48, height: 'auto', aspectRatio: '1/1', borderRadius: 8, objectFit: 'cover', marginRight: '4%' }} />
+                                            ) : (
+                                                <div className="clip-item-text" style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '1rem', lineHeight: 1.4 }}>{item.content.length > 120 ? item.content.slice(0, 120) + '…' : item.content}</div>
+                                            )}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', minWidth: 60 }}>
+                                                <span className="clip-item-time" style={{ opacity: 0.5, fontSize: '0.85rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{new Date(item.timestamp).toLocaleTimeString()}</span>
+                                                {(settings.pinFavoriteItems) && (
+                                                    <button
+                                                        className="clip-pin-btn"
+                                                        tabIndex={-1}
+                                                        style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            padding: 0,
+                                                            marginLeft: 2,
+                                                            marginTop: 2,
+                                                            cursor: 'pointer',
+                                                            outline: 'none',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            opacity: item.pinned ? 1 : 0.6,
+                                                            transition: 'opacity 0.2s',
+                                                            height: 25,
+                                                            width: 25,
+                                                        }}
+                                                        title={item.pinned ? 'Unpin' : 'Pin'}
+                                                        onClick={e => {
+                                                            e.stopPropagation();
+                                                            if (settings.pinFavoriteItems) handleTogglePin(item);
+                                                        }}
+                                                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                                                        onMouseLeave={e => (e.currentTarget.style.opacity = item.pinned ? '1' : '0.6')}
+                                                    >
+                                                        <PinIcon pinned={!!item.pinned} />
+                                                    </button>
+                                                )}
                                                 <button
-                                                    className="clip-pin-btn"
+                                                    className="clip-delete-btn"
                                                     tabIndex={-1}
                                                     style={{
                                                         background: 'none',
@@ -2563,50 +2607,22 @@ const App: React.FC = () => {
                                                         outline: 'none',
                                                         display: 'flex',
                                                         alignItems: 'center',
-                                                        opacity: item.pinned ? 1 : 0.6,
+                                                        opacity: 0.7,
                                                         transition: 'opacity 0.2s',
                                                         height: 25,
                                                         width: 25,
                                                     }}
-                                                    title={item.pinned ? 'Unpin' : 'Pin'}
+                                                    title="Delete"
                                                     onClick={e => {
                                                         e.stopPropagation();
-                                                        if (settings.pinFavoriteItems) handleTogglePin(item);
+                                                        handleDeleteItem(item);
                                                     }}
                                                     onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                                                    onMouseLeave={e => (e.currentTarget.style.opacity = item.pinned ? '1' : '0.6')}
+                                                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
                                                 >
-                                                    <PinIcon pinned={!!item.pinned} />
+                                                    <DustbinIcon />
                                                 </button>
-                                            )}
-                                            <button
-                                                className="clip-delete-btn"
-                                                tabIndex={-1}
-                                                style={{
-                                                    background: 'none',
-                                                    border: 'none',
-                                                    padding: 0,
-                                                    marginLeft: 2,
-                                                    marginTop: 2,
-                                                    cursor: 'pointer',
-                                                    outline: 'none',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    opacity: 0.7,
-                                                    transition: 'opacity 0.2s',
-                                                    height: 25,
-                                                    width: 25,
-                                                }}
-                                                title="Delete"
-                                                onClick={e => {
-                                                    e.stopPropagation();
-                                                    handleDeleteItem(item);
-                                                }}
-                                                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                                                onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-                                            >
-                                                <DustbinIcon />
-                                            </button>
+                                            </div>
                                         </div>
                                     </div>
                                 );
