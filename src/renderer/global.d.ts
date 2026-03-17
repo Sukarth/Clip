@@ -1,5 +1,6 @@
 // Type definitions for Electron contextBridge API exposed in preload.js
 interface ElectronAPI {
+    dragWindow: (cursorX: number, cursorY: number, offsetX?: number, offsetY?: number) => void;
     hideWindow: () => void;
     restorePreviousWindow: () => void;
     onClipboardItem: (callback: (data: any) => void) => (() => void) | void;
@@ -31,6 +32,15 @@ interface ElectronAPI {
     setBackendShortcut: (shortcut: string) => void;
     restartApp: () => void;
     saveSettingsToFile: (settings: any) => void;
+    getThemeConfig: () => Promise<any>;
+    getThemeSchema: () => Promise<any>;
+    saveThemeConfig: (config: any) => Promise<any>;
+    reloadThemeConfig: () => Promise<any>;
+    exportThemeConfig: () => Promise<string>;
+    createThemeProfile: (profileName: string) => Promise<any>;
+    deleteThemeProfile: (profileKey: string) => Promise<any>;
+    setActiveThemeProfile: (profileKey: string) => Promise<any>;
+    onThemeConfigUpdated: (callback: (data: any) => void) => (() => void) | void;
     isDevelopment: () => boolean;
 }
 

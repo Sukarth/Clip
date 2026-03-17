@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+    dragWindow: (cursorX, cursorY, offsetX, offsetY) => ipcRenderer.send('drag-window', { cursorX, cursorY, offsetX, offsetY }),
     hideWindow: () => ipcRenderer.send('hide-window'),
     restorePreviousWindow: () => ipcRenderer.send('restore-previous-window'),
     onClipboardItem: (callback) => {
@@ -55,6 +56,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setBackendShortcut: (shortcut) => ipcRenderer.send('set-backend-shortcut', shortcut),
     restartApp: () => ipcRenderer.send('restart-app'),
     saveSettingsToFile: (settings) => ipcRenderer.send('save-settings-to-file', settings),
+    getThemeConfig: () => ipcRenderer.invoke('get-theme-config'),
+    getThemeSchema: () => ipcRenderer.invoke('get-theme-schema'),
+    saveThemeConfig: (config) => ipcRenderer.invoke('save-theme-config', config),
+    reloadThemeConfig: () => ipcRenderer.invoke('reload-theme-config'),
+    exportThemeConfig: () => ipcRenderer.invoke('export-theme-config'),
+    createThemeProfile: (profileName) => ipcRenderer.invoke('create-theme-profile', profileName),
+    deleteThemeProfile: (profileKey) => ipcRenderer.invoke('delete-theme-profile', profileKey),
+    setActiveThemeProfile: (profileKey) => ipcRenderer.invoke('set-active-theme-profile', profileKey),
+    onThemeConfigUpdated: (callback) => {
+        const listener = (_event, data) => callback(data);
+        ipcRenderer.on('theme-config-updated', listener);
+        return () => ipcRenderer.removeListener('theme-config-updated', listener);
+    },
     isDevelopment: () => {
         // Check multiple indicators for development mode
         return !!(

@@ -5,6 +5,14 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import ThemeProvider from './ThemeProvider';
 import ToastContainer from './components/ToastContainer';
 import { log, logger, isDev } from '../logger';
+import {
+    WINDOW_SIZE_LIMITS,
+    createDefaultThemeConfig,
+    normalizeThemeProfileKey,
+    sanitizeThemeConfig,
+    type ThemeConfig,
+    type ThemeProfile,
+} from '../theme-config';
 
 // Toast notification type
 interface ToastMessage {
@@ -45,6 +53,10 @@ interface Settings {
 
     // Shortcut
     globalShortcut: string;
+
+    // Window size
+    windowWidth: number;
+    windowHeight: number;
 }
 
 const BACKUP_INTERVALS = [
@@ -79,6 +91,91 @@ const DEFAULT_SETTINGS: Settings = {
 
     // Shortcut
     globalShortcut: 'Control+Shift+V',
+
+    // Window size
+    windowWidth: WINDOW_SIZE_LIMITS.width.default,
+    windowHeight: WINDOW_SIZE_LIMITS.height.default,
+};
+
+function getActiveThemeProfile(config: ThemeConfig): ThemeProfile {
+    const key = normalizeThemeProfileKey(config.activeProfile);
+    if (config.profiles[key]) {
+        return config.profiles[key];
+    }
+
+    const firstKey = Object.keys(config.profiles)[0];
+    if (firstKey) {
+        return config.profiles[firstKey];
+    }
+
+    return createDefaultThemeConfig().profiles.default;
+}
+
+function withFileProtocolIfNeeded(value: string): string {
+    if (/^(data:image\/|https?:\/\/|file:\/\/)/i.test(value)) {
+        return value;
+    }
+
+    if (/^[a-zA-Z]:\\/.test(value)) {
+        return `file:///${value.replace(/\\/g, '/')}`;
+    }
+
+    return value;
+}
+
+function iconToImageSource(icon: string): string | null {
+    const trimmed = icon.trim();
+    if (!trimmed) return null;
+    const lower = trimmed.toLowerCase();
+
+    if (trimmed.startsWith('<svg') && trimmed.endsWith('</svg>')) {
+        return `data:image/svg+xml;utf8,${encodeURIComponent(trimmed)}`;
+    }
+
+    if (
+        lower.startsWith('data:image/') ||
+        lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        lower.startsWith('file://') ||
+        trimmed.startsWith('./') ||
+        trimmed.startsWith('../') ||
+        trimmed.startsWith('/') ||
+        /^[a-zA-Z]:\\/.test(trimmed)
+    ) {
+        return withFileProtocolIfNeeded(trimmed);
+    }
+
+    if (/\.(svg|png|jpg|jpeg|webp|ico)(\?.*)?$/i.test(trimmed)) {
+        return withFileProtocolIfNeeded(trimmed);
+    }
+
+    return null;
+}
+
+const IconGlyph: React.FC<{ value: string; fallback: string; size?: number; label: string; tint?: string }> = ({
+    value,
+    fallback,
+    size = 16,
+    label,
+    tint,
+}) => {
+    const source = iconToImageSource(value);
+    if (source) {
+        return (
+            <img
+                src={source}
+                alt={label}
+                style={{ width: size, height: size, objectFit: 'contain', filter: tint ? `drop-shadow(0 0 0 ${tint})` : undefined }}
+            />
+        );
+    }
+
+    const text = value?.trim() || fallback;
+    return (
+        <span title={label} style={{ fontSize: size, lineHeight: 1, color: tint || 'inherit' }}>
+            {text}
+        </span>
+    );
 };
 
 const sectionHeaderStyle: React.CSSProperties = {
@@ -224,34 +321,6 @@ const getCustomRangeStyles = (accentColor: string) => ({
     },
 });
 
-// Pin SVGs
-const PinIcon: React.FC<{ pinned: boolean }> = ({ pinned }) => (
-    pinned ? (
-        <svg width="25" height="25" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <g transform="rotate(90 12 12)">
-                <path d="m14.579 14.579-2.947 2.947-.864-.863c-.39-.39-.61-.92-.61-1.474v-2.084L7.21 10.158 5 9.421 9.421 5l.737 2.21 2.947 2.948h2.084c.553 0 1.083.22 1.474.61l.863.864zm0 0L19 19" stroke="#888" fill="#888" strokeLinecap="round" strokeLinejoin="round" />
-            </g>
-        </svg>
-    ) : (
-        <svg width="25" height="25" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <g transform="rotate(90 12 12)">
-                <path d="m14.579 14.579-2.947 2.947-.864-.863c-.39-.39-.61-.92-.61-1.474v-2.084L7.21 10.158 5 9.421 9.421 5l.737 2.21 2.947 2.948h2.084c.553 0 1.083.22 1.474.61l.863.864zm0 0L19 19" stroke="#888" strokeLinecap="round" strokeLinejoin="round" />
-            </g>
-        </svg>
-    )
-);
-
-// Dustbin SVG
-const DustbinIcon: React.FC = () => (
-    <svg width="25" height="25" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="5" y="7.5" width="14" height="11" rx="2.5" stroke="#888" strokeWidth="1.5" fill="none" />
-        <rect x="9" y="3" width="6" height="3" rx="1.5" stroke="#888" strokeWidth="1.5" fill="none" />
-        <path d="M3 7.5h18" stroke="#888" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M10 11v4" stroke="#888" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="M14 11v4" stroke="#888" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-);
-
 // --- Modern shortcut input (checkboxes for modifiers + text for main key) ---
 const MODIFIER_OPTIONS = [
     { label: 'Ctrl', value: 'Control' },
@@ -367,6 +436,50 @@ const App: React.FC = () => {
         const saved = localStorage.getItem('clip-settings');
         return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
     });
+    const [themeConfig, setThemeConfig] = useState<ThemeConfig>(() => createDefaultThemeConfig());
+    const activeThemeProfile = React.useMemo(() => getActiveThemeProfile(themeConfig), [themeConfig]);
+    const activeThemeProfileKey = React.useMemo(() => {
+        const normalized = normalizeThemeProfileKey(themeConfig.activeProfile);
+        if (themeConfig.profiles[normalized]) return normalized;
+        return Object.keys(themeConfig.profiles)[0] || 'default';
+    }, [themeConfig]);
+
+    const themeColors = activeThemeProfile.colors;
+    const themeTypography = activeThemeProfile.typography;
+    const themeSurface = activeThemeProfile.surface;
+    const themeIcons = activeThemeProfile.icons;
+
+    const clampWindowWidth = useCallback((value: unknown) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return WINDOW_SIZE_LIMITS.width.default;
+        return Math.min(WINDOW_SIZE_LIMITS.width.max, Math.max(WINDOW_SIZE_LIMITS.width.min, Math.floor(parsed)));
+    }, []);
+
+    const clampWindowHeight = useCallback((value: unknown) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return WINDOW_SIZE_LIMITS.height.default;
+        return Math.min(WINDOW_SIZE_LIMITS.height.max, Math.max(WINDOW_SIZE_LIMITS.height.min, Math.floor(parsed)));
+    }, []);
+
+    const getWindowSizeValidationError = useCallback((widthValue: unknown, heightValue: unknown) => {
+        const w = Number(widthValue);
+        const h = Number(heightValue);
+
+        if (!Number.isFinite(w) || !Number.isFinite(h)) {
+            return 'Width and height must be valid numbers.';
+        }
+
+        if (w < WINDOW_SIZE_LIMITS.width.min || w > WINDOW_SIZE_LIMITS.width.max) {
+            return `Width must be ${WINDOW_SIZE_LIMITS.width.min}-${WINDOW_SIZE_LIMITS.width.max}px.`;
+        }
+
+        if (h < WINDOW_SIZE_LIMITS.height.min || h > WINDOW_SIZE_LIMITS.height.max) {
+            return `Height must be ${WINDOW_SIZE_LIMITS.height.min}-${WINDOW_SIZE_LIMITS.height.max}px.`;
+        }
+
+        return '';
+    }, []);
+
     const toastIdCounter = useRef(0); // For unique toast IDs
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
     const [isWindowFocused, setIsWindowFocused] = useState(document.hasFocus()); // Track window focus state
@@ -389,6 +502,19 @@ const App: React.FC = () => {
         const draft = localStorage.getItem('clip-settingsDraft');
         return draft ? JSON.parse(draft) : null;
     });
+
+    const windowSizeError = React.useMemo(() => {
+        return getWindowSizeValidationError(
+            settingsDraft?.windowWidth ?? settings.windowWidth,
+            settingsDraft?.windowHeight ?? settings.windowHeight,
+        );
+    }, [
+        settingsDraft?.windowWidth,
+        settingsDraft?.windowHeight,
+        settings.windowWidth,
+        settings.windowHeight,
+        getWindowSizeValidationError,
+    ]);
     const inputRef = useRef<HTMLInputElement>(null); // Ref for search input
 
     // Track if there are unsaved changes in settings
@@ -408,6 +534,8 @@ const App: React.FC = () => {
     const escListener = useRef<((e: KeyboardEvent) => void) | null>(null);
     const settingsModalRef = useRef<HTMLDivElement>(null); const [search, setSearch] = useState('');
     const [filteredType, setFilteredType] = useState<'all' | 'text' | 'image'>('all');
+    const dragStateRef = useRef({ dragging: false, offsetX: 0, offsetY: 0 });
+    const lastDragEmitRef = useRef(0);
 
     const [isClosingSettings, setIsClosingSettings] = useState(false);
     // Settings panel fade state
@@ -471,6 +599,185 @@ const App: React.FC = () => {
     const [backupDeleteAction, setBackupDeleteAction] = useState<'single' | 'multiple' | null>(null);
     const [backupToDelete, setBackupToDelete] = useState<string>('');
     const [isBackupDeleteDialogClosing, setIsBackupDeleteDialogClosing] = useState(false);
+
+    // --- Theme config state ---
+    const [themeEditorConfig, setThemeEditorConfig] = useState<ThemeConfig>(() => createDefaultThemeConfig());
+    const [themeSchema, setThemeSchema] = useState<any>(null);
+    const [newThemeProfileName, setNewThemeProfileName] = useState('');
+    const [isThemeSaving, setIsThemeSaving] = useState(false);
+    const editorThemeProfile = React.useMemo(() => getActiveThemeProfile(themeEditorConfig), [themeEditorConfig]);
+
+    const saveThemeEditorConfig = useCallback(async () => {
+        try {
+            setIsThemeSaving(true);
+            const saved = await window.electronAPI?.saveThemeConfig?.(themeEditorConfig);
+            if (saved) {
+                const next = sanitizeThemeConfig(saved);
+                setThemeConfig(next);
+                setThemeEditorConfig(next);
+                showToast('success', 'Theme config saved to file.');
+            }
+        } catch (error) {
+            showToast('error', `Failed to save theme config: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setIsThemeSaving(false);
+        }
+    }, [themeEditorConfig]);
+
+    const updateEditorActiveProfile = useCallback((updater: (profile: ThemeProfile) => ThemeProfile) => {
+        setThemeEditorConfig((prev) => {
+            const key = normalizeThemeProfileKey(prev.activeProfile);
+            const activeKey = prev.profiles[key] ? key : Object.keys(prev.profiles)[0] || 'default';
+            const current = prev.profiles[activeKey] || createDefaultThemeConfig().profiles.default;
+            const updated = updater(current);
+            return sanitizeThemeConfig({
+                ...prev,
+                activeProfile: activeKey,
+                profiles: {
+                    ...prev.profiles,
+                    [activeKey]: updated,
+                },
+            });
+        });
+    }, []);
+
+    const loadThemeFromMain = useCallback(async () => {
+        try {
+            const [config, schema] = await Promise.all([
+                window.electronAPI?.getThemeConfig?.(),
+                window.electronAPI?.getThemeSchema?.(),
+            ]);
+
+            if (config) {
+                const sanitized = sanitizeThemeConfig(config);
+                setThemeConfig(sanitized);
+                setThemeEditorConfig(sanitized);
+            }
+            if (schema) {
+                setThemeSchema(schema);
+            }
+        } catch (error) {
+            showToast('error', `Failed to load theme config: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, []);
+
+    const switchThemeProfile = useCallback(async (profileKey: string) => {
+        try {
+            const key = normalizeThemeProfileKey(profileKey);
+            setThemeEditorConfig(prev => sanitizeThemeConfig({ ...prev, activeProfile: key }));
+            const next = await window.electronAPI?.setActiveThemeProfile?.(key);
+            if (next) {
+                const sanitized = sanitizeThemeConfig(next);
+                setThemeConfig(sanitized);
+                setThemeEditorConfig(sanitized);
+            }
+        } catch (error) {
+            showToast('error', `Failed to switch profile: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, []);
+
+    const createThemeProfileFromInput = useCallback(async () => {
+        const name = newThemeProfileName.trim();
+        if (!name) return;
+
+        try {
+            const saved = await window.electronAPI?.createThemeProfile?.(name);
+            if (saved) {
+                const sanitized = sanitizeThemeConfig(saved);
+                setThemeConfig(sanitized);
+                setThemeEditorConfig(sanitized);
+                setNewThemeProfileName('');
+                showToast('success', 'Theme profile created.');
+            }
+        } catch (error) {
+            showToast('error', `Failed to create profile: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, [newThemeProfileName]);
+
+    const deleteActiveThemeProfile = useCallback(async () => {
+        try {
+            const saved = await window.electronAPI?.deleteThemeProfile?.(activeThemeProfileKey);
+            if (saved) {
+                const sanitized = sanitizeThemeConfig(saved);
+                setThemeConfig(sanitized);
+                setThemeEditorConfig(sanitized);
+                showToast('success', 'Theme profile deleted.');
+            }
+        } catch (error) {
+            showToast('error', `Failed to delete profile: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, [activeThemeProfileKey]);
+
+    const reloadThemeFromDisk = useCallback(async () => {
+        try {
+            const next = await window.electronAPI?.reloadThemeConfig?.();
+            if (next) {
+                const sanitized = sanitizeThemeConfig(next);
+                setThemeConfig(sanitized);
+                setThemeEditorConfig(sanitized);
+                showToast('info', 'Theme config reloaded from file/backup.');
+            }
+        } catch (error) {
+            showToast('error', `Failed to reload theme config: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, []);
+
+    const exportThemeJson = useCallback(async () => {
+        try {
+            const text = await window.electronAPI?.exportThemeConfig?.();
+            if (!text) return;
+            const blob = new Blob([text], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'clip-theme.json';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            showToast('success', 'Theme JSON exported.');
+        } catch (error) {
+            showToast('error', `Failed to export theme JSON: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, []);
+
+    useEffect(() => {
+        const onMouseMove = (event: MouseEvent) => {
+            if (!dragStateRef.current.dragging) return;
+            const now = Date.now();
+            if (now - lastDragEmitRef.current < 16) return;
+            lastDragEmitRef.current = now;
+            window.electronAPI?.dragWindow?.(
+                event.screenX,
+                event.screenY,
+                dragStateRef.current.offsetX,
+                dragStateRef.current.offsetY,
+            );
+        };
+
+        const onMouseUp = () => {
+            dragStateRef.current.dragging = false;
+            dragStateRef.current.offsetX = 0;
+            dragStateRef.current.offsetY = 0;
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+        return () => {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+    }, []);
+
+    useEffect(() => {
+        loadThemeFromMain();
+        const dispose = window.electronAPI?.onThemeConfigUpdated?.((nextConfig) => {
+            const sanitized = sanitizeThemeConfig(nextConfig);
+            setThemeConfig(sanitized);
+            setThemeEditorConfig(sanitized);
+        });
+        return () => {
+            if (typeof dispose === 'function') dispose();
+        };
+    }, [loadThemeFromMain]);
 
     const refreshBackupList = useCallback(async () => {
         const list = await window.electronAPI?.listBackups?.();
@@ -1024,11 +1331,17 @@ const App: React.FC = () => {
     };    // Settings modal logic
     const openSettings = () => {
         setSettingsDraft(settings);
+        setThemeEditorConfig(themeConfig);
         setShowSettings(true);
         setIsSettingsDialogClosing(false);
     };
 
     const saveSettings = () => {
+        if (windowSizeError) {
+            showToast('error', windowSizeError);
+            return;
+        }
+
         if (settingsDraft) {
             setSettings(settingsDraft);
 
@@ -1040,6 +1353,32 @@ const App: React.FC = () => {
 
             // Also save to file for main process to read at startup
             window.electronAPI?.saveSettingsToFile?.(settingsDraft);
+
+            const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
+            const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
+            const mergedThemeConfig = sanitizeThemeConfig({
+                ...themeConfig,
+                ...themeEditorConfig,
+                activeProfile: profileKey,
+                profiles: {
+                    ...themeEditorConfig.profiles,
+                    [profileKey]: {
+                        ...currentProfile,
+                        colors: {
+                            ...currentProfile.colors,
+                            accent: settingsDraft.accentColor,
+                        },
+                        surface: {
+                            ...currentProfile.surface,
+                            borderRadius: settingsDraft.borderRadius,
+                            transparency: settingsDraft.transparency,
+                        },
+                    },
+                },
+            });
+            setThemeConfig(mergedThemeConfig);
+            setThemeEditorConfig(mergedThemeConfig);
+            void window.electronAPI?.saveThemeConfig?.(mergedThemeConfig);
         }
 
         setIsSettingsDialogClosing(true);
@@ -1062,6 +1401,7 @@ const App: React.FC = () => {
         setTimeout(() => {
             setShowSettings(false);
             setSettingsDraft(null);
+            setThemeEditorConfig(themeConfig);
             setIsSettingsDialogClosing(false);
         }, 300);
     }; const resetSettings = () => {
@@ -1211,6 +1551,10 @@ const App: React.FC = () => {
         listRef.current?.scrollTo({ top: 0, behavior: 'instant' });
     };
 
+    const effectiveAccentColor = themeColors.accent || settings.accentColor;
+    const effectiveBorderRadius = themeSurface.borderRadius ?? settings.borderRadius;
+    const effectiveTransparency = themeSurface.transparency ?? settings.transparency;
+
     // UI: Add settings page/modal
     return (
         <ThemeProvider
@@ -1225,13 +1569,38 @@ const App: React.FC = () => {
             >
                 <ToastContainer
                     toasts={toasts}
-                    accentColor={settings.accentColor}
+                    accentColor={themeColors.accent}
                     onDismiss={dismissToast}
                     onClearAll={clearAllToasts}
                 />
 
-                <div className="clip-header" style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh' }}>
-                    <span className="clip-title" style={{ fontWeight: 600, fontSize: 18 }}>
+                <div
+                    className="clip-header"
+                    style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh', position: 'relative', zIndex: 3, cursor: 'move' }}
+                    onMouseDown={(event) => {
+                        if (showSettings) return;
+                        if (event.button !== 0) return;
+                        const target = event.target as HTMLElement | null;
+                        if (target?.closest('button') || target?.closest('input') || target?.closest('select')) {
+                            return;
+                        }
+                        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                        dragStateRef.current.dragging = true;
+                        dragStateRef.current.offsetX = event.clientX - rect.left;
+                        dragStateRef.current.offsetY = event.clientY - rect.top;
+                        lastDragEmitRef.current = 0;
+                        window.electronAPI?.dragWindow?.(
+                            event.screenX,
+                            event.screenY,
+                            dragStateRef.current.offsetX,
+                            dragStateRef.current.offsetY,
+                        );
+                    }}
+                >
+                    <span className="clip-title" style={{ fontWeight: themeTypography.fontWeightBold, fontSize: themeTypography.titleFontSize, color: themeColors.textPrimary }}>
+                        <span style={{ marginRight: 6 }}>
+                            <IconGlyph value={themeIcons.clipboard} fallback="📋" label="Clipboard" size={16} />
+                        </span>
                         Clipboard
                         {isDev() ? (
                             <span
@@ -1246,7 +1615,7 @@ const App: React.FC = () => {
                                 }}
                                 title={`Cache: ${itemsCache.length} items, age: ${Math.round((Date.now() - lastCacheUpdate) / 1000)}s`}
                             >
-                                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                                     <path
                                         d="M7 7v6a3 3 0 0 0 6 0V6a4 4 0 0 0-8 0v7a5 5 0 0 0 10 0V7"
                                         stroke="#9C27B0"
@@ -1263,17 +1632,17 @@ const App: React.FC = () => {
                         className="clip-settings-btn"
                         style={{
                             marginLeft: 'auto',
-                            background: 'rgba(255,255,255,0.08)',
-                            border: '1px solid #333',
+                            background: themeColors.inputBackground,
+                            border: `1px solid ${themeColors.inputBorder}`,
                             borderRadius: 8,
-                            color: '#fff',
+                            color: themeColors.textPrimary,
                             padding: '4px 12px',
                             cursor: 'pointer',
                             transition: 'background 0.2s, border 0.2s'
                         }}
                         onClick={openSettings}
                     >
-                        ⚙️
+                        <IconGlyph value={themeIcons.settings} fallback="⚙️" label="Settings" size={16} />
                     </button>
                 </div>
                 {/* Search/filter row */}
@@ -1289,11 +1658,11 @@ const App: React.FC = () => {
                                 width: '100%',
                                 height: '100%',
                                 borderRadius: 10,
-                                border: '1px solid #333',
-                                background: 'rgba(255,255,255,0.07)',
-                                color: '#fff',
+                                border: `1px solid ${themeColors.inputBorder}`,
+                                background: themeColors.inputBackground,
+                                color: themeColors.textPrimary,
                                 padding: '0 32px 0 14px',
-                                fontSize: 15,
+                                fontSize: themeTypography.baseFontSize,
                                 outline: 'none',
                                 transition: 'border 0.2s, box-shadow 0.3s',
                                 boxSizing: 'border-box',
@@ -1301,18 +1670,20 @@ const App: React.FC = () => {
                             spellCheck={false}
                             autoFocus={false}
                         />
-                        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.4, pointerEvents: 'none', fontSize: 16 }}>🔍</span>
+                        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.7, pointerEvents: 'none', fontSize: 16 }}>
+                            <IconGlyph value={themeIcons.search} fallback="🔍" label="Search" size={14} />
+                        </span>
                     </div>
                     <button
                         style={{
                             flexShrink: 0,
                             height: 40,
-                            background: 'rgba(255,255,255,0.07)',
-                            border: '1px solid #333',
+                            background: themeColors.inputBackground,
+                            border: `1px solid ${themeColors.inputBorder}`,
                             borderRadius: 8,
-                            color: '#fff',
+                            color: themeColors.textPrimary,
                             padding: '0 18px',
-                            fontSize: 15,
+                            fontSize: themeTypography.baseFontSize,
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
@@ -1329,10 +1700,10 @@ const App: React.FC = () => {
                     <div className={`clip-settings-modal ${isSettingsDialogClosing ? 'fade-out' : 'fade-in'}`} style={{
                         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-                        borderRadius: `${settings.borderRadius}px`,
+                        borderRadius: `${effectiveBorderRadius}px`,
                         overflow: 'visible',
                         backdropFilter: 'blur(8px)',
-                        background: 'rgba(0,0,0,0.4)'
+                        background: themeColors.overlayBackground
                     }} onAnimationEnd={() => {
                         if (isSettingsDialogClosing) {
                             setShowSettings(false);
@@ -1341,10 +1712,10 @@ const App: React.FC = () => {
                         }
                     }}>
                         <div className={`clip-settings-page ${isSettingsDialogClosing ? 'fade-out' : 'fade-in'}`} style={{
-                            background: `rgba(30,32,36,${settings.transparency})`,
-                            borderRadius: `${settings.borderRadius}px`,
-                            width: '400px',
-                            height: '600px',
+                            background: themeColors.panelBackground,
+                            borderRadius: `${effectiveBorderRadius}px`,
+                            width: `${settings.windowWidth}px`,
+                            height: `${settings.windowHeight}px`,
                             padding: 0,
                             display: 'flex',
                             flexDirection: 'column',
@@ -1352,7 +1723,7 @@ const App: React.FC = () => {
                             overflow: 'hidden',
                             transition: 'border-radius 0.3s, background 0.3s',
                             // boxShadow: '0 20px 60px rgba(0,0,0,0.3), 0 8px 32px rgba(0,0,0,0.2)',
-                            border: '1px solid rgba(255,255,255,0.08)'
+                            border: `${themeSurface.panelBorderWidth}px solid ${themeColors.border}`
                         }}>
                             <div style={{
                                 padding: '20px 24px',
@@ -1647,6 +2018,54 @@ const App: React.FC = () => {
                                                 </div>
                                             )}
                                         </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h2 style={{ ...sectionHeaderStyle, color: '#e1e1e1', fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Window Size</h2>
+                                    <div style={{ display: 'flex', gap: 12 }}>
+                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Width (px)</span>
+                                            <input
+                                                className="settings-input"
+                                                type="number"
+                                                min={WINDOW_SIZE_LIMITS.width.min}
+                                                max={WINDOW_SIZE_LIMITS.width.max}
+                                                value={settingsDraft?.windowWidth ?? settings.windowWidth}
+                                                onChange={e => setSettingsDraft(s => s ? { ...s, windowWidth: clampWindowWidth(e.target.value) } : null)}
+                                                style={{
+                                                    borderRadius: 8,
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    background: 'rgba(255,255,255,0.05)',
+                                                    color: '#fff',
+                                                    padding: '10px 12px',
+                                                    fontSize: 14,
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </label>
+                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Height (px)</span>
+                                            <input
+                                                className="settings-input"
+                                                type="number"
+                                                min={WINDOW_SIZE_LIMITS.height.min}
+                                                max={WINDOW_SIZE_LIMITS.height.max}
+                                                value={settingsDraft?.windowHeight ?? settings.windowHeight}
+                                                onChange={e => setSettingsDraft(s => s ? { ...s, windowHeight: clampWindowHeight(e.target.value) } : null)}
+                                                style={{
+                                                    borderRadius: 8,
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    background: 'rgba(255,255,255,0.05)',
+                                                    color: '#fff',
+                                                    padding: '10px 12px',
+                                                    fontSize: 14,
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </label>
+                                    </div>
+                                    <div style={{ marginTop: 8, fontSize: 12, color: windowSizeError ? '#ff4136' : '#888' }}>
+                                        {windowSizeError || `Allowed: ${WINDOW_SIZE_LIMITS.width.min}-${WINDOW_SIZE_LIMITS.width.max}px width, ${WINDOW_SIZE_LIMITS.height.min}-${WINDOW_SIZE_LIMITS.height.max}px height.`}
                                     </div>
                                 </div>
                                 {/* Backups section */}
@@ -2224,6 +2643,430 @@ const App: React.FC = () => {
                                     </div>
                                 </div>
 
+                                {/* Theme profiles and custom theme config */}
+                                <div>
+                                    <h2 style={sectionHeaderStyle}>Theme Profiles</h2>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Active profile</span>
+                                            <select
+                                                className="settings-select"
+                                                value={activeThemeProfileKey}
+                                                onChange={async (e) => {
+                                                    const key = e.target.value;
+                                                    setThemeEditorConfig(prev => sanitizeThemeConfig({ ...prev, activeProfile: key }));
+                                                    try {
+                                                        const next = await window.electronAPI?.setActiveThemeProfile?.(key);
+                                                        if (next) {
+                                                            const sanitized = sanitizeThemeConfig(next);
+                                                            setThemeConfig(sanitized);
+                                                            setThemeEditorConfig(sanitized);
+                                                        }
+                                                    } catch (error) {
+                                                        showToast('error', `Failed to switch profile: ${error instanceof Error ? error.message : String(error)}`);
+                                                    }
+                                                }}
+                                                style={{
+                                                    borderRadius: 8,
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    background: 'rgba(255,255,255,0.05)',
+                                                    color: '#fff',
+                                                    padding: '10px 12px',
+                                                    fontSize: 14,
+                                                    outline: 'none'
+                                                }}
+                                            >
+                                                {Object.entries(themeEditorConfig.profiles).map(([key, profile]) => (
+                                                    <option key={key} value={key}>{profile.name || key}</option>
+                                                ))}
+                                            </select>
+                                        </label>
+
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                            <input
+                                                className="settings-input"
+                                                type="text"
+                                                value={newThemeProfileName}
+                                                onChange={(e) => setNewThemeProfileName(e.target.value)}
+                                                placeholder="New profile name"
+                                                style={{
+                                                    flex: 1,
+                                                    borderRadius: 8,
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    background: 'rgba(255,255,255,0.05)',
+                                                    color: '#fff',
+                                                    padding: '10px 12px',
+                                                    fontSize: 14,
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: themeColors.accent,
+                                                    border: `1px solid ${themeColors.accent}`,
+                                                    borderRadius: 8,
+                                                    color: '#111',
+                                                    padding: '10px 12px',
+                                                    cursor: newThemeProfileName.trim() ? 'pointer' : 'not-allowed',
+                                                    fontWeight: 600,
+                                                    opacity: newThemeProfileName.trim() ? 1 : 0.6,
+                                                }}
+                                                disabled={!newThemeProfileName.trim()}
+                                                onClick={async () => {
+                                                    try {
+                                                        const saved = await window.electronAPI?.createThemeProfile?.(newThemeProfileName.trim());
+                                                        if (saved) {
+                                                            const sanitized = sanitizeThemeConfig(saved);
+                                                            setThemeConfig(sanitized);
+                                                            setThemeEditorConfig(sanitized);
+                                                            setNewThemeProfileName('');
+                                                            showToast('success', 'Theme profile created.');
+                                                        }
+                                                    } catch (error) {
+                                                        showToast('error', `Failed to create profile: ${error instanceof Error ? error.message : String(error)}`);
+                                                    }
+                                                }}
+                                            >
+                                                Add Profile
+                                            </button>
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.08)',
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    borderRadius: 8,
+                                                    color: '#fff',
+                                                    padding: '8px 12px',
+                                                    cursor: Object.keys(themeEditorConfig.profiles).length > 1 ? 'pointer' : 'not-allowed',
+                                                    opacity: Object.keys(themeEditorConfig.profiles).length > 1 ? 1 : 0.6,
+                                                    fontWeight: 600,
+                                                }}
+                                                disabled={Object.keys(themeEditorConfig.profiles).length <= 1}
+                                                onClick={async () => {
+                                                    try {
+                                                        const saved = await window.electronAPI?.deleteThemeProfile?.(activeThemeProfileKey);
+                                                        if (saved) {
+                                                            const sanitized = sanitizeThemeConfig(saved);
+                                                            setThemeConfig(sanitized);
+                                                            setThemeEditorConfig(sanitized);
+                                                            showToast('success', 'Theme profile deleted.');
+                                                        }
+                                                    } catch (error) {
+                                                        showToast('error', `Failed to delete profile: ${error instanceof Error ? error.message : String(error)}`);
+                                                    }
+                                                }}
+                                            >
+                                                Delete Profile
+                                            </button>
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.08)',
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    borderRadius: 8,
+                                                    color: '#fff',
+                                                    padding: '8px 12px',
+                                                    cursor: 'pointer',
+                                                    fontWeight: 600,
+                                                }}
+                                                onClick={async () => {
+                                                    try {
+                                                        const next = await window.electronAPI?.reloadThemeConfig?.();
+                                                        if (next) {
+                                                            const sanitized = sanitizeThemeConfig(next);
+                                                            setThemeConfig(sanitized);
+                                                            setThemeEditorConfig(sanitized);
+                                                            showToast('info', 'Theme config reloaded from file/backup.');
+                                                        }
+                                                    } catch (error) {
+                                                        showToast('error', `Failed to reload theme config: ${error instanceof Error ? error.message : String(error)}`);
+                                                    }
+                                                }}
+                                            >
+                                                Reload Theme File
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h2 style={sectionHeaderStyle}>Full Theme</h2>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Profile display name</span>
+                                            <input
+                                                className="settings-input"
+                                                type="text"
+                                                value={editorThemeProfile.name}
+                                                onChange={(e) => updateEditorActiveProfile((profile) => ({ ...profile, name: e.target.value.slice(0, 60) }))}
+                                                style={{
+                                                    borderRadius: 8,
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    background: 'rgba(255,255,255,0.05)',
+                                                    color: '#fff',
+                                                    padding: '10px 12px',
+                                                    fontSize: 14,
+                                                    outline: 'none'
+                                                }}
+                                            />
+                                        </label>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                            {[
+                                                ['accent', 'Accent'],
+                                                ['appBackground', 'App bg'],
+                                                ['panelBackground', 'Panel bg'],
+                                                ['itemBackground', 'Item bg'],
+                                                ['itemHoverBackground', 'Item hover'],
+                                                ['textPrimary', 'Text primary'],
+                                                ['textSecondary', 'Text secondary'],
+                                                ['border', 'Border'],
+                                                ['danger', 'Danger'],
+                                                ['success', 'Success'],
+                                            ].map(([key, label]) => {
+                                                const colorKey = key as keyof ThemeProfile['colors'];
+                                                return (
+                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                        <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
+                                                        <input
+                                                            className="settings-input"
+                                                            type="text"
+                                                            value={editorThemeProfile.colors[colorKey]}
+                                                            onChange={(e) => {
+                                                                const nextValue = e.target.value;
+                                                                updateEditorActiveProfile((profile) => ({
+                                                                    ...profile,
+                                                                    colors: {
+                                                                        ...profile.colors,
+                                                                        [colorKey]: nextValue,
+                                                                    },
+                                                                }));
+                                                            }}
+                                                            style={{
+                                                                borderRadius: 8,
+                                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                                background: 'rgba(255,255,255,0.05)',
+                                                                color: '#fff',
+                                                                padding: '8px 10px',
+                                                                fontSize: 12,
+                                                                outline: 'none'
+                                                            }}
+                                                        />
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                            {[
+                                                ['fontFamily', 'Font family'],
+                                                ['monoFontFamily', 'Mono font'],
+                                            ].map(([key, label]) => {
+                                                const typographyKey = key as keyof ThemeProfile['typography'];
+                                                return (
+                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 160 }}>
+                                                        <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
+                                                        <input
+                                                            className="settings-input"
+                                                            type="text"
+                                                            value={String(editorThemeProfile.typography[typographyKey])}
+                                                            onChange={(e) => {
+                                                                const nextValue = e.target.value;
+                                                                updateEditorActiveProfile((profile) => ({
+                                                                    ...profile,
+                                                                    typography: {
+                                                                        ...profile.typography,
+                                                                        [typographyKey]: nextValue,
+                                                                    },
+                                                                }));
+                                                            }}
+                                                            style={{
+                                                                borderRadius: 8,
+                                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                                background: 'rgba(255,255,255,0.05)',
+                                                                color: '#fff',
+                                                                padding: '8px 10px',
+                                                                fontSize: 12,
+                                                                outline: 'none'
+                                                            }}
+                                                        />
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                                            {[
+                                                ['baseFontSize', 'Base size'],
+                                                ['titleFontSize', 'Title size'],
+                                                ['borderRadius', 'Border radius'],
+                                                ['itemRadius', 'Item radius'],
+                                                ['transparency', 'Transparency'],
+                                                ['backdropBlur', 'Backdrop blur'],
+                                            ].map(([key, label]) => {
+                                                const value =
+                                                    key in editorThemeProfile.surface
+                                                        ? (editorThemeProfile.surface as any)[key]
+                                                        : (editorThemeProfile.typography as any)[key];
+                                                return (
+                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                        <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
+                                                        <input
+                                                            className="settings-input"
+                                                            type="number"
+                                                            value={value}
+                                                            onChange={(e) => {
+                                                                const parsed = Number(e.target.value);
+                                                                updateEditorActiveProfile((profile) => {
+                                                                    if (key in profile.surface) {
+                                                                        return {
+                                                                            ...profile,
+                                                                            surface: {
+                                                                                ...profile.surface,
+                                                                                [key]: parsed,
+                                                                            },
+                                                                        };
+                                                                    }
+
+                                                                    return {
+                                                                        ...profile,
+                                                                        typography: {
+                                                                            ...profile.typography,
+                                                                            [key]: parsed,
+                                                                        },
+                                                                    };
+                                                                });
+                                                            }}
+                                                            style={{
+                                                                borderRadius: 8,
+                                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                                background: 'rgba(255,255,255,0.05)',
+                                                                color: '#fff',
+                                                                padding: '8px 10px',
+                                                                fontSize: 12,
+                                                                outline: 'none'
+                                                            }}
+                                                        />
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                            {[
+                                                ['delete', 'Delete icon'],
+                                                ['pin', 'Pin icon'],
+                                                ['pinFilled', 'Pin filled icon'],
+                                                ['settings', 'Settings icon'],
+                                                ['close', 'Close icon'],
+                                                ['search', 'Search icon'],
+                                                ['confirm', 'Confirm icon'],
+                                                ['clipboard', 'Clipboard icon'],
+                                            ].map(([key, label]) => {
+                                                const iconKey = key as keyof ThemeProfile['icons'];
+                                                return (
+                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                        <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
+                                                        <input
+                                                            className="settings-input"
+                                                            type="text"
+                                                            value={editorThemeProfile.icons[iconKey]}
+                                                            onChange={(e) => {
+                                                                const nextValue = e.target.value;
+                                                                updateEditorActiveProfile((profile) => ({
+                                                                    ...profile,
+                                                                    icons: {
+                                                                        ...profile.icons,
+                                                                        [iconKey]: nextValue,
+                                                                    },
+                                                                }));
+                                                            }}
+                                                            style={{
+                                                                borderRadius: 8,
+                                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                                background: 'rgba(255,255,255,0.05)',
+                                                                color: '#fff',
+                                                                padding: '8px 10px',
+                                                                fontSize: 12,
+                                                                outline: 'none'
+                                                            }}
+                                                        />
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: themeColors.accent,
+                                                    border: `1px solid ${themeColors.accent}`,
+                                                    borderRadius: 8,
+                                                    color: '#111',
+                                                    padding: '9px 12px',
+                                                    cursor: isThemeSaving ? 'wait' : 'pointer',
+                                                    fontWeight: 700,
+                                                    flex: 1,
+                                                    opacity: isThemeSaving ? 0.7 : 1,
+                                                }}
+                                                disabled={isThemeSaving}
+                                                onClick={() => {
+                                                    void saveThemeEditorConfig();
+                                                }}
+                                            >
+                                                {isThemeSaving ? 'Saving...' : 'Save Theme JSON'}
+                                            </button>
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.08)',
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    borderRadius: 8,
+                                                    color: '#fff',
+                                                    padding: '9px 12px',
+                                                    cursor: 'pointer',
+                                                    fontWeight: 600,
+                                                }}
+                                                onClick={async () => {
+                                                    try {
+                                                        const text = await window.electronAPI?.exportThemeConfig?.();
+                                                        if (!text) return;
+                                                        const blob = new Blob([text], { type: 'application/json' });
+                                                        const url = URL.createObjectURL(blob);
+                                                        const a = document.createElement('a');
+                                                        a.href = url;
+                                                        a.download = 'clip-theme.json';
+                                                        a.click();
+                                                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                                                        showToast('success', 'Theme JSON exported.');
+                                                    } catch (error) {
+                                                        showToast('error', `Failed to export theme JSON: ${error instanceof Error ? error.message : String(error)}`);
+                                                    }
+                                                }}
+                                            >
+                                                Export Theme JSON
+                                            </button>
+                                        </div>
+
+                                        <div style={{ fontSize: 12, color: '#8f8f8f', lineHeight: 1.5 }}>
+                                            Theme file path: <code style={{ color: '#cfcfcf' }}>AppData/clip-theme.json</code>
+                                            <br />
+                                            Backup schema path: <code style={{ color: '#cfcfcf' }}>AppData/clip-theme.schema.json</code>
+                                            {themeSchema?.notes?.length ? (
+                                                <>
+                                                    <br />
+                                                    {String(themeSchema.notes[0])}
+                                                </>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                </div>
+
                                 {/* Visual Settings section */}
                                 <div>
                                     <h2 style={sectionHeaderStyle}>Visual Settings</h2>
@@ -2591,7 +3434,12 @@ const App: React.FC = () => {
                                                         onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
                                                         onMouseLeave={e => (e.currentTarget.style.opacity = item.pinned ? '1' : '0.6')}
                                                     >
-                                                        <PinIcon pinned={!!item.pinned} />
+                                                        <IconGlyph
+                                                            value={item.pinned ? themeIcons.pinFilled : themeIcons.pin}
+                                                            fallback={item.pinned ? '📍' : '📌'}
+                                                            label={item.pinned ? 'Pinned' : 'Pin'}
+                                                            size={17}
+                                                        />
                                                     </button>
                                                 )}
                                                 <button
@@ -2620,7 +3468,7 @@ const App: React.FC = () => {
                                                     onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
                                                     onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
                                                 >
-                                                    <DustbinIcon />
+                                                    <IconGlyph value={themeIcons.delete} fallback="🗑️" label="Delete" size={17} />
                                                 </button>
                                             </div>
                                         </div>
@@ -2770,13 +3618,13 @@ const App: React.FC = () => {
                     background: #ccc !important;
                 }
                 .clip-root {
-                    background: rgba(30,32,36,${settings.transparency});
-                    border-radius: ${settings.borderRadius}px;
+                    background: ${themeColors.appBackground};
+                    border-radius: ${effectiveBorderRadius}px;
                     padding: 3%;
-                    height: 600px; /* Fixed height instead of min-height */
-                    width: 400px; /* Match main window width */
-                    color: #fff;
-                    font-family: 'Segoe UI', Arial, sans-serif;
+                    height: ${settings.windowHeight}px;
+                    width: ${settings.windowWidth}px;
+                    color: ${themeColors.textPrimary};
+                    font-family: ${themeTypography.fontFamily};
                     transition: box-shadow 0.2s, border-radius 0.3s, background 0.3s;
                     position: relative;
                     overflow: hidden;
@@ -2784,8 +3632,8 @@ const App: React.FC = () => {
                     flex-direction: column;
                     box-sizing: border-box; /* Include padding in dimensions */
                     padding-bottom: 7px;
-                    backdrop-filter: blur(10px);
-                    -webkit-backdrop-filter: blur(10px);
+                    backdrop-filter: blur(${themeSurface.backdropBlur}px);
+                    -webkit-backdrop-filter: blur(${themeSurface.backdropBlur}px);
                 }
 
                 /* Dark mode option styling */
@@ -3055,6 +3903,7 @@ const App: React.FC = () => {
                 /* Other elements */
                 .clip-item {
                     will-change: transform, opacity;
+                    border-radius: ${themeSurface.itemRadius}px !important;
                 }
                 .clip-item:active {
                     transform: scale(0.97);
@@ -3106,14 +3955,14 @@ const App: React.FC = () => {
                     opacity: 1;
                 }
                 .clip-list::-webkit-scrollbar-thumb {
-                    background: #444;
+                    background: ${themeColors.scrollbarThumb};
                     border-radius: 6px;
-                    border: 2px solid #23252a;
+                    border: 2px solid ${themeColors.scrollbarTrack};
                     min-height: 20px !important;
                     transition: background 0.2s;
                 }
                 .clip-list::-webkit-scrollbar-thumb:hover {
-                    background: #2ecc40;
+                    background: ${themeColors.accent};
                 }
 
                 /* Backup list scrollbar styling */

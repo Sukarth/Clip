@@ -4,6 +4,13 @@ import * as path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { execFile, spawn, ChildProcess, exec } from 'child_process';
+import {
+    WINDOW_SIZE_LIMITS,
+    createDefaultThemeConfig,
+    getThemeSchema,
+    normalizeThemeProfileKey,
+    sanitizeThemeConfig,
+} from './theme-config';
 
 // --- Robust error logging for debugging startup crashes ---
 const logPath = path.join(
@@ -41,7 +48,10 @@ let windowHideBehavior: 'hide' | 'tray' = 'hide';
 let showInTaskbar: boolean = false;
 let showNotifications: boolean = false;
 let maxHistoryItems: number = MAX_HISTORY;
+let windowWidth = WINDOW_SIZE_LIMITS.width.default;
+let windowHeight = WINDOW_SIZE_LIMITS.height.default;
 let cachedAppDataPath: string | null = null;
+let activeThemeConfig = createDefaultThemeConfig();
 
 // --- PERFORMANCE OPTIMIZATIONS: Data Caching ---
 let cachedClipboardHistory: any[] = [];
@@ -471,6 +481,129 @@ function getDatabasePath() {
     return path.join(dataPath, 'clip.db');
 }
 
+function clampInt(value: unknown, min: number, max: number, fallback: number) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, Math.floor(parsed)));
+}
+
+function getThemeConfigPath() {
+    return path.join(getAppDataPath(), 'clip-theme.json');
+}
+
+function getThemeSchemaPath() {
+    return path.join(getAppDataPath(), 'clip-theme.schema.json');
+}
+
+function applyWindowSize(width: unknown, height: unknown) {
+    windowWidth = clampInt(width, WINDOW_SIZE_LIMITS.width.min, WINDOW_SIZE_LIMITS.width.max, WINDOW_SIZE_LIMITS.width.default);
+    windowHeight = clampInt(height, WINDOW_SIZE_LIMITS.height.min, WINDOW_SIZE_LIMITS.height.max, WINDOW_SIZE_LIMITS.height.default);
+
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    const currentBounds = mainWindow.getBounds();
+    const target = {
+        x: currentBounds.x,
+        y: currentBounds.y,
+        width: windowWidth,
+        height: windowHeight,
+    };
+    const display = screen.getDisplayMatching(target);
+    const workArea = display.workArea;
+
+    const boundedWidth = Math.min(windowWidth, workArea.width);
+    const boundedHeight = Math.min(windowHeight, workArea.height);
+    const maxX = Math.max(workArea.x, workArea.x + workArea.width - boundedWidth);
+    const maxY = Math.max(workArea.y, workArea.y + workArea.height - boundedHeight);
+    const clampedX = Math.min(Math.max(target.x, workArea.x), maxX);
+    const clampedY = Math.min(Math.max(target.y, workArea.y), maxY);
+
+    mainWindow.setBounds({ x: clampedX, y: clampedY, width: boundedWidth, height: boundedHeight }, false);
+}
+
+function writeThemeSchemaFile() {
+    try {
+        fs.writeFileSync(getThemeSchemaPath(), JSON.stringify(getThemeSchema(), null, 2), 'utf8');
+    } catch (error) {
+        console.error('[main] Failed to write theme schema file:', error);
+    }
+}
+
+function readThemeConfigFromFile() {
+    const themePath = getThemeConfigPath();
+    if (!fs.existsSync(themePath)) return null;
+
+    try {
+        const parsed = JSON.parse(fs.readFileSync(themePath, 'utf8'));
+        return sanitizeThemeConfig(parsed);
+    } catch (error) {
+        console.error('[main] Failed to parse theme file; trying DB restore.', error);
+        try {
+            const backupName = `clip-theme.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+            fs.renameSync(themePath, path.join(getAppDataPath(), backupName));
+        } catch (renameError) {
+            console.error('[main] Failed to quarantine corrupt theme file:', renameError);
+        }
+        return null;
+    }
+}
+
+function readThemeConfigFromDb() {
+    try {
+        const row = db
+            .prepare('SELECT value FROM app_state WHERE key = ? LIMIT 1')
+            .get('theme_config') as { value?: string } | undefined;
+
+        if (!row?.value) return null;
+        const parsed = JSON.parse(row.value);
+        return sanitizeThemeConfig(parsed);
+    } catch (error) {
+        console.error('[main] Failed to parse theme config from DB backup:', error);
+        return null;
+    }
+}
+
+function persistThemeConfig(config: unknown) {
+    const sanitized = sanitizeThemeConfig(config);
+    activeThemeConfig = sanitized;
+
+    try {
+        fs.writeFileSync(getThemeConfigPath(), JSON.stringify(sanitized, null, 2), 'utf8');
+    } catch (error) {
+        console.error('[main] Failed to persist theme config to file:', error);
+    }
+
+    try {
+        db.prepare(
+            `INSERT INTO app_state (key, value, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(key)
+             DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+        ).run('theme_config', JSON.stringify(sanitized), Date.now());
+    } catch (error) {
+        console.error('[main] Failed to persist theme config to DB backup:', error);
+    }
+
+    return sanitized;
+}
+
+function initializeThemeConfig() {
+    writeThemeSchemaFile();
+
+    const fromFile = readThemeConfigFromFile();
+    if (fromFile) {
+        return persistThemeConfig(fromFile);
+    }
+
+    const fromDb = readThemeConfigFromDb();
+    if (fromDb) {
+        console.log('[main] Restored theme file from DB backup.');
+        return persistThemeConfig(fromDb);
+    }
+
+    return persistThemeConfig(createDefaultThemeConfig());
+}
+
 // Load settings from local storage (for startup behavior)
 function loadStartupSettings() {
     try {
@@ -485,6 +618,8 @@ function loadStartupSettings() {
             if (Number.isFinite(parsedMaxItems)) {
                 maxHistoryItems = Math.min(500, Math.max(10, Math.floor(parsedMaxItems)));
             }
+
+            applyWindowSize(settings.windowWidth, settings.windowHeight);
         }
     } catch (error) {
         console.log('[main] Could not load startup settings, using defaults');
@@ -511,6 +646,13 @@ function initDatabase() {
     if (!hasPinned) {
         db.exec('ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0');
     }
+
+    db.exec(`CREATE TABLE IF NOT EXISTS app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+    )`);
+
 }
 
 // Insert clipboard item into DB
@@ -673,9 +815,11 @@ function removeTray() {
 
 function createMainWindow() {
     const windowOptions = {
-        width: 400,
-        height: 600,
+        width: windowWidth,
+        height: windowHeight,
         resizable: false,
+        minWidth: WINDOW_SIZE_LIMITS.width.min,
+        minHeight: WINDOW_SIZE_LIMITS.height.min,
         transparent: true,
         roundedCorners: false,
         show: false,
@@ -767,8 +911,8 @@ function createMainWindow() {
 }
 
 function ensureWindowBoundsVisible(win: BrowserWindow) {
-    const desiredWidth = 400;
-    const desiredHeight = 600;
+    const desiredWidth = windowWidth;
+    const desiredHeight = windowHeight;
     const current = win.getBounds();
     const target = {
         x: current.x,
@@ -780,13 +924,16 @@ function ensureWindowBoundsVisible(win: BrowserWindow) {
     const display = screen.getDisplayMatching(target);
     const area = display.workArea;
 
-    const maxX = Math.max(area.x, area.x + area.width - desiredWidth);
-    const maxY = Math.max(area.y, area.y + area.height - desiredHeight);
+    const boundedWidth = Math.min(desiredWidth, area.width);
+    const boundedHeight = Math.min(desiredHeight, area.height);
+
+    const maxX = Math.max(area.x, area.x + area.width - boundedWidth);
+    const maxY = Math.max(area.y, area.y + area.height - boundedHeight);
 
     const clampedX = Math.min(Math.max(target.x, area.x), maxX);
     const clampedY = Math.min(Math.max(target.y, area.y), maxY);
 
-    win.setBounds({ x: clampedX, y: clampedY, width: desiredWidth, height: desiredHeight }, false);
+    win.setBounds({ x: clampedX, y: clampedY, width: boundedWidth, height: boundedHeight }, false);
 }
 
 function pollClipboard() {
@@ -999,6 +1146,12 @@ function restoreBackup(backupFile: string) {
         db.exec('ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0');
     }
 
+    db.exec(`CREATE TABLE IF NOT EXISTS app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+    )`);
+
     // Verify the restore worked by counting records
     const count = db.prepare('SELECT COUNT(*) as count FROM history').get() as { count: number };
     console.log(`[main] Restored database contains ${count.count} items`);
@@ -1105,6 +1258,12 @@ ipcMain.handle('import-db', async (event, buffer) => {
         if (!hasPinned) {
             db.exec('ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0');
         }
+
+        db.exec(`CREATE TABLE IF NOT EXISTS app_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )`);
 
         // Small delay to ensure database operations are complete
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -1262,6 +1421,7 @@ app.whenReady().then(() => {
     loadStartupSettings();
 
     initDatabase();
+    initializeThemeConfig();
     createMainWindow();
 
     // Handle startup behavior based on command line arguments and settings
@@ -1355,6 +1515,135 @@ app.whenReady().then(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.setSkipTaskbar(!showInTaskbar);
         }
+    });
+
+    ipcMain.on('drag-window', (_event, { cursorX, cursorY, offsetX, offsetY }) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        if (!Number.isFinite(cursorX) || !Number.isFinite(cursorY)) return;
+
+        const bounds = mainWindow.getBounds();
+        const safeOffsetX = Number.isFinite(offsetX) ? Number(offsetX) : Math.floor(bounds.width / 2);
+        const safeOffsetY = Number.isFinite(offsetY) ? Number(offsetY) : 18;
+        const target = {
+            x: Math.round(Number(cursorX) - safeOffsetX),
+            y: Math.round(Number(cursorY) - safeOffsetY),
+            width: bounds.width,
+            height: bounds.height,
+        };
+        const display = screen.getDisplayMatching(target);
+        const area = display.workArea;
+        const maxX = Math.max(area.x, area.x + area.width - target.width);
+        const maxY = Math.max(area.y, area.y + area.height - target.height);
+        const clampedX = Math.min(Math.max(target.x, area.x), maxX);
+        const clampedY = Math.min(Math.max(target.y, area.y), maxY);
+        mainWindow.setBounds({ ...target, x: clampedX, y: clampedY }, false);
+    });
+
+    ipcMain.handle('get-theme-config', () => {
+        return activeThemeConfig;
+    });
+
+    ipcMain.handle('get-theme-schema', () => {
+        return getThemeSchema();
+    });
+
+    ipcMain.handle('save-theme-config', (_event, config) => {
+        const next = persistThemeConfig(config);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('theme-config-updated', next);
+        }
+        return next;
+    });
+
+    ipcMain.handle('reload-theme-config', () => {
+        const fromFile = readThemeConfigFromFile();
+        const restored = fromFile || readThemeConfigFromDb() || createDefaultThemeConfig();
+        const next = persistThemeConfig(restored);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('theme-config-updated', next);
+        }
+        return next;
+    });
+
+    ipcMain.handle('export-theme-config', () => {
+        return JSON.stringify(activeThemeConfig, null, 2);
+    });
+
+    ipcMain.handle('create-theme-profile', (_event, profileName) => {
+        const cleanName = String(profileName || '').trim();
+        if (!cleanName) {
+            throw new Error('Profile name is required');
+        }
+
+        const keyBase = normalizeThemeProfileKey(cleanName);
+        let key = keyBase;
+        let index = 2;
+        while (activeThemeConfig.profiles[key]) {
+            key = `${keyBase}-${index}`;
+            index += 1;
+        }
+
+        const source = activeThemeConfig.profiles[activeThemeConfig.activeProfile] || createDefaultThemeConfig().profiles.default;
+        const next = {
+            ...activeThemeConfig,
+            activeProfile: key,
+            profiles: {
+                ...activeThemeConfig.profiles,
+                [key]: {
+                    ...JSON.parse(JSON.stringify(source)),
+                    name: cleanName,
+                },
+            },
+        };
+
+        const saved = persistThemeConfig(next);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('theme-config-updated', saved);
+        }
+        return saved;
+    });
+
+    ipcMain.handle('delete-theme-profile', (_event, profileKey) => {
+        const key = normalizeThemeProfileKey(String(profileKey || ''));
+        const existingKeys = Object.keys(activeThemeConfig.profiles);
+        if (!activeThemeConfig.profiles[key]) {
+            return activeThemeConfig;
+        }
+        if (existingKeys.length <= 1) {
+            throw new Error('At least one profile must remain');
+        }
+
+        const { [key]: _removed, ...rest } = activeThemeConfig.profiles;
+        const fallbackKey = rest[activeThemeConfig.activeProfile] ? activeThemeConfig.activeProfile : Object.keys(rest)[0];
+        const next = {
+            ...activeThemeConfig,
+            activeProfile: fallbackKey,
+            profiles: rest,
+        };
+
+        const saved = persistThemeConfig(next);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('theme-config-updated', saved);
+        }
+        return saved;
+    });
+
+    ipcMain.handle('set-active-theme-profile', (_event, profileKey) => {
+        const key = normalizeThemeProfileKey(String(profileKey || ''));
+        if (!activeThemeConfig.profiles[key]) {
+            throw new Error('Profile not found');
+        }
+
+        const next = {
+            ...activeThemeConfig,
+            activeProfile: key,
+        };
+
+        const saved = persistThemeConfig(next);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('theme-config-updated', saved);
+        }
+        return saved;
     });
     ipcMain.on('set-notifications', (_event, enabled) => {
         showNotifications = enabled;
@@ -1547,6 +1836,7 @@ app.whenReady().then(() => {
                 maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(settings.maxItems))));
                 invalidateHistoryCache();
             }
+            applyWindowSize(settings?.windowWidth, settings?.windowHeight);
             const settingsPath = path.join(getAppDataPath(), 'clip-settings.json');
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
         } catch (error) {
