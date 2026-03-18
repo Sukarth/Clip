@@ -251,64 +251,164 @@ export function sanitizeThemeConfig(input: unknown): ThemeConfig {
     };
 }
 
-export function getThemeSchema() {
+function createThemeColorSchema(defaultValue: string, description: string) {
     return {
-        version: THEME_CONFIG_VERSION,
-        notes: [
-            'Edit clip-theme.json while the app is closed, or use Reload Theme in settings.',
-            'Supported icon formats: emoji/text, data URLs, file paths, http/https URLs, or raw <svg>...</svg> text.',
-            'If clip-theme.json is missing/corrupt, Clip restores from the DB backup automatically.',
-        ],
-        windowSizeLimits: WINDOW_SIZE_LIMITS,
-        requiredTopLevelFields: ['version', 'activeProfile', 'profiles'],
-        profileStructure: {
-            name: 'string (max 60 chars)',
-            colors: {
-                appBackground: 'CSS color',
-                panelBackground: 'CSS color',
-                overlayBackground: 'CSS color',
-                itemBackground: 'CSS color',
-                itemHoverBackground: 'CSS color',
-                inputBackground: 'CSS color',
-                inputBorder: 'CSS color',
-                border: 'CSS color',
-                textPrimary: 'CSS color',
-                textSecondary: 'CSS color',
-                textMuted: 'CSS color',
-                accent: 'CSS color',
-                danger: 'CSS color',
-                warning: 'CSS color',
-                success: 'CSS color',
-                scrollbarThumb: 'CSS color',
-                scrollbarTrack: 'CSS color',
+        type: 'string',
+        description: `${description} CSS color value. Supported formats include hex, rgb(a), hsl(a), named colors, CSS variables, and keywords like transparent/currentColor.`,
+        default: defaultValue,
+    };
+}
+
+function createThemeNumberSchema(defaultValue: number, minimum: number, maximum: number, description: string) {
+    return {
+        type: 'number',
+        minimum,
+        maximum,
+        description,
+        default: defaultValue,
+    };
+}
+
+function createThemeStringSchema(defaultValue: string, description: string, maxLength = 200) {
+    return {
+        type: 'string',
+        maxLength,
+        description,
+        default: defaultValue,
+    };
+}
+
+export function getThemeSchema() {
+    const colorDescriptions: Record<keyof ThemeProfile['colors'], string> = {
+        appBackground: 'Main app background.',
+        panelBackground: 'Settings/theme panel background.',
+        overlayBackground: 'Modal overlay background.',
+        itemBackground: 'Clipboard item background.',
+        itemHoverBackground: 'Clipboard item hover background.',
+        inputBackground: 'Input field background.',
+        inputBorder: 'Input field border color.',
+        border: 'General border color.',
+        textPrimary: 'Primary text color.',
+        textSecondary: 'Secondary text color.',
+        textMuted: 'Muted text color.',
+        accent: 'Accent color used for highlights and buttons.',
+        danger: 'Danger/error color.',
+        warning: 'Warning color.',
+        success: 'Success color.',
+        scrollbarThumb: 'Scrollbar thumb color.',
+        scrollbarTrack: 'Scrollbar track color.',
+    };
+
+    const colorProperties = Object.fromEntries(
+        Object.entries(DEFAULT_THEME_PROFILE.colors).map(([key, defaultValue]) => [
+            key,
+            createThemeColorSchema(defaultValue, colorDescriptions[key as keyof ThemeProfile['colors']]),
+        ])
+    );
+
+    const typographyProperties = {
+        fontFamily: createThemeStringSchema(DEFAULT_THEME_PROFILE.typography.fontFamily, 'Primary UI font family.', 200),
+        monoFontFamily: createThemeStringSchema(DEFAULT_THEME_PROFILE.typography.monoFontFamily, 'Monospace font family for code or fixed-width text.', 200),
+        baseFontSize: createThemeNumberSchema(DEFAULT_THEME_PROFILE.typography.baseFontSize, 11, 24, 'Base UI font size.'),
+        titleFontSize: createThemeNumberSchema(DEFAULT_THEME_PROFILE.typography.titleFontSize, 13, 40, 'Title font size.'),
+        fontWeightNormal: createThemeNumberSchema(DEFAULT_THEME_PROFILE.typography.fontWeightNormal, 300, 700, 'Normal font weight.'),
+        fontWeightMedium: createThemeNumberSchema(DEFAULT_THEME_PROFILE.typography.fontWeightMedium, 300, 800, 'Medium font weight.'),
+        fontWeightBold: createThemeNumberSchema(DEFAULT_THEME_PROFILE.typography.fontWeightBold, 400, 900, 'Bold font weight.'),
+    };
+
+    const surfaceProperties = {
+        borderRadius: createThemeNumberSchema(DEFAULT_THEME_PROFILE.surface.borderRadius, 0, 32, 'Window border radius.'),
+        itemRadius: createThemeNumberSchema(DEFAULT_THEME_PROFILE.surface.itemRadius, 0, 24, 'Clipboard item corner radius.'),
+        transparency: createThemeNumberSchema(DEFAULT_THEME_PROFILE.surface.transparency, 0.35, 1, 'Surface transparency. 1 is fully opaque.'),
+        backdropBlur: createThemeNumberSchema(DEFAULT_THEME_PROFILE.surface.backdropBlur, 0, 30, 'Backdrop blur amount in pixels.'),
+        panelBorderWidth: createThemeNumberSchema(DEFAULT_THEME_PROFILE.surface.panelBorderWidth, 0, 4, 'Panel border width in pixels.'),
+    };
+
+    const iconDescriptions: Record<keyof ThemeProfile['icons'], string> = {
+        delete: 'Delete icon value.',
+        pin: 'Pin icon value.',
+        pinFilled: 'Filled pin icon value.',
+        settings: 'Settings icon value.',
+        close: 'Close icon value.',
+        search: 'Search icon value.',
+        confirm: 'Confirm icon value.',
+        clipboard: 'Clipboard icon value.',
+    };
+
+    const iconProperties = Object.fromEntries(
+        Object.entries(DEFAULT_THEME_PROFILE.icons).map(([key, defaultValue]) => [
+            key,
+            createThemeStringSchema(defaultValue, iconDescriptions[key as keyof ThemeProfile['icons']], 12000),
+        ])
+    );
+
+    return {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        $id: 'https://clip.local/schemas/clip-theme.schema.json',
+        title: 'Clip theme config',
+        description: 'Theme profile configuration for Clip.',
+        type: 'object',
+        additionalProperties: false,
+        required: ['version', 'activeProfile', 'profiles'],
+        properties: {
+            $schema: {
+                type: 'string',
+                description: 'Schema location used by IDEs for IntelliSense.',
+                default: 'https://json-schema.org/draft/2020-12/schema',
             },
-            typography: {
-                fontFamily: 'string',
-                monoFontFamily: 'string',
-                baseFontSize: '11..24',
-                titleFontSize: '13..40',
-                fontWeightNormal: '300..700',
-                fontWeightMedium: '300..800',
-                fontWeightBold: '400..900',
+            version: {
+                type: 'integer',
+                const: THEME_CONFIG_VERSION,
+                description: 'Theme file version.',
             },
-            surface: {
-                borderRadius: '0..32',
-                itemRadius: '0..24',
-                transparency: '0.35..1',
-                backdropBlur: '0..30',
-                panelBorderWidth: '0..4',
+            activeProfile: {
+                type: 'string',
+                description: 'The currently active theme profile key.',
+                default: DEFAULT_THEME_PROFILE_KEY,
             },
-            icons: {
-                delete: 'string',
-                pin: 'string',
-                pinFilled: 'string',
-                settings: 'string',
-                close: 'string',
-                search: 'string',
-                confirm: 'string',
-                clipboard: 'string',
+            profiles: {
+                type: 'object',
+                description: 'Map of profile keys to theme profiles.',
+                minProperties: 1,
+                additionalProperties: {
+                    $ref: '#/$defs/themeProfile',
+                },
             },
         },
-        defaults: createDefaultThemeConfig(),
+        $defs: {
+            themeProfile: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['name', 'colors', 'typography', 'surface', 'icons'],
+                properties: {
+                    name: createThemeStringSchema(DEFAULT_THEME_PROFILE.name, 'Display name for the profile.', 60),
+                    colors: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: Object.keys(DEFAULT_THEME_PROFILE.colors),
+                        properties: colorProperties,
+                    },
+                    typography: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: Object.keys(DEFAULT_THEME_PROFILE.typography),
+                        properties: typographyProperties,
+                    },
+                    surface: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: Object.keys(DEFAULT_THEME_PROFILE.surface),
+                        properties: surfaceProperties,
+                    },
+                    icons: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: Object.keys(DEFAULT_THEME_PROFILE.icons),
+                        properties: iconProperties,
+                    },
+                },
+            },
+        },
+        examples: [createDefaultThemeConfig()],
     };
 }

@@ -1,8 +1,9 @@
 // @ts-nocheck
-import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification, screen } from 'electron';
+import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification, screen, shell } from 'electron';
 import * as path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { pathToFileURL } from 'url';
 import { execFile, spawn, ChildProcess, exec } from 'child_process';
 import {
     WINDOW_SIZE_LIMITS,
@@ -52,6 +53,7 @@ let windowWidth = WINDOW_SIZE_LIMITS.width.default;
 let windowHeight = WINDOW_SIZE_LIMITS.height.default;
 let cachedAppDataPath: string | null = null;
 let activeThemeConfig = createDefaultThemeConfig();
+let suppressBlurHideUntil = 0;
 
 // --- PERFORMANCE OPTIMIZATIONS: Data Caching ---
 let cachedClipboardHistory: any[] = [];
@@ -167,9 +169,10 @@ ${ahkHotkey}:: {
     ; Always route through WM_CLIP_SHOW so the app runs its normal show logic.
     ; (WinActivate alone can focus a transparent window without making the UI visible.)
     DetectHiddenWindows(true)
+    target := WinExist("A")
     hwnd := WinExist("Clip - Clipboard Manager")
     if (hwnd) {
-        PostMessage(0x8001, 0, 0, , "ahk_id " . hwnd)
+        PostMessage(0x8001, target, 0, , "ahk_id " . hwnd)
         Sleep(30)
         WinActivate("ahk_id " . hwnd)
         WinWaitActive("ahk_id " . hwnd, , 2)
@@ -495,6 +498,237 @@ function getThemeSchemaPath() {
     return path.join(getAppDataPath(), 'clip-theme.schema.json');
 }
 
+function getSettingsPath() {
+    return path.join(getAppDataPath(), 'clip-settings.json');
+}
+
+function getSettingsSchemaPath() {
+    return path.join(getAppDataPath(), 'clip-settings.schema.json');
+}
+
+function getThemeSchemaUri() {
+    return pathToFileURL(getThemeSchemaPath()).href;
+}
+
+function getSettingsSchemaUri() {
+    return pathToFileURL(getSettingsSchemaPath()).href;
+}
+
+function serializeThemeConfigForFile(config: unknown) {
+    return {
+        $schema: getThemeSchemaUri(),
+        ...sanitizeThemeConfig(config),
+    };
+}
+
+function createDefaultSettingsDocument() {
+    return {
+        maxItems: MAX_HISTORY,
+        windowHideBehavior: 'hide',
+        showInTaskbar: false,
+        enableBackups: false,
+        backupInterval: 900000,
+        maxBackups: 5,
+        borderRadius: 18,
+        transparency: 0.95,
+        accentColor: '#4682b4',
+        theme: 'dark',
+        showNotifications: false,
+        startWithSystem: true,
+        storeImagesInClipboard: true,
+        pinFavoriteItems: true,
+        deleteConfirm: true,
+        globalShortcut: 'Control+Shift+V',
+        windowWidth: WINDOW_SIZE_LIMITS.width.default,
+        windowHeight: WINDOW_SIZE_LIMITS.height.default,
+    };
+}
+
+function getSettingsSchema() {
+    return {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        $id: 'https://clip.local/schemas/clip-settings.schema.json',
+        title: 'Clip settings',
+        description: 'General application settings for Clip.',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+            'maxItems',
+            'windowHideBehavior',
+            'showInTaskbar',
+            'enableBackups',
+            'backupInterval',
+            'maxBackups',
+            'borderRadius',
+            'transparency',
+            'accentColor',
+            'theme',
+            'showNotifications',
+            'startWithSystem',
+            'storeImagesInClipboard',
+            'pinFavoriteItems',
+            'deleteConfirm',
+            'globalShortcut',
+            'windowWidth',
+            'windowHeight',
+        ],
+        properties: {
+            $schema: {
+                type: 'string',
+                description: 'Schema location used by IDEs for IntelliSense.',
+            },
+            maxItems: {
+                type: 'integer',
+                minimum: 10,
+                maximum: 500,
+                description: 'Maximum number of clipboard history items to keep.',
+                default: MAX_HISTORY,
+            },
+            windowHideBehavior: {
+                type: 'string',
+                enum: ['hide', 'tray'],
+                description: 'How the window hides when closed.',
+                default: 'hide',
+            },
+            showInTaskbar: {
+                type: 'boolean',
+                description: 'Keep the app visible in the taskbar.',
+                default: false,
+            },
+            enableBackups: {
+                type: 'boolean',
+                description: 'Enable periodic backups of app data.',
+                default: false,
+            },
+            backupInterval: {
+                type: 'integer',
+                minimum: 60000,
+                maximum: 86400000,
+                description: 'Backup interval in milliseconds.',
+                default: 900000,
+            },
+            maxBackups: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 100,
+                description: 'Maximum number of backup files to keep.',
+                default: 5,
+            },
+            borderRadius: {
+                type: 'integer',
+                minimum: 0,
+                maximum: 40,
+                description: 'Window corner radius.',
+                default: 18,
+            },
+            transparency: {
+                type: 'number',
+                minimum: 0.35,
+                maximum: 1,
+                description: 'Window transparency value. 1 is fully opaque.',
+                default: 0.95,
+            },
+            accentColor: {
+                type: 'string',
+                description: 'Accent color used by the app UI.',
+                default: '#4682b4',
+            },
+            theme: {
+                type: 'string',
+                enum: ['light', 'dark', 'system'],
+                description: 'UI theme mode.',
+                default: 'dark',
+            },
+            showNotifications: {
+                type: 'boolean',
+                description: 'Show desktop notifications.',
+                default: false,
+            },
+            startWithSystem: {
+                type: 'boolean',
+                description: 'Launch Clip when Windows starts.',
+                default: true,
+            },
+            storeImagesInClipboard: {
+                type: 'boolean',
+                description: 'Store images from the clipboard.',
+                default: true,
+            },
+            pinFavoriteItems: {
+                type: 'boolean',
+                description: 'Allow pinning favorite clipboard items.',
+                default: true,
+            },
+            deleteConfirm: {
+                type: 'boolean',
+                description: 'Ask before deleting clipboard items.',
+                default: true,
+            },
+            globalShortcut: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 64,
+                description: 'Global shortcut used to open Clip.',
+                default: 'Control+Shift+V',
+            },
+            windowWidth: {
+                type: 'integer',
+                minimum: WINDOW_SIZE_LIMITS.width.min,
+                maximum: WINDOW_SIZE_LIMITS.width.max,
+                description: 'Saved window width.',
+                default: WINDOW_SIZE_LIMITS.width.default,
+            },
+            windowHeight: {
+                type: 'integer',
+                minimum: WINDOW_SIZE_LIMITS.height.min,
+                maximum: WINDOW_SIZE_LIMITS.height.max,
+                description: 'Saved window height.',
+                default: WINDOW_SIZE_LIMITS.height.default,
+            },
+        },
+    };
+}
+
+function writeSettingsSchemaFile() {
+    try {
+        fs.writeFileSync(getSettingsSchemaPath(), JSON.stringify(getSettingsSchema(), null, 2), 'utf8');
+    } catch (error) {
+        console.error('[main] Failed to write settings schema file:', error);
+    }
+}
+
+function readSettingsFromFile() {
+    const settingsPath = getSettingsPath();
+    if (!fs.existsSync(settingsPath)) return null;
+
+    try {
+        return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    } catch (error) {
+        console.error('[main] Failed to parse settings file:', error);
+        return null;
+    }
+}
+
+function applySettingsRuntime(settings: any) {
+    if (!settings || typeof settings !== 'object') return;
+
+    windowHideBehavior = settings.windowHideBehavior === 'tray' ? 'tray' : 'hide';
+    showInTaskbar = !!settings.showInTaskbar;
+    showNotifications = !!settings.showNotifications;
+    backendShortcut = sanitizeShortcut(settings.globalShortcut || SAFE_SHORTCUT_FALLBACK);
+
+    const parsedMaxItems = Number(settings.maxItems);
+    if (Number.isFinite(parsedMaxItems)) {
+        maxHistoryItems = Math.min(500, Math.max(10, Math.floor(parsedMaxItems)));
+    }
+
+    applyWindowSize(settings.windowWidth, settings.windowHeight);
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setSkipTaskbar(!showInTaskbar);
+    }
+}
+
 function applyWindowSize(width: unknown, height: unknown) {
     windowWidth = clampInt(width, WINDOW_SIZE_LIMITS.width.min, WINDOW_SIZE_LIMITS.width.max, WINDOW_SIZE_LIMITS.width.default);
     windowHeight = clampInt(height, WINDOW_SIZE_LIMITS.height.min, WINDOW_SIZE_LIMITS.height.max, WINDOW_SIZE_LIMITS.height.default);
@@ -568,7 +802,7 @@ function persistThemeConfig(config: unknown) {
     activeThemeConfig = sanitized;
 
     try {
-        fs.writeFileSync(getThemeConfigPath(), JSON.stringify(sanitized, null, 2), 'utf8');
+        fs.writeFileSync(getThemeConfigPath(), JSON.stringify(serializeThemeConfigForFile(sanitized), null, 2), 'utf8');
     } catch (error) {
         console.error('[main] Failed to persist theme config to file:', error);
     }
@@ -604,23 +838,135 @@ function initializeThemeConfig() {
     return persistThemeConfig(createDefaultThemeConfig());
 }
 
+function suppressBlurHide(ms: number) {
+    suppressBlurHideUntil = Math.max(suppressBlurHideUntil, Date.now() + ms);
+}
+
+function isBlurHideSuppressed() {
+    return Date.now() < suppressBlurHideUntil;
+}
+
+function hideMainWindowImmediate() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    suppressBlurHide(300);
+
+    if (windowHideBehavior === 'hide') {
+        mainWindow.setSkipTaskbar(true);
+        mainWindow.hide();
+        removeTray();
+    } else if (windowHideBehavior === 'tray') {
+        mainWindow.hide();
+        mainWindow.setSkipTaskbar(true);
+        ensureTray(mainWindow);
+    }
+}
+
+function parseHwndParam(value: any): number | null {
+    try {
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+            return Math.trunc(value);
+        }
+        if (typeof value === 'bigint' && value > 0n) {
+            const n = Number(value);
+            return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+        }
+        if (Buffer.isBuffer(value)) {
+            if (value.length >= 8) {
+                const n = Number(value.readBigUInt64LE(0));
+                return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+            }
+            if (value.length >= 4) {
+                const n = value.readUInt32LE(0);
+                return n > 0 ? n : null;
+            }
+        }
+        if (value && typeof value === 'object') {
+            const asString = String(value);
+            const parsed = Number(asString);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                return Math.trunc(parsed);
+            }
+        }
+    } catch {
+    }
+    return null;
+}
+
+function getMainWindowHwnd(): number | null {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    try {
+        const hwndBuffer = mainWindow.getNativeWindowHandle();
+        return parseHwndParam(hwndBuffer);
+    } catch {
+        return null;
+    }
+}
+
+function getPreferredPasteTargetHwnd() {
+    const mainHwnd = getMainWindowHwnd();
+    if (lastForegroundHwnd && lastForegroundHwnd > 0) {
+        if (!mainHwnd || lastForegroundHwnd !== mainHwnd) {
+            return lastForegroundHwnd;
+        }
+    }
+    return null;
+}
+
+function sendPasteWithRetries(preferredHwnd: number | null, attempt = 1) {
+    const sendPastePath = path.join(app.getAppPath(), 'native', 'SendPaste.exe');
+    const hwndArg = preferredHwnd && preferredHwnd > 0 ? String(preferredHwnd) : '';
+
+    execFile(sendPastePath, [hwndArg], (err: any, stdout: string, stderr: string) => {
+        if (stdout) {
+            console.log('[SendPaste.exe stdout]:', stdout);
+        }
+        if (stderr) {
+            console.error('[SendPaste.exe stderr]:', stderr);
+        }
+
+        const stdoutText = String(stdout || '');
+        const hwndIsNull = /ERROR:\s*hwnd\s*is\s*NULL/i.test(stdoutText);
+        const sendInputZero = /SendInput sent:\s*0/i.test(stdoutText);
+        const shouldRetry = (hwndIsNull || sendInputZero || !!err) && attempt < 4;
+
+        if (shouldRetry) {
+            const delay = 70 * attempt;
+            console.warn(`[main] SendPaste retry ${attempt} after ${delay}ms`);
+            const nextPreferred = attempt >= 2 ? null : preferredHwnd;
+            setTimeout(() => sendPasteWithRetries(nextPreferred, attempt + 1), delay);
+            return;
+        }
+
+        if (err) {
+            console.error('[main] SendPaste.exe error:', err);
+        }
+    });
+}
+
 // Load settings from local storage (for startup behavior)
 function loadStartupSettings() {
     try {
-        const settingsPath = path.join(getAppDataPath(), 'clip-settings.json');
-        if (fs.existsSync(settingsPath)) {
-            const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-            windowHideBehavior = settings.windowHideBehavior || 'hide';
-            showInTaskbar = settings.showInTaskbar || false;
-            showNotifications = settings.showNotifications || false;
-            backendShortcut = sanitizeShortcut(settings.globalShortcut || SAFE_SHORTCUT_FALLBACK);
-            const parsedMaxItems = Number(settings.maxItems);
-            if (Number.isFinite(parsedMaxItems)) {
-                maxHistoryItems = Math.min(500, Math.max(10, Math.floor(parsedMaxItems)));
-            }
+        writeSettingsSchemaFile();
 
-            applyWindowSize(settings.windowWidth, settings.windowHeight);
+        const settings = readSettingsFromFile();
+        if (settings) {
+            applySettingsRuntime(settings);
+            fs.writeFileSync(
+                getSettingsPath(),
+                JSON.stringify({ $schema: getSettingsSchemaUri(), ...settings }, null, 2),
+                'utf8'
+            );
+            return;
         }
+
+        const fallbackSettings = createDefaultSettingsDocument();
+        fs.writeFileSync(
+            getSettingsPath(),
+            JSON.stringify({ $schema: getSettingsSchemaUri(), ...fallbackSettings }, null, 2),
+            'utf8'
+        );
+        applySettingsRuntime(fallbackSettings);
     } catch (error) {
         console.log('[main] Could not load startup settings, using defaults');
     }
@@ -889,6 +1235,11 @@ function createMainWindow() {
             // Don't hide if triggered by AHK (give AHK time to focus)
             if (isAhkTriggered) {
                 console.log('[main] Window lost focus but AHK is active, not hiding...');
+                return;
+            }
+
+            if (isBlurHideSuppressed()) {
+                console.log('[main] Window blur hide suppressed briefly');
                 return;
             }
 
@@ -1315,11 +1666,15 @@ function registerNativeMessageHandler() {
     if (wmClipShowHookedForWindowId === mainWindow.id) return;
 
     try {
-        mainWindow.hookWindowMessage(WM_CLIP_SHOW, () => {
+        mainWindow.hookWindowMessage(WM_CLIP_SHOW, (wParam) => {
             // Run on next tick to avoid re-entrancy surprises.
             setImmediate(() => {
                 try {
-                    showMainWindow();
+                    const targetFromAhk = parseHwndParam(wParam);
+                    if (targetFromAhk && targetFromAhk > 0) {
+                        lastForegroundHwnd = targetFromAhk;
+                    }
+                    showMainWindow(targetFromAhk);
                 } catch (e) {
                     console.error('[main] Error handling WM_CLIP_SHOW:', e);
                 }
@@ -1334,19 +1689,47 @@ function registerNativeMessageHandler() {
 }
 
 
-function savePreviousHwnd() {
-    // Disabled intentionally: native focus tracking via clipmsg.node causes
-    // async hook corruption in Electron on some environments.
+function savePreviousHwnd(preferredFromAhk?: number | null) {
+    // Prefer explicit target from AHK if provided.
+    if (preferredFromAhk && preferredFromAhk > 0) {
+        lastForegroundHwnd = preferredFromAhk;
+        return;
+    }
+
+    // Fallback: capture active window before Clip is shown.
+    try {
+        const clipmsgPath = path.join(app.getAppPath(), 'native', 'clipmsg.node');
+        if (fs.existsSync(clipmsgPath)) {
+            const clipmsg = require(clipmsgPath);
+            const hwnd = Number(clipmsg?.getForegroundWindow?.());
+            const mainHwnd = getMainWindowHwnd();
+            if (Number.isFinite(hwnd) && hwnd > 0 && (!mainHwnd || hwnd !== mainHwnd)) {
+                lastForegroundHwnd = Math.trunc(hwnd);
+                return;
+            }
+        }
+    } catch {
+    }
+
     lastForegroundHwnd = null;
 }
 
 function restorePreviousWindow() {
-    // Disabled intentionally: native focus restore path relies on clipmsg.node.
+    if (!lastForegroundHwnd || lastForegroundHwnd <= 0) return;
+    try {
+        const clipmsgPath = path.join(app.getAppPath(), 'native', 'clipmsg.node');
+        if (!fs.existsSync(clipmsgPath)) return;
+        const clipmsg = require(clipmsgPath);
+        if (typeof clipmsg?.setForegroundWindow === 'function') {
+            clipmsg.setForegroundWindow(lastForegroundHwnd);
+        }
+    } catch {
+    }
 }
 
-function showMainWindow() {
+function showMainWindow(preferredTargetHwnd?: number | null) {
     // Save the previous foreground window HWND before showing
-    savePreviousHwnd();
+    savePreviousHwnd(preferredTargetHwnd);
 
     // Recreate window if it doesn't exist or is destroyed
     let windowWasRecreated = false;
@@ -1355,6 +1738,8 @@ function showMainWindow() {
         windowWasRecreated = true;
     }
     if (!mainWindow) return;
+
+    suppressBlurHide(450);
 
     ensureWindowBoundsVisible(mainWindow);
     mainWindow.webContents.send('window-will-show');
@@ -1457,49 +1842,47 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('paste-clipboard-item', (_event, item) => {
+        const preferredTargetHwnd = getPreferredPasteTargetHwnd();
+
         if (item.type === 'text') {
             clipboard.writeText(item.content);
         } else if (item.type === 'image') {
             const image = nativeImage.createFromDataURL(item.content);
             clipboard.writeImage(image);
+
+            const verifyImage = clipboard.readImage();
+            if (verifyImage.isEmpty()) {
+                setTimeout(() => {
+                    try {
+                        clipboard.writeImage(image);
+                    } catch (retryError) {
+                        console.error('[main] Failed to rewrite image to clipboard:', retryError);
+                    }
+                }, 30);
+            }
         }
 
-        // Keep native fast paste, but let SendPaste resolve current focus itself.
-        const hwndArg = '';
-        const sendPastePath = path.join(app.getAppPath(), 'native', 'SendPaste.exe');
-        execFile(sendPastePath, [hwndArg], (err: any, stdout: string, stderr: string) => {
-            if (err) {
-                console.error('[main] SendPaste.exe error:', err);
-            }
-            if (stdout) {
-                console.log('[SendPaste.exe stdout]:', stdout);
-            }
-            if (stderr) {
-                console.error('[SendPaste.exe stderr]:', stderr);
-            }
-        });
+        // Prevent immediate blur-hide race while we hide and return focus.
+        suppressBlurHide(900);
 
-        // Hide window instead of minimize to fix fully transparent bug
+        // Explicitly restore focus to the previous app before paste.
+        restorePreviousWindow();
+
         if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.blur();
-            if (windowHideBehavior === 'hide') {
-                setTimeout(() => {
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(true);
-                        mainWindow.hide();
-                        removeTray();
-                    }
-                }, 100);
-            } else if (windowHideBehavior === 'tray') {
-                setTimeout(() => {
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(true);
-                        mainWindow.hide();
-                        ensureTray(mainWindow);
-                    }
-                }, 100);
-            }
+            hideMainWindowImmediate();
         }
+
+        // One extra restore attempt improves reliability in Chromium targets.
+        setTimeout(() => {
+            restorePreviousWindow();
+        }, 45);
+
+        const pasteDelayMs = item.type === 'image' ? 120 : 55;
+
+        // Give target window a brief moment to become foreground, then paste with retry.
+        setTimeout(() => {
+            sendPasteWithRetries(preferredTargetHwnd, 1);
+        }, pasteDelayMs);
     });
 
     ipcMain.on('set-window-hide-behavior', (_event, behavior) => {
@@ -1567,6 +1950,87 @@ app.whenReady().then(() => {
 
     ipcMain.handle('export-theme-config', () => {
         return JSON.stringify(activeThemeConfig, null, 2);
+    });
+
+    ipcMain.handle('get-theme-paths', () => {
+        return {
+            configPath: getThemeConfigPath(),
+            schemaPath: getThemeSchemaPath(),
+        };
+    });
+
+    ipcMain.handle('open-theme-config-file', async () => {
+        try {
+            const configPath = getThemeConfigPath();
+            if (!fs.existsSync(configPath)) {
+                persistThemeConfig(activeThemeConfig);
+            }
+
+            const error = await shell.openPath(configPath);
+            if (error) {
+                return { ok: false, error, path: configPath };
+            }
+
+            return { ok: true, path: configPath };
+        } catch (error) {
+            return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+                path: getThemeConfigPath(),
+            };
+        }
+    });
+
+    ipcMain.handle('get-settings-paths', () => {
+        return {
+            configPath: getSettingsPath(),
+            schemaPath: getSettingsSchemaPath(),
+        };
+    });
+
+    ipcMain.handle('open-settings-config-file', async () => {
+        try {
+            const configPath = getSettingsPath();
+            if (!fs.existsSync(configPath)) {
+                const doc = { $schema: getSettingsSchemaUri(), ...createDefaultSettingsDocument() };
+                fs.writeFileSync(configPath, JSON.stringify(doc, null, 2), 'utf8');
+            }
+
+            const error = await shell.openPath(configPath);
+            if (error) {
+                return { ok: false, error, path: configPath };
+            }
+
+            return { ok: true, path: configPath };
+        } catch (error) {
+            return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+                path: getSettingsPath(),
+            };
+        }
+    });
+
+    ipcMain.handle('reload-settings-from-disk', () => {
+        const fromFile = readSettingsFromFile();
+        if (!fromFile) {
+            const fallback = createDefaultSettingsDocument();
+            applySettingsRuntime(fallback);
+            handleShortcutChange(backendShortcut).catch((error) => {
+                console.error('[main] Failed to refresh shortcut after settings reload:', error);
+            });
+            return fallback;
+        }
+
+        applySettingsRuntime(fromFile);
+        if (Number.isFinite(Number(fromFile.maxItems))) {
+            maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(fromFile.maxItems))));
+            invalidateHistoryCache();
+        }
+        handleShortcutChange(backendShortcut).catch((error) => {
+            console.error('[main] Failed to refresh shortcut after settings reload:', error);
+        });
+        return fromFile;
     });
 
     ipcMain.handle('create-theme-profile', (_event, profileName) => {
@@ -1832,13 +2296,19 @@ app.whenReady().then(() => {
 
     ipcMain.on('save-settings-to-file', (_event, settings) => {
         try {
+            applySettingsRuntime(settings);
             if (settings && Number.isFinite(Number(settings.maxItems))) {
                 maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(settings.maxItems))));
                 invalidateHistoryCache();
             }
-            applyWindowSize(settings?.windowWidth, settings?.windowHeight);
-            const settingsPath = path.join(getAppDataPath(), 'clip-settings.json');
-            fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+            const nextSettings = {
+                $schema: getSettingsSchemaUri(),
+                ...(settings || {}),
+            };
+            fs.writeFileSync(getSettingsPath(), JSON.stringify(nextSettings, null, 2), 'utf8');
+            handleShortcutChange(backendShortcut).catch((error) => {
+                console.error('[main] Failed to refresh shortcut after settings save:', error);
+            });
         } catch (error) {
             console.error('[main] Failed to save settings to file:', error);
         }

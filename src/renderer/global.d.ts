@@ -37,6 +37,11 @@ interface ElectronAPI {
     saveThemeConfig: (config: any) => Promise<any>;
     reloadThemeConfig: () => Promise<any>;
     exportThemeConfig: () => Promise<string>;
+    getThemePaths: () => Promise<{ configPath: string; schemaPath: string }>;
+    openThemeConfigFile: () => Promise<{ ok: boolean; error?: string; path?: string }>;
+    getSettingsPaths: () => Promise<{ configPath: string; schemaPath: string }>;
+    openSettingsConfigFile: () => Promise<{ ok: boolean; error?: string; path?: string }>;
+    reloadSettingsFromDisk: () => Promise<any>;
     createThemeProfile: (profileName: string) => Promise<any>;
     deleteThemeProfile: (profileKey: string) => Promise<any>;
     setActiveThemeProfile: (profileKey: string) => Promise<any>;

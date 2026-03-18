@@ -430,6 +430,135 @@ const Toast: React.FC<{
     );
 };
 
+type ParsedColor = {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+};
+
+function clampColorChannel(value: number) {
+    return Math.min(255, Math.max(0, Math.round(value)));
+}
+
+function parseHexColor(value: string): ParsedColor | null {
+    const match = value.trim().match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+    if (!match) return null;
+
+    const hex = match[1];
+    if (hex.length === 3 || hex.length === 4) {
+        const r = parseInt(hex[0] + hex[0], 16);
+        const g = parseInt(hex[1] + hex[1], 16);
+        const b = parseInt(hex[2] + hex[2], 16);
+        const a = hex.length === 4 ? parseInt(hex[3] + hex[3], 16) / 255 : 1;
+        return { r, g, b, a };
+    }
+
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
+    return { r, g, b, a };
+}
+
+function parseRgbColor(value: string): ParsedColor | null {
+    const match = value.trim().match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([0-9.]+)\s*)?\)$/i);
+    if (!match) return null;
+
+    return {
+        r: clampColorChannel(Number(match[1])),
+        g: clampColorChannel(Number(match[2])),
+        b: clampColorChannel(Number(match[3])),
+        a: match[4] !== undefined ? Math.min(1, Math.max(0, Number(match[4]))) : 1,
+    };
+}
+
+function parseColorValue(value: string): ParsedColor | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const hex = parseHexColor(trimmed);
+    if (hex) return hex;
+
+    const rgb = parseRgbColor(trimmed);
+    if (rgb) return rgb;
+
+    if (typeof document !== 'undefined') {
+        const probe = document.createElement('span');
+        probe.style.color = trimmed;
+        probe.style.position = 'fixed';
+        probe.style.left = '-9999px';
+        probe.style.top = '-9999px';
+        probe.style.visibility = 'hidden';
+        document.body.appendChild(probe);
+        const computed = getComputedStyle(probe).color;
+        document.body.removeChild(probe);
+        return parseRgbColor(computed);
+    }
+
+    return null;
+}
+
+function colorValueToPickerValue(value: string, fallback = '#4682b4'): string {
+    const parsed = parseColorValue(value);
+    if (!parsed) return fallback;
+    return `#${clampColorChannel(parsed.r).toString(16).padStart(2, '0')}${clampColorChannel(parsed.g).toString(16).padStart(2, '0')}${clampColorChannel(parsed.b).toString(16).padStart(2, '0')}`;
+}
+
+function pickerValueToColorValue(nextValue: string, currentValue: string): string {
+    const picked = parseColorValue(nextValue);
+    if (!picked) return currentValue;
+
+    const current = parseColorValue(currentValue);
+    if (current && current.a < 1) {
+        const alpha = Math.round(current.a * 1000) / 1000;
+        return `rgba(${picked.r}, ${picked.g}, ${picked.b}, ${alpha})`;
+    }
+
+    return nextValue;
+}
+
+const ColorSettingField: React.FC<{
+    label: string;
+    value: string;
+    onChange: (nextValue: string) => void;
+}> = ({ label, value, onChange }) => {
+    const pickerValue = React.useMemo(() => colorValueToPickerValue(value), [value]);
+
+    return (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+            <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
+            <div style={{ display: 'flex', gap: 8, minWidth: 0, alignItems: 'center' }}>
+                <input
+                    aria-label={label}
+                    className="settings-input"
+                    type="color"
+                    value={pickerValue}
+                    onChange={(e) => onChange(pickerValueToColorValue(e.target.value, value))}
+                    style={{ width: 38, height: 32, border: '1px solid #444', borderRadius: 8, background: 'transparent', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+                />
+                <input
+                    className="settings-input"
+                    type="text"
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    style={{
+                        flex: 1,
+                        minWidth: 0,
+                        borderRadius: 8,
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        background: 'rgba(255,255,255,0.05)',
+                        color: '#fff',
+                        padding: '8px 10px',
+                        fontSize: 12,
+                        outline: 'none',
+                    }}
+                />
+            </div>
+        </label>
+    );
+};
+
 const App: React.FC = () => {
     const [items, setItems] = useState<ClipboardItem[]>([]);
     const [settings, setSettings] = useState<Settings>(() => {
@@ -520,21 +649,15 @@ const App: React.FC = () => {
     // Track if there are unsaved changes in settings
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-    // Update hasUnsavedChanges whenever settingsDraft changes
-    useEffect(() => {
-        if (settingsDraft && settings) {
-            // Compare settings and settingsDraft to see if there are any differences
-            const isDifferent = JSON.stringify(settingsDraft) !== JSON.stringify(settings);
-            setHasUnsavedChanges(isDifferent);
-        } else {
-            setHasUnsavedChanges(false);
-        }
-    }, [settingsDraft, settings]);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [showThemeProfileResetConfirm, setShowThemeProfileResetConfirm] = useState(false);
+    const [isThemeProfileResetDialogClosing, setIsThemeProfileResetDialogClosing] = useState(false);
+    const [showThemeProfileDeleteConfirm, setShowThemeProfileDeleteConfirm] = useState(false);
+    const [isThemeProfileDeleteDialogClosing, setIsThemeProfileDeleteDialogClosing] = useState(false);
     const escListener = useRef<((e: KeyboardEvent) => void) | null>(null);
     const settingsModalRef = useRef<HTMLDivElement>(null); const [search, setSearch] = useState('');
     const [filteredType, setFilteredType] = useState<'all' | 'text' | 'image'>('all');
-    const dragStateRef = useRef({ dragging: false, offsetX: 0, offsetY: 0 });
+    const dragStateRef = useRef({ dragging: false, dragStarted: false, offsetX: 0, offsetY: 0, startClientX: 0, startClientY: 0 });
     const lastDragEmitRef = useRef(0);
 
     const [isClosingSettings, setIsClosingSettings] = useState(false);
@@ -603,6 +726,8 @@ const App: React.FC = () => {
     // --- Theme config state ---
     const [themeEditorConfig, setThemeEditorConfig] = useState<ThemeConfig>(() => createDefaultThemeConfig());
     const [themeSchema, setThemeSchema] = useState<any>(null);
+    const [themePaths, setThemePaths] = useState<{ configPath: string; schemaPath: string } | null>(null);
+    const [settingsPaths, setSettingsPaths] = useState<{ configPath: string; schemaPath: string } | null>(null);
     const [newThemeProfileName, setNewThemeProfileName] = useState('');
     const [isThemeSaving, setIsThemeSaving] = useState(false);
     const editorThemeProfile = React.useMemo(() => getActiveThemeProfile(themeEditorConfig), [themeEditorConfig]);
@@ -630,22 +755,24 @@ const App: React.FC = () => {
             const activeKey = prev.profiles[key] ? key : Object.keys(prev.profiles)[0] || 'default';
             const current = prev.profiles[activeKey] || createDefaultThemeConfig().profiles.default;
             const updated = updater(current);
-            return sanitizeThemeConfig({
+            return {
                 ...prev,
                 activeProfile: activeKey,
                 profiles: {
                     ...prev.profiles,
                     [activeKey]: updated,
                 },
-            });
+            };
         });
     }, []);
 
     const loadThemeFromMain = useCallback(async () => {
         try {
-            const [config, schema] = await Promise.all([
+            const [config, schema, themeFilePaths, settingsFilePaths] = await Promise.all([
                 window.electronAPI?.getThemeConfig?.(),
                 window.electronAPI?.getThemeSchema?.(),
+                window.electronAPI?.getThemePaths?.(),
+                window.electronAPI?.getSettingsPaths?.(),
             ]);
 
             if (config) {
@@ -656,6 +783,12 @@ const App: React.FC = () => {
             if (schema) {
                 setThemeSchema(schema);
             }
+            if (themeFilePaths?.configPath && themeFilePaths?.schemaPath) {
+                setThemePaths(themeFilePaths);
+            }
+            if (settingsFilePaths?.configPath && settingsFilePaths?.schemaPath) {
+                setSettingsPaths(settingsFilePaths);
+            }
         } catch (error) {
             showToast('error', `Failed to load theme config: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -664,7 +797,7 @@ const App: React.FC = () => {
     const switchThemeProfile = useCallback(async (profileKey: string) => {
         try {
             const key = normalizeThemeProfileKey(profileKey);
-            setThemeEditorConfig(prev => sanitizeThemeConfig({ ...prev, activeProfile: key }));
+            setThemeEditorConfig(prev => ({ ...prev, activeProfile: key }));
             const next = await window.electronAPI?.setActiveThemeProfile?.(key);
             if (next) {
                 const sanitized = sanitizeThemeConfig(next);
@@ -708,6 +841,40 @@ const App: React.FC = () => {
         }
     }, [activeThemeProfileKey]);
 
+    const resetActiveThemeProfileToDefault = useCallback(async () => {
+        try {
+            const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
+            const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
+            const defaultProfile = createDefaultThemeConfig().profiles.default;
+            const nextConfig = sanitizeThemeConfig({
+                ...themeConfig,
+                ...themeEditorConfig,
+                activeProfile: profileKey,
+                profiles: {
+                    ...themeEditorConfig.profiles,
+                    [profileKey]: {
+                        ...defaultProfile,
+                        name: currentProfile.name || defaultProfile.name,
+                    },
+                },
+            });
+
+            setThemeConfig(nextConfig);
+            setThemeEditorConfig(nextConfig);
+
+            const saved = await window.electronAPI?.saveThemeConfig?.(nextConfig);
+            if (saved) {
+                const sanitized = sanitizeThemeConfig(saved);
+                setThemeConfig(sanitized);
+                setThemeEditorConfig(sanitized);
+            }
+
+            showToast('success', 'Theme profile reset to default.');
+        } catch (error) {
+            showToast('error', `Failed to reset profile theme: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, [editorThemeProfile, themeConfig, themeEditorConfig]);
+
     const reloadThemeFromDisk = useCallback(async () => {
         try {
             const next = await window.electronAPI?.reloadThemeConfig?.();
@@ -739,9 +906,105 @@ const App: React.FC = () => {
         }
     }, []);
 
+    const openThemeConfigInSystem = useCallback(async () => {
+        try {
+            const result = await window.electronAPI?.openThemeConfigFile?.();
+            if (result?.ok) {
+                showToast('success', 'Opened theme config file in default app.');
+            } else {
+                showToast('error', `Failed to open theme config file: ${result?.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            showToast('error', `Failed to open theme config file: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, []);
+
+    const openSettingsConfigInSystem = useCallback(async () => {
+        try {
+            const result = await window.electronAPI?.openSettingsConfigFile?.();
+            if (result?.ok) {
+                showToast('success', 'Opened settings config file in default app.');
+            } else {
+                showToast('error', `Failed to open settings config file: ${result?.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            showToast('error', `Failed to open settings config file: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, []);
+
+    const reloadSettingsFromDisk = useCallback(async () => {
+        try {
+            const loaded = await window.electronAPI?.reloadSettingsFromDisk?.();
+            if (!loaded) return;
+
+            const nextSettings = { ...settings, ...loaded };
+            setSettings(nextSettings);
+            setSettingsDraft(nextSettings);
+            localStorage.setItem('clip-settings', JSON.stringify(nextSettings));
+            localStorage.setItem('clip-settingsDraft', JSON.stringify(nextSettings));
+
+            const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
+            const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
+            const mergedThemeConfig = sanitizeThemeConfig({
+                ...themeConfig,
+                ...themeEditorConfig,
+                activeProfile: profileKey,
+                profiles: {
+                    ...themeEditorConfig.profiles,
+                    [profileKey]: {
+                        ...currentProfile,
+                        colors: {
+                            ...currentProfile.colors,
+                            accent: nextSettings.accentColor,
+                        },
+                        surface: {
+                            ...currentProfile.surface,
+                            borderRadius: nextSettings.borderRadius,
+                            transparency: nextSettings.transparency,
+                        },
+                    },
+                },
+            });
+            setThemeConfig(mergedThemeConfig);
+            setThemeEditorConfig(mergedThemeConfig);
+            void window.electronAPI?.saveThemeConfig?.(mergedThemeConfig);
+
+            showToast('info', 'Settings reloaded from disk.');
+        } catch (error) {
+            showToast('error', `Failed to reload settings from disk: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, [editorThemeProfile, settings, themeConfig, themeEditorConfig]);
+
+    const copyTextToClipboard = useCallback(async (value: string, label: string) => {
+        try {
+            await navigator.clipboard.writeText(value);
+            showToast('success', `${label} copied to clipboard.`);
+        } catch {
+            try {
+                const input = document.createElement('textarea');
+                input.value = value;
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand('copy');
+                document.body.removeChild(input);
+                showToast('success', `${label} copied to clipboard.`);
+            } catch (error) {
+                showToast('error', `Failed to copy ${label.toLowerCase()}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+    }, []);
+
     useEffect(() => {
         const onMouseMove = (event: MouseEvent) => {
             if (!dragStateRef.current.dragging) return;
+            const deltaX = Math.abs(event.clientX - dragStateRef.current.startClientX);
+            const deltaY = Math.abs(event.clientY - dragStateRef.current.startClientY);
+            if (!dragStateRef.current.dragStarted) {
+                if (deltaX < 4 && deltaY < 4) {
+                    return;
+                }
+                dragStateRef.current.dragStarted = true;
+            }
             const now = Date.now();
             if (now - lastDragEmitRef.current < 16) return;
             lastDragEmitRef.current = now;
@@ -755,8 +1018,11 @@ const App: React.FC = () => {
 
         const onMouseUp = () => {
             dragStateRef.current.dragging = false;
+            dragStateRef.current.dragStarted = false;
             dragStateRef.current.offsetX = 0;
             dragStateRef.current.offsetY = 0;
+            dragStateRef.current.startClientX = 0;
+            dragStateRef.current.startClientY = 0;
         };
 
         window.addEventListener('mousemove', onMouseMove);
@@ -778,6 +1044,15 @@ const App: React.FC = () => {
             if (typeof dispose === 'function') dispose();
         };
     }, [loadThemeFromMain]);
+
+    useEffect(() => {
+        setHasUnsavedChanges(prev => {
+            const settingsDifferent = !!(settingsDraft && settings) && JSON.stringify(settingsDraft) !== JSON.stringify(settings);
+            const themeDifferent = JSON.stringify(themeEditorConfig) !== JSON.stringify(themeConfig);
+            const next = settingsDifferent || themeDifferent;
+            return prev === next ? prev : next;
+        });
+    }, [settingsDraft, settings, themeEditorConfig, themeConfig]);
 
     const refreshBackupList = useCallback(async () => {
         const list = await window.electronAPI?.listBackups?.();
@@ -1051,6 +1326,18 @@ const App: React.FC = () => {
                         setDeleteTarget(null);
                         setIsDeleteDialogClosing(false);
                     }, 300);
+                } else if (showThemeProfileDeleteConfirm) {
+                    setIsThemeProfileDeleteDialogClosing(true);
+                    setTimeout(() => {
+                        setShowThemeProfileDeleteConfirm(false);
+                        setIsThemeProfileDeleteDialogClosing(false);
+                    }, 300);
+                } else if (showThemeProfileResetConfirm) {
+                    setIsThemeProfileResetDialogClosing(true);
+                    setTimeout(() => {
+                        setShowThemeProfileResetConfirm(false);
+                        setIsThemeProfileResetDialogClosing(false);
+                    }, 300);
                 } else if (showResetConfirm) {
                     setShowResetConfirm(false);
                 } else if (showSettings) {
@@ -1072,7 +1359,7 @@ const App: React.FC = () => {
         };
         window.addEventListener('keydown', escHandler);
         return () => window.removeEventListener('keydown', escHandler);
-    }, [showMaxItemsWarning, isMaxItemsWarningClosing, dangerAction, isDangerDialogClosing, showResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, restartReason, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges, backupDeleteAction, isBackupDeleteDialogClosing]);
+    }, [showMaxItemsWarning, isMaxItemsWarningClosing, dangerAction, isDangerDialogClosing, showResetConfirm, showThemeProfileDeleteConfirm, isThemeProfileDeleteDialogClosing, showThemeProfileResetConfirm, isThemeProfileResetDialogClosing, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, restartReason, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges, backupDeleteAction, isBackupDeleteDialogClosing]);
 
     // Force refresh when Ctrl+Shift+V is pressed (global shortcut)
     // This effect is now primarily for development/debugging if needed,
@@ -1342,6 +1629,33 @@ const App: React.FC = () => {
             return;
         }
 
+        const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
+        const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
+        const draftAccentColor = settingsDraft?.accentColor ?? settings.accentColor;
+        const draftBorderRadius = settingsDraft?.borderRadius ?? settings.borderRadius;
+        const draftTransparency = settingsDraft?.transparency ?? settings.transparency;
+
+        const mergedThemeConfig = sanitizeThemeConfig({
+            ...themeConfig,
+            ...themeEditorConfig,
+            activeProfile: profileKey,
+            profiles: {
+                ...themeEditorConfig.profiles,
+                [profileKey]: {
+                    ...currentProfile,
+                    colors: {
+                        ...currentProfile.colors,
+                        accent: draftAccentColor,
+                    },
+                    surface: {
+                        ...currentProfile.surface,
+                        borderRadius: draftBorderRadius,
+                        transparency: draftTransparency,
+                    },
+                },
+            },
+        });
+
         if (settingsDraft) {
             setSettings(settingsDraft);
 
@@ -1353,33 +1667,11 @@ const App: React.FC = () => {
 
             // Also save to file for main process to read at startup
             window.electronAPI?.saveSettingsToFile?.(settingsDraft);
-
-            const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
-            const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
-            const mergedThemeConfig = sanitizeThemeConfig({
-                ...themeConfig,
-                ...themeEditorConfig,
-                activeProfile: profileKey,
-                profiles: {
-                    ...themeEditorConfig.profiles,
-                    [profileKey]: {
-                        ...currentProfile,
-                        colors: {
-                            ...currentProfile.colors,
-                            accent: settingsDraft.accentColor,
-                        },
-                        surface: {
-                            ...currentProfile.surface,
-                            borderRadius: settingsDraft.borderRadius,
-                            transparency: settingsDraft.transparency,
-                        },
-                    },
-                },
-            });
-            setThemeConfig(mergedThemeConfig);
-            setThemeEditorConfig(mergedThemeConfig);
-            void window.electronAPI?.saveThemeConfig?.(mergedThemeConfig);
         }
+
+        setThemeConfig(mergedThemeConfig);
+        setThemeEditorConfig(mergedThemeConfig);
+        void window.electronAPI?.saveThemeConfig?.(mergedThemeConfig);
 
         setIsSettingsDialogClosing(true);
         setTimeout(() => {
@@ -1409,6 +1701,13 @@ const App: React.FC = () => {
         setSettings(DEFAULT_SETTINGS);
         // Update settings draft to reflect the default values
         setSettingsDraft(DEFAULT_SETTINGS);
+
+        // Persist default settings immediately to localStorage
+        localStorage.setItem('clip-settings', JSON.stringify(DEFAULT_SETTINGS));
+
+        // Also save to file for main process to read at startup
+        window.electronAPI?.saveSettingsToFile?.(DEFAULT_SETTINGS);
+
         showToast('success', 'Settings reset to default values');
         // Close the settings window after successful reset
         setIsSettingsDialogClosing(true);
@@ -1569,32 +1868,34 @@ const App: React.FC = () => {
             >
                 <ToastContainer
                     toasts={toasts}
-                    accentColor={themeColors.accent}
+                    accentColor={themeColors.success}
                     onDismiss={dismissToast}
                     onClearAll={clearAllToasts}
                 />
 
                 <div
                     className="clip-header"
-                    style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh', position: 'relative', zIndex: 3, cursor: 'move' }}
+                    style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh', position: 'relative', zIndex: 3, cursor: 'default' }}
                     onMouseDown={(event) => {
                         if (showSettings) return;
                         if (event.button !== 0) return;
                         const target = event.target as HTMLElement | null;
-                        if (target?.closest('button') || target?.closest('input') || target?.closest('select')) {
+                        if (
+                            target?.closest('button') ||
+                            target?.closest('input') ||
+                            target?.closest('select') ||
+                            target?.closest('.clip-title')
+                        ) {
                             return;
                         }
                         const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
                         dragStateRef.current.dragging = true;
+                        dragStateRef.current.dragStarted = false;
                         dragStateRef.current.offsetX = event.clientX - rect.left;
                         dragStateRef.current.offsetY = event.clientY - rect.top;
+                        dragStateRef.current.startClientX = event.clientX;
+                        dragStateRef.current.startClientY = event.clientY;
                         lastDragEmitRef.current = 0;
-                        window.electronAPI?.dragWindow?.(
-                            event.screenX,
-                            event.screenY,
-                            dragStateRef.current.offsetX,
-                            dragStateRef.current.offsetY,
-                        );
                     }}
                 >
                     <span className="clip-title" style={{ fontWeight: themeTypography.fontWeightBold, fontSize: themeTypography.titleFontSize, color: themeColors.textPrimary }}>
@@ -2064,8 +2365,41 @@ const App: React.FC = () => {
                                             />
                                         </label>
                                     </div>
-                                    <div style={{ marginTop: 8, fontSize: 12, color: windowSizeError ? '#ff4136' : '#888' }}>
-                                        {windowSizeError || `Allowed: ${WINDOW_SIZE_LIMITS.width.min}-${WINDOW_SIZE_LIMITS.width.max}px width, ${WINDOW_SIZE_LIMITS.height.min}-${WINDOW_SIZE_LIMITS.height.max}px height.`}
+                                    <div style={{ marginTop: 8, fontSize: 12, color: windowSizeError ? '#ff4136' : '#888', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span>{windowSizeError || `Allowed: ${WINDOW_SIZE_LIMITS.width.min}-${WINDOW_SIZE_LIMITS.width.max}px width, ${WINDOW_SIZE_LIMITS.height.min}-${WINDOW_SIZE_LIMITS.height.max}px height.`}</span>
+                                        <button
+                                            onClick={() => {
+                                                setSettingsDraft(s => s ? {
+                                                    ...s,
+                                                    windowWidth: WINDOW_SIZE_LIMITS.width.default,
+                                                    windowHeight: WINDOW_SIZE_LIMITS.height.default
+                                                } : null);
+                                                showToast('info', 'Window dimensions reset to default');
+                                            }}
+                                            style={{
+                                                background: 'rgba(255,255,255,0.08)',
+                                                border: '1px solid rgba(255,255,255,0.15)',
+                                                color: '#ccc',
+                                                borderRadius: 6,
+                                                padding: '4px 10px',
+                                                fontSize: 11,
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s ease',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: 4
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.background = 'rgba(255,255,255,0.12)';
+                                                e.currentTarget.style.color = '#fff';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                                                e.currentTarget.style.color = '#ccc';
+                                            }}
+                                        >
+                                            Reset to Default
+                                        </button>
                                     </div>
                                 </div>
                                 {/* Backups section */}
@@ -2746,21 +3080,30 @@ const App: React.FC = () => {
                                                     fontWeight: 600,
                                                 }}
                                                 disabled={Object.keys(themeEditorConfig.profiles).length <= 1}
-                                                onClick={async () => {
-                                                    try {
-                                                        const saved = await window.electronAPI?.deleteThemeProfile?.(activeThemeProfileKey);
-                                                        if (saved) {
-                                                            const sanitized = sanitizeThemeConfig(saved);
-                                                            setThemeConfig(sanitized);
-                                                            setThemeEditorConfig(sanitized);
-                                                            showToast('success', 'Theme profile deleted.');
-                                                        }
-                                                    } catch (error) {
-                                                        showToast('error', `Failed to delete profile: ${error instanceof Error ? error.message : String(error)}`);
-                                                    }
+                                                onClick={() => {
+                                                    setShowThemeProfileDeleteConfirm(true);
+                                                    setIsThemeProfileDeleteDialogClosing(false);
                                                 }}
                                             >
                                                 Delete Profile
+                                            </button>
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: themeColors.warning,
+                                                    border: `1px solid ${themeColors.warning}`,
+                                                    borderRadius: 8,
+                                                    color: '#222',
+                                                    padding: '8px 12px',
+                                                    cursor: 'pointer',
+                                                    fontWeight: 700,
+                                                }}
+                                                onClick={() => {
+                                                    setShowThemeProfileResetConfirm(true);
+                                                    setIsThemeProfileResetDialogClosing(false);
+                                                }}
+                                            >
+                                                Reset Profile Theme
                                             </button>
                                             <button
                                                 className="settings-button"
@@ -2815,48 +3158,77 @@ const App: React.FC = () => {
                                             />
                                         </label>
 
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>
+                                            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                                                <span style={{ fontSize: 12, color: '#aaa' }}>Theme mode</span>
+                                                <select
+                                                    className="settings-select"
+                                                    value={settingsDraft?.theme ?? settings.theme}
+                                                    onChange={e => setSettingsDraft(s => s ? { ...s, theme: e.target.value as Settings['theme'] } : null)}
+                                                    style={{
+                                                        borderRadius: 8,
+                                                        border: '1px solid rgba(255,255,255,0.12)',
+                                                        background: 'rgba(255,255,255,0.05)',
+                                                        color: '#fff',
+                                                        padding: '8px 10px',
+                                                        fontSize: 12,
+                                                        outline: 'none',
+                                                        width: '100%',
+                                                        minWidth: 0,
+                                                    }}
+                                                >
+                                                    <option value="dark">Dark</option>
+                                                    <option value="light">Light</option>
+                                                    <option value="system">System</option>
+                                                </select>
+                                            </label>
+
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                                                <span style={{ fontSize: 12, color: '#aaa' }}>Accent color (quick)</span>
+                                                <ColorSettingField
+                                                    label="Accent color"
+                                                    value={settingsDraft?.accentColor ?? settings.accentColor}
+                                                    onChange={(nextValue) => setSettingsDraft(s => s ? { ...s, accentColor: nextValue } : null)}
+                                                />
+                                            </div>
+                                        </div>
+
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                                             {[
-                                                ['accent', 'Accent'],
-                                                ['appBackground', 'App bg'],
-                                                ['panelBackground', 'Panel bg'],
-                                                ['itemBackground', 'Item bg'],
+                                                ['appBackground', 'App background'],
+                                                ['panelBackground', 'Panel background'],
+                                                ['overlayBackground', 'Overlay background'],
+                                                ['itemBackground', 'Item background'],
                                                 ['itemHoverBackground', 'Item hover'],
+                                                ['inputBackground', 'Input background'],
+                                                ['inputBorder', 'Input border'],
+                                                ['border', 'Border'],
                                                 ['textPrimary', 'Text primary'],
                                                 ['textSecondary', 'Text secondary'],
-                                                ['border', 'Border'],
+                                                ['textMuted', 'Text muted'],
+                                                ['accent', 'Accent'],
                                                 ['danger', 'Danger'],
+                                                ['warning', 'Warning'],
                                                 ['success', 'Success'],
+                                                ['scrollbarThumb', 'Scrollbar thumb'],
+                                                ['scrollbarTrack', 'Scrollbar track'],
                                             ].map(([key, label]) => {
                                                 const colorKey = key as keyof ThemeProfile['colors'];
                                                 return (
-                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                        <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
-                                                        <input
-                                                            className="settings-input"
-                                                            type="text"
-                                                            value={editorThemeProfile.colors[colorKey]}
-                                                            onChange={(e) => {
-                                                                const nextValue = e.target.value;
-                                                                updateEditorActiveProfile((profile) => ({
-                                                                    ...profile,
-                                                                    colors: {
-                                                                        ...profile.colors,
-                                                                        [colorKey]: nextValue,
-                                                                    },
-                                                                }));
-                                                            }}
-                                                            style={{
-                                                                borderRadius: 8,
-                                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                                background: 'rgba(255,255,255,0.05)',
-                                                                color: '#fff',
-                                                                padding: '8px 10px',
-                                                                fontSize: 12,
-                                                                outline: 'none'
-                                                            }}
-                                                        />
-                                                    </label>
+                                                    <ColorSettingField
+                                                        key={key}
+                                                        label={String(label)}
+                                                        value={editorThemeProfile.colors[colorKey]}
+                                                        onChange={(nextValue) => {
+                                                            updateEditorActiveProfile((profile) => ({
+                                                                ...profile,
+                                                                colors: {
+                                                                    ...profile.colors,
+                                                                    [colorKey]: nextValue,
+                                                                },
+                                                            }));
+                                                        }}
+                                                    />
                                                 );
                                             })}
                                         </div>
@@ -2899,7 +3271,7 @@ const App: React.FC = () => {
                                             })}
                                         </div>
 
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, width: '100%' }}>
                                             {[
                                                 ['baseFontSize', 'Base size'],
                                                 ['titleFontSize', 'Title size'],
@@ -2913,7 +3285,7 @@ const App: React.FC = () => {
                                                         ? (editorThemeProfile.surface as any)[key]
                                                         : (editorThemeProfile.typography as any)[key];
                                                 return (
-                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
                                                         <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
                                                         <input
                                                             className="settings-input"
@@ -2948,7 +3320,10 @@ const App: React.FC = () => {
                                                                 color: '#fff',
                                                                 padding: '8px 10px',
                                                                 fontSize: 12,
-                                                                outline: 'none'
+                                                                outline: 'none',
+                                                                width: '100%',
+                                                                minWidth: 0,
+                                                                boxSizing: 'border-box',
                                                             }}
                                                         />
                                                     </label>
@@ -3000,7 +3375,7 @@ const App: React.FC = () => {
                                             })}
                                         </div>
 
-                                        <div style={{ display: 'flex', gap: 8 }}>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                                             <button
                                                 className="settings-button"
                                                 style={{
@@ -3020,6 +3395,23 @@ const App: React.FC = () => {
                                                 }}
                                             >
                                                 {isThemeSaving ? 'Saving...' : 'Save Theme JSON'}
+                                            </button>
+                                            <button
+                                                className="settings-button"
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.08)',
+                                                    border: '1px solid rgba(255,255,255,0.12)',
+                                                    borderRadius: 8,
+                                                    color: '#fff',
+                                                    padding: '9px 12px',
+                                                    cursor: 'pointer',
+                                                    fontWeight: 600,
+                                                }}
+                                                onClick={() => {
+                                                    void openThemeConfigInSystem();
+                                                }}
+                                            >
+                                                Open Theme JSON
                                             </button>
                                             <button
                                                 className="settings-button"
@@ -3054,9 +3446,29 @@ const App: React.FC = () => {
                                         </div>
 
                                         <div style={{ fontSize: 12, color: '#8f8f8f', lineHeight: 1.5 }}>
-                                            Theme file path: <code style={{ color: '#cfcfcf' }}>AppData/clip-theme.json</code>
+                                            Theme file path:{' '}
+                                            <code
+                                                style={{ color: '#cfcfcf', cursor: 'pointer', textDecoration: 'underline' }}
+                                                title="click to copy"
+                                                onClick={() => {
+                                                    if (!themePaths?.configPath) return;
+                                                    void copyTextToClipboard(themePaths.configPath, 'Theme file path');
+                                                }}
+                                            >
+                                                {themePaths?.configPath || 'AppData/clip-theme.json'}
+                                            </code>
                                             <br />
-                                            Backup schema path: <code style={{ color: '#cfcfcf' }}>AppData/clip-theme.schema.json</code>
+                                            Backup schema path:{' '}
+                                            <code
+                                                style={{ color: '#cfcfcf', cursor: 'pointer', textDecoration: 'underline' }}
+                                                title="click to copy"
+                                                onClick={() => {
+                                                    if (!themePaths?.schemaPath) return;
+                                                    void copyTextToClipboard(themePaths.schemaPath, 'Theme schema path');
+                                                }}
+                                            >
+                                                {themePaths?.schemaPath || 'AppData/clip-theme.schema.json'}
+                                            </code>
                                             {themeSchema?.notes?.length ? (
                                                 <>
                                                     <br />
@@ -3067,81 +3479,7 @@ const App: React.FC = () => {
                                     </div>
                                 </div>
 
-                                {/* Visual Settings section */}
-                                <div>
-                                    <h2 style={sectionHeaderStyle}>Visual Settings</h2>
-
-                                    <label style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-                                        Border radius
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                            <input
-                                                type="range"
-                                                min={0}
-                                                max={24}
-                                                value={settingsDraft?.borderRadius ?? settings.borderRadius}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, borderRadius: Number(e.target.value) } : null)}
-                                                style={{ flex: 1, ...getCustomRangeStyles(settingsDraft?.accentColor ?? settings.accentColor) }}
-                                            />
-                                            <span style={{ minWidth: 40, textAlign: 'right', fontFamily: 'monospace' }}>{`${settingsDraft?.borderRadius ?? settings.borderRadius}px`}</span>
-                                        </div>
-                                    </label>
-
-                                    <label style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-                                        Window transparency
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                            <input
-                                                type="range"
-                                                min={70}
-                                                max={100}
-                                                value={(settingsDraft?.transparency ?? settings.transparency) * 100}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, transparency: Number(e.target.value) / 100 } : null)}
-                                                style={{ flex: 1, ...getCustomRangeStyles(settingsDraft?.accentColor ?? settings.accentColor) }}
-                                            />
-                                            <span style={{ minWidth: 40, textAlign: 'right', fontFamily: 'monospace' }}>{`${Math.round((settingsDraft?.transparency ?? settings.transparency) * 100)}%`}</span>
-                                        </div>
-                                    </label>
-
-                                    <label style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-                                        Accent color
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>                                            <input
-                                            className="settings-input"
-                                            type="color"
-                                            value={settingsDraft?.accentColor ?? settings.accentColor}
-                                            onChange={e => setSettingsDraft(s => s ? { ...s, accentColor: e.target.value } : null)}
-                                            style={{ width: 40, height: 40, border: '1px solid #444', borderRadius: 8, background: 'transparent', cursor: 'pointer' }}
-                                        />
-                                            <input
-                                                className="settings-input"
-                                                type="text"
-                                                value={settingsDraft?.accentColor ?? settings.accentColor}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, accentColor: e.target.value } : null)}
-                                                style={{
-                                                    borderRadius: 7,
-                                                    border: '1px solid #444',
-                                                    background: '#23252a',
-                                                    color: '#fff',
-                                                    padding: '6px 12px',
-                                                    width: 90,
-                                                    fontSize: 15
-                                                }}
-                                            />
-                                        </div>
-                                    </label>
-
-                                    <label style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-                                        Theme
-                                        <select
-                                            className="settings-select"
-                                            value={settingsDraft?.theme ?? settings.theme}
-                                            onChange={e => setSettingsDraft(s => s ? { ...s, theme: e.target.value as Settings['theme'] } : null)}
-                                            style={{ borderRadius: 7, border: '1px solid #444', background: '#23252a', color: '#fff', padding: '6px 12px', width: 150, fontSize: 15 }}
-                                        >
-                                            <option value="dark">Dark (Default)</option>
-                                            <option value="light">Light</option>
-                                            <option value="system">System theme</option>
-                                        </select>
-                                    </label>
-                                </div>
+                                {/* Visual Settings section removed (merged into Full Theme). */}
 
                                 {/* Behavior Settings section */}
                                 <div>
@@ -3189,38 +3527,102 @@ const App: React.FC = () => {
                                     </label>
                                 </div>
 
+                                <div style={{ marginTop: 10, padding: 14, border: `1px solid ${themeColors.border}`, borderRadius: 12, background: themeColors.panelBackground }}>
+                                    <div style={{ fontSize: 13, color: themeColors.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>
+                                        Settings file path:{' '}
+                                        <code
+                                            style={{ color: themeColors.textPrimary, cursor: 'pointer', textDecoration: 'underline' }}
+                                            title="click to copy"
+                                            onClick={() => {
+                                                if (!settingsPaths?.configPath) return;
+                                                void copyTextToClipboard(settingsPaths.configPath, 'Settings file path');
+                                            }}
+                                        >
+                                            {settingsPaths?.configPath || 'AppData/clip-settings.json'}
+                                        </code>
+                                        <br />
+                                        Settings schema path:{' '}
+                                        <code
+                                            style={{ color: themeColors.textPrimary, cursor: 'pointer', textDecoration: 'underline' }}
+                                            title="click to copy"
+                                            onClick={() => {
+                                                if (!settingsPaths?.schemaPath) return;
+                                                void copyTextToClipboard(settingsPaths.schemaPath, 'Settings schema path');
+                                            }}
+                                        >
+                                            {settingsPaths?.schemaPath || 'AppData/clip-settings.schema.json'}
+                                        </code>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                                        <button
+                                            className="settings-button"
+                                            style={{
+                                                background: 'rgba(255,255,255,0.08)',
+                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                borderRadius: 8,
+                                                color: '#fff',
+                                                padding: '9px 12px',
+                                                cursor: 'pointer',
+                                                fontWeight: 600,
+                                            }}
+                                            onClick={() => {
+                                                void openSettingsConfigInSystem();
+                                            }}
+                                        >
+                                            Open Settings JSON
+                                        </button>
+                                        <button
+                                            className="settings-button"
+                                            style={{
+                                                background: 'rgba(255,255,255,0.08)',
+                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                borderRadius: 8,
+                                                color: '#fff',
+                                                padding: '9px 12px',
+                                                cursor: 'pointer',
+                                                fontWeight: 600,
+                                            }}
+                                            onClick={() => {
+                                                void reloadSettingsFromDisk();
+                                            }}
+                                        >
+                                            Reload Settings From Disk
+                                        </button>
+                                    </div>
+                                </div>
+
                                 {/* Danger Area section */}
                                 <div style={{
                                     marginTop: 32,
                                     padding: 18,
-                                    border: '2px solid #ff4136',
+                                    border: `2px solid ${themeColors.danger}`,
                                     borderRadius: 12,
-                                    background: 'rgba(255,65,54,0.08)',
-                                    color: '#ff4136',
+                                    background: `${themeColors.danger}14`,
+                                    color: themeColors.danger,
                                     display: 'flex',
                                     flexDirection: 'column',
                                     gap: 16,
                                 }}>
-                                    <h2 id='danger-area' style={{ fontSize: 18, fontWeight: 700, color: '#ff4136', margin: 0, marginBottom: 8 }}>Danger Area</h2>
-                                    <div style={{ fontSize: 15, color: '#ff4136', marginBottom: 8 }}>
+                                    <h2 id='danger-area' style={{ fontSize: 18, fontWeight: 700, color: themeColors.danger, margin: 0, marginBottom: 8 }}>Danger Area</h2>
+                                    <div style={{ fontSize: 15, color: themeColors.danger, marginBottom: 8 }}>
                                         These actions are irreversible. Please proceed with caution.
                                     </div>
                                     <button
-                                        style={{ background: '#ff4136', border: '1px solid #ff4136', borderRadius: 8, color: '#fff', padding: '8px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15 }}
+                                        style={{ background: themeColors.danger, border: `1px solid ${themeColors.danger}`, borderRadius: 8, color: '#fff', padding: '8px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15 }}
                                         onClick={() => setDangerAction('clear')}
                                     >
                                         Clear All Clipboard History
                                     </button>
-                                    <div style={{ fontSize: 13, color: '#ff4136', marginBottom: 8, marginTop: -8 }}>
+                                    <div style={{ fontSize: 13, color: themeColors.danger, marginBottom: 8, marginTop: -8 }}>
                                         This will permanently delete all clipboard items.
                                     </div>
                                     <button
-                                        style={{ background: '#ffb300', border: '1px solid #ffb300', borderRadius: 8, color: '#222', padding: '8px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15 }}
+                                        style={{ background: themeColors.warning, border: `1px solid ${themeColors.warning}`, borderRadius: 8, color: '#222', padding: '8px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15 }}
                                         onClick={() => setDangerAction('reset')}
                                     >
                                         Reset Settings to Default
                                     </button>
-                                    <div id='reset-settings-warning' style={{ fontSize: 13, color: '#ffb300', marginTop: -8 }}>
+                                    <div id='reset-settings-warning' style={{ fontSize: 13, color: themeColors.warning, marginTop: -8 }}>
                                         This will reset all settings to their original defaults.
                                     </div>
                                 </div>
@@ -3346,7 +3748,7 @@ const App: React.FC = () => {
 
                     {/* Show empty state message when not loading and no items in filtered list */}
                     {filteredItems.length === 0 && !isInitialLoading && (
-                        <div className="clip-empty" style={{ opacity: 0.7, textAlign: 'center', marginTop: '10%' }}>
+                        <div className="clip-empty" style={{ opacity: 0.7, textAlign: 'center', marginTop: '10%', color: themeColors.textMuted }}>
                             {search.trim().length > 0
                                 ? 'No results found.'
                                 : filteredType === 'text'
@@ -3385,7 +3787,7 @@ const App: React.FC = () => {
                                             className={`clip-item clip-item-${item.type} ${isAnimatingList ? 'clip-item-animate' : ''}`}
                                             onClick={() => handlePaste(item)}
                                             style={{
-                                                background: 'rgba(255,255,255,0.04)',
+                                                background: themeColors.itemBackground,
                                                 borderRadius: 12,
                                                 margin: 0,
                                                 padding: '2.5% 3%',
@@ -3397,16 +3799,16 @@ const App: React.FC = () => {
                                                 gap: 10,
                                                 boxSizing: 'border-box'
                                             }}
-                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.10)'}
-                                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                                            onMouseEnter={e => e.currentTarget.style.background = themeColors.itemHoverBackground}
+                                            onMouseLeave={e => e.currentTarget.style.background = themeColors.itemBackground}
                                         >
                                             {item.type === 'image' ? (
                                                 <img className="clip-item-image" src={item.content} alt="clip" style={{ width: '13%', minWidth: 36, maxWidth: 48, height: 'auto', aspectRatio: '1/1', borderRadius: 8, objectFit: 'cover', marginRight: '4%' }} />
                                             ) : (
-                                                <div className="clip-item-text" style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '1rem', lineHeight: 1.4 }}>{item.content.length > 120 ? item.content.slice(0, 120) + '…' : item.content}</div>
+                                                <div className="clip-item-text" style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '1rem', lineHeight: 1.4, color: themeColors.textPrimary }}>{item.content.length > 120 ? item.content.slice(0, 120) + '…' : item.content}</div>
                                             )}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', minWidth: 60 }}>
-                                                <span className="clip-item-time" style={{ opacity: 0.5, fontSize: '0.85rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{new Date(item.timestamp).toLocaleTimeString()}</span>
+                                                <span className="clip-item-time" style={{ color: themeColors.textMuted, fontSize: '0.85rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{new Date(item.timestamp).toLocaleTimeString()}</span>
                                                 {(settings.pinFavoriteItems) && (
                                                     <button
                                                         className="clip-pin-btn"
@@ -3649,43 +4051,43 @@ const App: React.FC = () => {
 
                 /* Theme-based styling */
                 .theme-light .clip-root {
-                    background: rgba(250,250,250,${settings.transparency});
-                    color: #2c3e50;
+                    background: ${themeColors.appBackground};
+                    color: ${themeColors.textPrimary};
                     backdrop-filter: blur(10px);
                     -webkit-backdrop-filter: blur(10px);
                 }
 
                 .theme-light .clip-item {
-                    background: rgba(255,255,255,0.85) !important;
-                    color: #2c3e50;
-                    border: 1px solid rgba(0,0,0,0.08) !important;
+                    background: ${themeColors.itemBackground} !important;
+                    color: ${themeColors.textPrimary};
+                    border: 1px solid ${themeColors.border} !important;
                 }
 
                 .theme-light .clip-item:hover {
-                    background: rgba(255,255,255,0.95) !important;
-                    border: 1px solid rgba(0,0,0,0.12) !important;
+                    background: ${themeColors.itemHoverBackground} !important;
+                    border: 1px solid ${themeColors.border} !important;
                 }
 
                 .theme-light .clip-settings-page {
-                    background: rgba(250,250,250,${settings.transparency}) !important;
-                    color: #2c3e50;
+                    background: ${themeColors.panelBackground} !important;
+                    color: ${themeColors.textPrimary};
                 }
 
 
                 .theme-light .clip-settings-scroll::-webkit-scrollbar-thumb {
-                    background: #aaa;
-                    border: 2px solid #f0f0f0;
+                    background: ${themeColors.scrollbarThumb};
+                    border: 2px solid ${themeColors.scrollbarTrack};
                     max-height: 90%;
                 }
 
                 .theme-light .clip-settings-scroll::-webkit-scrollbar-thumb:hover {
-                    background: ${settings.accentColor};
+                    background: ${themeColors.accent};
                 }
 
                 .theme-light input, .theme-light select {
-                    background: rgba(255,255,255,0.95) !important;
-                    color: #2c3e50 !important;
-                    border: 1px solid #d1d5db !important;
+                    background: ${themeColors.inputBackground} !important;
+                    color: ${themeColors.textPrimary} !important;
+                    border: 1px solid ${themeColors.inputBorder} !important;
                     box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
                 }
 
@@ -3699,14 +4101,14 @@ const App: React.FC = () => {
                 }
 
                 .theme-light input:focus, .theme-light select:focus {
-                    border-color: ${settings.accentColor} !important;
+                    border-color: ${themeColors.accent} !important;
                     box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
                     outline: none !important;
                 }
 
                 .theme-light option {
-                    background: rgba(255,255,255,0.98) !important;
-                    color: #2c3e50 !important;
+                    background: ${themeColors.panelBackground} !important;
+                    color: ${themeColors.textPrimary} !important;
                 }
 
                 /* Dark mode theme-specific option styling */
@@ -3721,14 +4123,14 @@ const App: React.FC = () => {
                 }
 
                 .theme-light button:not(.no-btn, .clip-pin-btn, .clip-delete-btn) {
-                    color: #292e36a6 !important;
-                    border: 1px solid #d1d5db !important;
+                    color: ${themeColors.textSecondary} !important;
+                    border: 1px solid ${themeColors.inputBorder} !important;
                     box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
                     transition: all 0.2s ease !important;
                 }
 
                 .theme-light button:hover:not(.clip-pin-btn, .clip-delete-btn) {
-                    border-color: #9ca3af !important;
+                    border-color: ${themeColors.accent} !important;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.15) !important;
                 }
 
@@ -3744,21 +4146,21 @@ const App: React.FC = () => {
                 }
 
                 .theme-light h2 {
-                    color: #2c3440e8 !important;
-                    border-bottom-color: #e5e7eb !important;
+                    color: ${themeColors.textPrimary} !important;
+                    border-bottom-color: ${themeColors.border} !important;
                 }
 
                 .theme-light h3 {
-                    color: #374151 !important;
+                    color: ${themeColors.textSecondary} !important;
                 }
 
                 .theme-light span:not(.toast-message>span) {
-                    color: #6b7280 !important;
+                    color: ${themeColors.textMuted} !important;
                 }
 
                 /* Light mode text labels - only for text labels, not container labels */
                 .theme-light label:not([style*="background:"]) {
-                    color: #374151 !important;
+                    color: ${themeColors.textSecondary} !important;
                 }
 
                 /* Light mode simple class-based styling */
@@ -3772,8 +4174,12 @@ const App: React.FC = () => {
                     box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
                 }
 
-                #danger-area, .theme-light #reset-settings-warning {
-                    color: #ff4136 !important;
+                #danger-area {
+                    color: ${themeColors.danger} !important;
+                }
+
+                .theme-light #reset-settings-warning {
+                    color: ${themeColors.warning} !important;
                 }
 
                 .theme-light .settings-input:focus,
@@ -4248,7 +4654,7 @@ const App: React.FC = () => {
                                 style={{
                                     background: '#222',
                                     color: '#fff',
-                                    border: '1px solid #444',
+                                    border: `1px solid ${themeColors.border}`,
                                     borderRadius: 6,
                                     padding: '8px 18px',
                                     fontWeight: 600,
@@ -4260,6 +4666,194 @@ const App: React.FC = () => {
                                         setBackupDeleteAction(null);
                                         setBackupToDelete('');
                                         setIsBackupDeleteDialogClosing(false);
+                                    }, 300);
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Theme profile reset confirmation dialog */}
+                {showThemeProfileResetConfirm && (
+                    <div className={`fade-opacity-${isThemeProfileResetDialogClosing ? 'out' : 'in'}`} style={{
+                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
+                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2350, borderRadius: settings.borderRadius
+                    }}>
+                        <div
+                            className={`${isThemeProfileResetDialogClosing ? 'fade-out' : 'fade-in'}`}
+                            style={{
+                                background: themeColors.panelBackground,
+                                borderRadius: 10,
+                                padding: 24,
+                                minWidth: 340,
+                                maxWidth: 460,
+                                textAlign: 'center',
+                                boxShadow: '0 2px 12px #0008',
+                                border: `1px solid ${themeColors.border}`
+                            }}
+                        >
+                            <div style={{
+                                marginBottom: 18,
+                                color: themeColors.warning,
+                                fontWeight: 700,
+                                fontSize: 17,
+                                lineHeight: 1.4
+                            }}>
+                                Reset this profile's theme to default?
+                            </div>
+                            <div style={{
+                                fontSize: 14,
+                                color: themeColors.textSecondary,
+                                marginBottom: 18,
+                                lineHeight: 1.55,
+                                textAlign: 'left'
+                            }}>
+                                This will overwrite the selected profile's colors, typography, surface settings, and icons with Clip's default theme values.
+                                <br /><br />
+                                The profile name will stay the same.
+                                <br /><br />
+                                <strong style={{ color: themeColors.danger }}>This cannot be undone.</strong>
+                            </div>
+                            <button
+                                style={{
+                                    background: themeColors.warning,
+                                    color: '#222',
+                                    border: `1px solid ${themeColors.warning}`,
+                                    borderRadius: 6,
+                                    padding: '8px 18px',
+                                    marginRight: 10,
+                                    marginBottom: 8,
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                }}
+                                onClick={() => {
+                                    setIsThemeProfileResetDialogClosing(true);
+                                    setTimeout(() => {
+                                        setShowThemeProfileResetConfirm(false);
+                                        setIsThemeProfileResetDialogClosing(false);
+                                    }, 300);
+                                    void resetActiveThemeProfileToDefault();
+                                }}
+                            >
+                                Yes, Reset Profile
+                            </button>
+                            <button
+                                style={{
+                                    background: '#222',
+                                    color: '#fff',
+                                    border: `1px solid ${themeColors.border}`,
+                                    borderRadius: 6,
+                                    padding: '8px 18px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                                onClick={() => {
+                                    setIsThemeProfileResetDialogClosing(true);
+                                    setTimeout(() => {
+                                        setShowThemeProfileResetConfirm(false);
+                                        setIsThemeProfileResetDialogClosing(false);
+                                    }, 300);
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Theme profile delete confirmation dialog */}
+                {showThemeProfileDeleteConfirm && (
+                    <div className={`fade-opacity-${isThemeProfileDeleteDialogClosing ? 'out' : 'in'}`} style={{
+                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
+                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2351, borderRadius: settings.borderRadius
+                    }}>
+                        <div
+                            className={`${isThemeProfileDeleteDialogClosing ? 'fade-out' : 'fade-in'}`}
+                            style={{
+                                background: themeColors.panelBackground,
+                                borderRadius: 10,
+                                padding: 24,
+                                minWidth: 340,
+                                maxWidth: 460,
+                                textAlign: 'center',
+                                boxShadow: '0 2px 12px #0008',
+                                border: `1px solid ${themeColors.border}`
+                            }}
+                        >
+                            <div style={{
+                                marginBottom: 18,
+                                color: themeColors.danger,
+                                fontWeight: 700,
+                                fontSize: 17,
+                                lineHeight: 1.4
+                            }}>
+                                Delete this theme profile?
+                            </div>
+                            <div style={{
+                                fontSize: 14,
+                                color: themeColors.textSecondary,
+                                marginBottom: 18,
+                                lineHeight: 1.55,
+                                textAlign: 'left'
+                            }}>
+                                This will permanently delete the active profile{' '}
+                                <strong style={{ color: themeColors.textPrimary }}>{themeEditorConfig.profiles[activeThemeProfileKey]?.name || activeThemeProfileKey}</strong>.
+                                <br /><br />
+                                If you delete the current profile, Clip will switch to another available profile.
+                                <br /><br />
+                                <strong style={{ color: themeColors.danger }}>This cannot be undone.</strong>
+                            </div>
+                            <button
+                                style={{
+                                    background: themeColors.danger,
+                                    color: '#fff',
+                                    border: `1px solid ${themeColors.danger}`,
+                                    borderRadius: 6,
+                                    padding: '8px 18px',
+                                    marginRight: 10,
+                                    marginBottom: 8,
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                }}
+                                onClick={async () => {
+                                    setIsThemeProfileDeleteDialogClosing(true);
+                                    setTimeout(() => {
+                                        setShowThemeProfileDeleteConfirm(false);
+                                        setIsThemeProfileDeleteDialogClosing(false);
+                                    }, 300);
+
+                                    try {
+                                        const saved = await window.electronAPI?.deleteThemeProfile?.(activeThemeProfileKey);
+                                        if (saved) {
+                                            const sanitized = sanitizeThemeConfig(saved);
+                                            setThemeConfig(sanitized);
+                                            setThemeEditorConfig(sanitized);
+                                            showToast('success', 'Theme profile deleted.');
+                                        }
+                                    } catch (error) {
+                                        showToast('error', `Failed to delete profile: ${error instanceof Error ? error.message : String(error)}`);
+                                    }
+                                }}
+                            >
+                                Yes, Delete Profile
+                            </button>
+                            <button
+                                style={{
+                                    background: '#222',
+                                    color: '#fff',
+                                    border: `1px solid ${themeColors.border}`,
+                                    borderRadius: 6,
+                                    padding: '8px 18px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                                onClick={() => {
+                                    setIsThemeProfileDeleteDialogClosing(true);
+                                    setTimeout(() => {
+                                        setShowThemeProfileDeleteConfirm(false);
+                                        setIsThemeProfileDeleteDialogClosing(false);
                                     }, 300);
                                 }}
                             >
@@ -4290,7 +4884,7 @@ const App: React.FC = () => {
                         >
                             <div style={{
                                 marginBottom: 18,
-                                color: pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) ? '#ff4136' : '#e67e22',
+                                color: pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) ? themeColors.danger : themeColors.warning,
                                 fontWeight: 600,
                                 fontSize: 17,
                                 lineHeight: 1.4
@@ -4301,7 +4895,7 @@ const App: React.FC = () => {
                             </div>
                             <div style={{
                                 fontSize: 14,
-                                color: settings.theme === 'light' ? '#666' : '#ccc',
+                                color: themeColors.textSecondary,
                                 marginBottom: 18,
                                 lineHeight: 1.5
                             }}>
@@ -4309,7 +4903,7 @@ const App: React.FC = () => {
                                     <>
                                         You're decreasing the max items from <strong>{settingsDraft?.maxItems ?? settings.maxItems}</strong> to <strong>{pendingMaxItems}</strong>.
                                         <br /><br />
-                                        <span style={{ color: '#ff4136', fontWeight: 600 }}>⚠️ This will immediately delete {Math.max(0, items.length - pendingMaxItems)} clipboard items from the oldest entries.</span>
+                                        <span style={{ color: themeColors.danger, fontWeight: 600 }}>⚠️ This will immediately delete {Math.max(0, items.length - pendingMaxItems)} clipboard items from the oldest entries.</span>
                                         <br /><br />
                                         <strong>This action is irreversible.</strong> Consider creating a backup first if you might want to restore these items later.
                                     </>
@@ -4324,9 +4918,9 @@ const App: React.FC = () => {
                             {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) && !backupCreated && (
                                 <button
                                     style={{
-                                        background: settingsDraft?.accentColor ?? settings.accentColor,
+                                        background: themeColors.success,
                                         color: '#fff',
-                                        border: `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}`,
+                                        border: `1px solid ${themeColors.success}`,
                                         borderRadius: 6,
                                         padding: '6px 16px',
                                         marginBottom: 12,
@@ -4356,9 +4950,9 @@ const App: React.FC = () => {
                             )}
                             <button
                                 style={{
-                                    background: settings.accentColor,
+                                    background: themeColors.success,
                                     color: '#222',
-                                    border: `1px solid ${settings.accentColor}`,
+                                    border: `1px solid ${themeColors.success}`,
                                     borderRadius: 6,
                                     padding: '8px 18px',
                                     marginRight: 10,
