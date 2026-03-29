@@ -349,8 +349,8 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                                                 background: isSelected
                                                     ? settingsDraft?.accentColor + '22'
                                                     : isChecked
-                                                    ? 'rgba(255,255,255,0.08)'
-                                                    : 'transparent',
+                                                        ? 'rgba(255,255,255,0.08)'
+                                                        : 'transparent',
                                                 borderLeft: isSelected
                                                     ? `3px solid ${settingsDraft?.accentColor ?? settings.accentColor}`
                                                     : '3px solid transparent',

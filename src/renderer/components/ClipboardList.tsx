@@ -132,10 +132,10 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                     {search.trim().length > 0
                         ? 'No results found.'
                         : filteredType === 'text'
-                        ? 'No text found.'
-                        : filteredType === 'image'
-                        ? 'No images found.'
-                        : 'No clipboard items found.'}
+                            ? 'No text found.'
+                            : filteredType === 'image'
+                                ? 'No images found.'
+                                : 'No clipboard items found.'}
                 </div>
             )}
 

@@ -7,26 +7,25 @@ import ToastContainer from './components/ToastContainer';
 import { log, isDev } from '../logger';
 import {
     DEFAULT_SETTINGS,
-    MAIN_KEY_OPTIONS,
-    MODIFIER_OPTIONS,
-    sectionHeaderStyle,
 } from './app-constants';
-import type { BackupEntry, ClipboardItem, Settings, ToastMessage } from './app-types';
+import type { BackupEntry, ClipboardItem, Settings } from './app-types';
 import AppDialogs from './components/AppDialogs';
 import AppInlineStyles from './components/AppInlineStyles';
 import ClipboardList from './components/ClipboardList';
 import IconGlyph from './components/IconGlyph';
+import SettingsBehaviorSection from './components/SettingsBehaviorSection';
 import SettingsBackupsSection from './components/SettingsBackupsSection';
+import SettingsDataSection from './components/SettingsDataSection';
+import SettingsGeneralSection from './components/SettingsGeneralSection';
+import SettingsModalFooter from './components/SettingsModalFooter';
 import SettingsThemeSection from './components/SettingsThemeSection';
-import Switch from './components/Switch';
-import { getActiveThemeProfile } from './theme-utils';
+import { useShortcutDraft } from './hooks/useShortcutDraft';
+import { useThemeConfigManager } from './hooks/useThemeConfigManager';
+import { useToastManager } from './hooks/useToastManager';
 import {
     WINDOW_SIZE_LIMITS,
-    createDefaultThemeConfig,
     normalizeThemeProfileKey,
     sanitizeThemeConfig,
-    type ThemeConfig,
-    type ThemeProfile,
 } from '../theme-config';
 
 const App: React.FC = () => {
@@ -35,18 +34,36 @@ const App: React.FC = () => {
         const saved = localStorage.getItem('clip-settings');
         return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
     });
-    const [themeConfig, setThemeConfig] = useState<ThemeConfig>(() => createDefaultThemeConfig());
-    const activeThemeProfile = React.useMemo(() => getActiveThemeProfile(themeConfig), [themeConfig]);
-    const activeThemeProfileKey = React.useMemo(() => {
-        const normalized = normalizeThemeProfileKey(themeConfig.activeProfile);
-        if (themeConfig.profiles[normalized]) return normalized;
-        return Object.keys(themeConfig.profiles)[0] || 'default';
-    }, [themeConfig]);
+    const { toasts, showToast, dismissToast, clearAllToasts } = useToastManager();
 
-    const themeColors = activeThemeProfile.colors;
-    const themeTypography = activeThemeProfile.typography;
-    const themeSurface = activeThemeProfile.surface;
-    const themeIcons = activeThemeProfile.icons;
+    const {
+        themeConfig,
+        setThemeConfig,
+        themeEditorConfig,
+        setThemeEditorConfig,
+        themeSchema,
+        themePaths,
+        settingsPaths,
+        newThemeProfileName,
+        setNewThemeProfileName,
+        isThemeSaving,
+        activeThemeProfileKey,
+        editorThemeProfile,
+        themeColors,
+        themeTypography,
+        themeSurface,
+        themeIcons,
+        saveThemeEditorConfig,
+        updateEditorActiveProfile,
+        switchThemeProfile,
+        createThemeProfileFromInput,
+        deleteActiveThemeProfile,
+        resetActiveThemeProfileToDefault,
+        reloadThemeFromDisk,
+        exportThemeJson,
+        openThemeConfigInSystem,
+        openSettingsConfigInSystem,
+    } = useThemeConfigManager({ showToast });
 
     const clampWindowWidth = useCallback((value: unknown) => {
         const parsed = Number(value);
@@ -79,8 +96,6 @@ const App: React.FC = () => {
         return '';
     }, []);
 
-    const toastIdCounter = useRef(0); // For unique toast IDs
-    const [toasts, setToasts] = useState<ToastMessage[]>([]);
     const [isWindowFocused, setIsWindowFocused] = useState(document.hasFocus()); // Track window focus state
     const [listForceKey, setListForceKey] = useState(0); // Force virtualizer remount on visibility changes
     const [isAnimatingList, setIsAnimatingList] = useState(true); // Track if list should animate
@@ -145,28 +160,18 @@ const App: React.FC = () => {
     const [isRestartDialogClosing, setIsRestartDialogClosing] = useState(false);
     const [isUnsavedChangesDialogClosing, setIsUnsavedChangesDialogClosing] = useState(false);
 
-    // --- Modern shortcut input state ---
-    const [shortcutModifiers, setShortcutModifiers] = useState<string[]>(() => {
-        const shortcut = settingsDraft?.globalShortcut ?? settings.globalShortcut;
-        return shortcut.split('+').filter(k => MODIFIER_OPTIONS.some(opt => opt.value.toLowerCase() === k.toLowerCase()));
+    const {
+        shortcutModifiers,
+        setShortcutModifiers,
+        shortcutMainKey,
+        setShortcutMainKey,
+        showShortcutInfo,
+        setShowShortcutInfo,
+    } = useShortcutDraft({
+        settingsDraft,
+        settings,
+        setSettingsDraft,
     });
-    const [shortcutMainKey, setShortcutMainKey] = useState<string>(() => {
-        const shortcut = settingsDraft?.globalShortcut ?? settings.globalShortcut;
-        const parts = shortcut.split('+');
-        return parts[parts.length - 1] || '';
-    });
-    // Keep shortcutModifiers and shortcutMainKey in sync with settingsDraft/globalShortcut
-    useEffect(() => {
-        const shortcut = settingsDraft?.globalShortcut ?? settings.globalShortcut;
-        const parts = shortcut.split('+');
-        setShortcutModifiers(parts.slice(0, -1));
-        setShortcutMainKey(parts[parts.length - 1] || '');
-    }, [settingsDraft?.globalShortcut, settings.globalShortcut]);
-    // Compose shortcut string and update settingsDraft
-    useEffect(() => {
-        const composed = [...shortcutModifiers, shortcutMainKey].filter(Boolean).join('+');
-        setSettingsDraft(s => s ? { ...s, globalShortcut: composed } : null);
-    }, [shortcutModifiers, shortcutMainKey]);
 
     // Handle system theme changes
     const handleSystemThemeChange = () => {
@@ -175,9 +180,6 @@ const App: React.FC = () => {
         setSettings({ ...settings });
         // }
     };
-
-    // --- Shortcut warning logic ---
-    const [showShortcutInfo, setShowShortcutInfo] = useState(false);
 
     // --- Backup restore dropdown state ---
     const [backupList, setBackupList] = useState<BackupEntry[]>([]);
@@ -189,215 +191,6 @@ const App: React.FC = () => {
     const [backupDeleteAction, setBackupDeleteAction] = useState<'single' | 'multiple' | null>(null);
     const [backupToDelete, setBackupToDelete] = useState<string>('');
     const [isBackupDeleteDialogClosing, setIsBackupDeleteDialogClosing] = useState(false);
-
-    // --- Theme config state ---
-    const [themeEditorConfig, setThemeEditorConfig] = useState<ThemeConfig>(() => createDefaultThemeConfig());
-    const [themeSchema, setThemeSchema] = useState<any>(null);
-    const [themePaths, setThemePaths] = useState<{ configPath: string; schemaPath: string } | null>(null);
-    const [settingsPaths, setSettingsPaths] = useState<{ configPath: string; schemaPath: string } | null>(null);
-    const [newThemeProfileName, setNewThemeProfileName] = useState('');
-    const [isThemeSaving, setIsThemeSaving] = useState(false);
-    const editorThemeProfile = React.useMemo(() => getActiveThemeProfile(themeEditorConfig), [themeEditorConfig]);
-
-    const saveThemeEditorConfig = useCallback(async () => {
-        try {
-            setIsThemeSaving(true);
-            const saved = await window.electronAPI?.saveThemeConfig?.(themeEditorConfig);
-            if (saved) {
-                const next = sanitizeThemeConfig(saved);
-                setThemeConfig(next);
-                setThemeEditorConfig(next);
-                showToast('success', 'Theme config saved to file.');
-            }
-        } catch (error) {
-            showToast('error', `Failed to save theme config: ${error instanceof Error ? error.message : String(error)}`);
-        } finally {
-            setIsThemeSaving(false);
-        }
-    }, [themeEditorConfig]);
-
-    const updateEditorActiveProfile = useCallback((updater: (profile: ThemeProfile) => ThemeProfile) => {
-        setThemeEditorConfig((prev) => {
-            const key = normalizeThemeProfileKey(prev.activeProfile);
-            const activeKey = prev.profiles[key] ? key : Object.keys(prev.profiles)[0] || 'default';
-            const current = prev.profiles[activeKey] || createDefaultThemeConfig().profiles.default;
-            const updated = updater(current);
-            return {
-                ...prev,
-                activeProfile: activeKey,
-                profiles: {
-                    ...prev.profiles,
-                    [activeKey]: updated,
-                },
-            };
-        });
-    }, []);
-
-    const loadThemeFromMain = useCallback(async () => {
-        try {
-            const [config, schema, themeFilePaths, settingsFilePaths] = await Promise.all([
-                window.electronAPI?.getThemeConfig?.(),
-                window.electronAPI?.getThemeSchema?.(),
-                window.electronAPI?.getThemePaths?.(),
-                window.electronAPI?.getSettingsPaths?.(),
-            ]);
-
-            if (config) {
-                const sanitized = sanitizeThemeConfig(config);
-                setThemeConfig(sanitized);
-                setThemeEditorConfig(sanitized);
-            }
-            if (schema) {
-                setThemeSchema(schema);
-            }
-            if (themeFilePaths?.configPath && themeFilePaths?.schemaPath) {
-                setThemePaths(themeFilePaths);
-            }
-            if (settingsFilePaths?.configPath && settingsFilePaths?.schemaPath) {
-                setSettingsPaths(settingsFilePaths);
-            }
-        } catch (error) {
-            showToast('error', `Failed to load theme config: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, []);
-
-    const switchThemeProfile = useCallback(async (profileKey: string) => {
-        try {
-            const key = normalizeThemeProfileKey(profileKey);
-            setThemeEditorConfig(prev => ({ ...prev, activeProfile: key }));
-            const next = await window.electronAPI?.setActiveThemeProfile?.(key);
-            if (next) {
-                const sanitized = sanitizeThemeConfig(next);
-                setThemeConfig(sanitized);
-                setThemeEditorConfig(sanitized);
-            }
-        } catch (error) {
-            showToast('error', `Failed to switch profile: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, []);
-
-    const createThemeProfileFromInput = useCallback(async () => {
-        const name = newThemeProfileName.trim();
-        if (!name) return;
-
-        try {
-            const saved = await window.electronAPI?.createThemeProfile?.(name);
-            if (saved) {
-                const sanitized = sanitizeThemeConfig(saved);
-                setThemeConfig(sanitized);
-                setThemeEditorConfig(sanitized);
-                setNewThemeProfileName('');
-                showToast('success', 'Theme profile created.');
-            }
-        } catch (error) {
-            showToast('error', `Failed to create profile: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, [newThemeProfileName]);
-
-    const deleteActiveThemeProfile = useCallback(async () => {
-        try {
-            const saved = await window.electronAPI?.deleteThemeProfile?.(activeThemeProfileKey);
-            if (saved) {
-                const sanitized = sanitizeThemeConfig(saved);
-                setThemeConfig(sanitized);
-                setThemeEditorConfig(sanitized);
-                showToast('success', 'Theme profile deleted.');
-            }
-        } catch (error) {
-            showToast('error', `Failed to delete profile: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, [activeThemeProfileKey]);
-
-    const resetActiveThemeProfileToDefault = useCallback(async () => {
-        try {
-            const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
-            const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
-            const defaultProfile = createDefaultThemeConfig().profiles.default;
-            const nextConfig = sanitizeThemeConfig({
-                ...themeConfig,
-                ...themeEditorConfig,
-                activeProfile: profileKey,
-                profiles: {
-                    ...themeEditorConfig.profiles,
-                    [profileKey]: {
-                        ...defaultProfile,
-                        name: currentProfile.name || defaultProfile.name,
-                    },
-                },
-            });
-
-            setThemeConfig(nextConfig);
-            setThemeEditorConfig(nextConfig);
-
-            const saved = await window.electronAPI?.saveThemeConfig?.(nextConfig);
-            if (saved) {
-                const sanitized = sanitizeThemeConfig(saved);
-                setThemeConfig(sanitized);
-                setThemeEditorConfig(sanitized);
-            }
-
-            showToast('success', 'Theme profile reset to default.');
-        } catch (error) {
-            showToast('error', `Failed to reset profile theme: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, [editorThemeProfile, themeConfig, themeEditorConfig]);
-
-    const reloadThemeFromDisk = useCallback(async () => {
-        try {
-            const next = await window.electronAPI?.reloadThemeConfig?.();
-            if (next) {
-                const sanitized = sanitizeThemeConfig(next);
-                setThemeConfig(sanitized);
-                setThemeEditorConfig(sanitized);
-                showToast('info', 'Theme config reloaded from file/backup.');
-            }
-        } catch (error) {
-            showToast('error', `Failed to reload theme config: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, []);
-
-    const exportThemeJson = useCallback(async () => {
-        try {
-            const text = await window.electronAPI?.exportThemeConfig?.();
-            if (!text) return;
-            const blob = new Blob([text], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'clip-theme.json';
-            a.click();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-            showToast('success', 'Theme JSON exported.');
-        } catch (error) {
-            showToast('error', `Failed to export theme JSON: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, []);
-
-    const openThemeConfigInSystem = useCallback(async () => {
-        try {
-            const result = await window.electronAPI?.openThemeConfigFile?.();
-            if (result?.ok) {
-                showToast('success', 'Opened theme config file in default app.');
-            } else {
-                showToast('error', `Failed to open theme config file: ${result?.error || 'Unknown error'}`);
-            }
-        } catch (error) {
-            showToast('error', `Failed to open theme config file: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, []);
-
-    const openSettingsConfigInSystem = useCallback(async () => {
-        try {
-            const result = await window.electronAPI?.openSettingsConfigFile?.();
-            if (result?.ok) {
-                showToast('success', 'Opened settings config file in default app.');
-            } else {
-                showToast('error', `Failed to open settings config file: ${result?.error || 'Unknown error'}`);
-            }
-        } catch (error) {
-            showToast('error', `Failed to open settings config file: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }, []);
 
     const reloadSettingsFromDisk = useCallback(async () => {
         try {
@@ -500,18 +293,6 @@ const App: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        loadThemeFromMain();
-        const dispose = window.electronAPI?.onThemeConfigUpdated?.((nextConfig) => {
-            const sanitized = sanitizeThemeConfig(nextConfig);
-            setThemeConfig(sanitized);
-            setThemeEditorConfig(sanitized);
-        });
-        return () => {
-            if (typeof dispose === 'function') dispose();
-        };
-    }, [loadThemeFromMain]);
-
-    useEffect(() => {
         setHasUnsavedChanges(prev => {
             const settingsDifferent = !!(settingsDraft && settings) && JSON.stringify(settingsDraft) !== JSON.stringify(settings);
             const themeDifferent = JSON.stringify(themeEditorConfig) !== JSON.stringify(themeConfig);
@@ -531,79 +312,6 @@ const App: React.FC = () => {
         }
     }, [showSettings, refreshBackupList]);
 
-    // Toast notification helpers
-    const showToast = (type: 'success' | 'error' | 'info', messageText: string) => {
-        toastIdCounter.current += 1;
-        const id = `toast-${toastIdCounter.current}`;
-        const newToast: ToastMessage = { id, type, message: messageText, isFadingOut: false }; // Initialize isFadingOut
-        setToasts(prev => [...prev, newToast]);
-
-        // If too many toasts (more than 3), remove the oldest ones
-        setTimeout(() => {
-            setToasts(currentToasts => {
-                if (currentToasts.length > 3) {
-                    return currentToasts.slice(currentToasts.length - 3);
-                }
-                return currentToasts;
-            });
-        }, 100);
-    };
-
-    const toastTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
-
-    const dismissToast = useCallback((id: string, type: 'manual' | 'auto') => {
-        // Start fading out animation
-        setToasts(prevToasts =>
-            prevToasts.map(toast =>
-                toast.id === id ? { ...toast, isFadingOut: true } : toast
-            )
-        );
-
-        // Clear the main 3-second auto-dismiss timer if it exists for this toast
-        if (toastTimersRef.current[id]) {
-            clearTimeout(toastTimersRef.current[id]);
-            delete toastTimersRef.current[id];
-        }
-
-        // After animation duration, actually remove the toast
-        setTimeout(() => {
-            setToasts(prev => prev.filter(t => t.id !== id));
-        }, 300); // Corresponds to animation duration
-    }, [setToasts]); // setToasts is stable
-
-    useEffect(() => {
-        const newTimers: Record<string, NodeJS.Timeout> = { ...toastTimersRef.current };
-
-        toasts.forEach(toast => {
-            if (!toast.isFadingOut && !newTimers[toast.id]) {
-                // If not already fading out and no timer exists, set one.
-                newTimers[toast.id] = setTimeout(() => {
-                    dismissToast(toast.id, 'auto');
-                }, 3000); // Start dismissal process after 3 seconds
-            } else if (toast.isFadingOut && newTimers[toast.id]) {
-                // If it started fading out but still had a 3s timer, clear it.
-                clearTimeout(newTimers[toast.id]);
-                delete newTimers[toast.id];
-            }
-        });
-
-        // Clear timers for toasts that no longer exist
-        Object.keys(newTimers).forEach(toastId => {
-            if (!toasts.some(t => t.id === toastId)) {
-                clearTimeout(newTimers[toastId]);
-                delete newTimers[toastId];
-            }
-        });
-
-        toastTimersRef.current = newTimers;
-
-        // Cleanup on unmount - clear all managed timers
-        return () => {
-            Object.values(toastTimersRef.current).forEach(clearTimeout);
-            toastTimersRef.current = {};
-        };
-    }, [toasts, dismissToast]);
-
     // Reset animation state after animations complete
     useEffect(() => {
         if (isAnimatingList) {
@@ -613,22 +321,6 @@ const App: React.FC = () => {
             return () => clearTimeout(timeout);
         }
     }, [isAnimatingList]);
-
-    const clearAllToasts = () => {
-        // Mark all toasts for fading out
-        setToasts(prevToasts =>
-            prevToasts.map(toast => ({ ...toast, isFadingOut: true }))
-        );
-
-        // Clear all active 3s auto-dismiss timers
-        Object.values(toastTimersRef.current).forEach(clearTimeout);
-        toastTimersRef.current = {};
-
-        // Actually remove them after animation completes
-        setTimeout(() => {
-            setToasts([]);
-        }, 300); // Animation duration
-    };
 
     // Add loading state for backup operation
     const [isBackingUp, setIsBackingUp] = useState(false);
@@ -1464,6 +1156,14 @@ const App: React.FC = () => {
         closeMaxItemsWarningDialog();
     };
 
+    const handleQuitFromSettings = () => {
+        if (hasUnsavedChanges) {
+            setShowUnsavedChangesConfirm('quit');
+        } else {
+            window.electronAPI?.quitApp?.();
+        }
+    };
+
     // UI: Add settings page/modal
     return (
         <ThemeProvider
@@ -1670,343 +1370,31 @@ const App: React.FC = () => {
                                 scrollbarWidth: 'thin',
                                 scrollbarColor: settings.theme === 'light' ? '#ccc #f0f0f0' : '#444 #23252a',
                             }}>
-                                {/* General section */}
-                                <div>
-                                    <h2 style={{ ...sectionHeaderStyle, marginBlockStart: 0, color: '#e1e1e1', fontSize: 16, fontWeight: 600, marginBottom: 16 }}>General</h2>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Max clipboard items</span>
-                                            <div style={{ position: 'relative' }}>
-                                                <input
-                                                    className="settings-input"
-                                                    type="number"
-                                                    min={10}
-                                                    max={500}
-                                                    value={maxItemsInputValue ?? (settingsDraft?.maxItems ?? settings.maxItems)}
-                                                    onChange={e => {
-                                                        const newValue = Number(e.target.value);
-                                                        const currentMaxItems = settingsDraft?.maxItems ?? settings.maxItems;
-                                                        setMaxItemsInputValue(newValue);
-                                                        setHasMaxItemsChanges(newValue !== currentMaxItems);
-                                                    }}
-                                                    style={{
-                                                        borderRadius: 8,
-                                                        border: '1px solid rgba(255,255,255,0.12)',
-                                                        background: 'rgba(255,255,255,0.05)',
-                                                        color: '#fff',
-                                                        padding: hasMaxItemsChanges ? '10px 40px 10px 12px' : '10px 12px',
-                                                        fontSize: 14,
-                                                        transition: 'border-color 0.2s, background 0.2s, padding 0.2s',
-                                                        outline: 'none',
-                                                        width: '100%',
-                                                        boxSizing: 'border-box'
-                                                    }}
-                                                    onFocus={e => e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor}
-                                                    onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.12)'}
-                                                />
-                                                {hasMaxItemsChanges && (
-                                                    <button
-                                                        style={{
-                                                            position: 'absolute',
-                                                            right: 8,
-                                                            top: '50%',
-                                                            transform: 'translateY(-50%)',
-                                                            background: settingsDraft?.accentColor ?? settings.accentColor,
-                                                            border: 'none',
-                                                            borderRadius: 4,
-                                                            color: '#fff',
-                                                            padding: '4px 8px',
-                                                            fontSize: 11,
-                                                            fontWeight: 600,
-                                                            cursor: 'pointer',
-                                                            transition: 'all 0.2s',
-                                                            opacity: 0.9
-                                                        }}
-                                                        onClick={() => {
-                                                            const newValue = maxItemsInputValue!;
-                                                            const currentMaxItems = settingsDraft?.maxItems ?? settings.maxItems;
-
-                                                            // Always show warning when decreasing max items
-                                                            if (newValue < currentMaxItems) {
-                                                                setPendingMaxItems(newValue);
-                                                                setBackupCreated(false); // Reset backup status
-                                                                setShowMaxItemsWarning(true);
-                                                                // Don't reset input states yet - wait for warning dialog
-                                                            }
-                                                            // Show performance warning when increasing significantly beyond current count
-                                                            else if (newValue > currentMaxItems && items.length > 0 && newValue > items.length + 50) {
-                                                                setPendingMaxItems(newValue);
-                                                                setBackupCreated(false); // Reset backup status
-                                                                setShowMaxItemsWarning(true);
-                                                                // Don't reset input states yet - wait for warning dialog
-                                                            } else {
-                                                                // Safe change - apply immediately and reset input states
-                                                                const newSettings = settingsDraft ? { ...settingsDraft, maxItems: newValue } : { ...settings, maxItems: newValue };
-                                                                setSettingsDraft(newSettings);
-                                                                setSettings(newSettings);
-                                                                persistSettings(newSettings);
-
-                                                                setMaxItemsInputValue(null);
-                                                                setHasMaxItemsChanges(false);
-                                                            }
-                                                        }}
-                                                        onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                                                        onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
-                                                        title="Apply changes"
-                                                    >
-                                                        ✓
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </label>
-                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Window hide behavior</span>
-                                            <select
-                                                className="settings-select"
-                                                value={settingsDraft?.windowHideBehavior ?? settings.windowHideBehavior}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, windowHideBehavior: e.target.value as Settings['windowHideBehavior'] } : null)}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    transition: 'border-color 0.2s, background 0.2s',
-                                                    outline: 'none'
-                                                }}
-                                                onFocus={e => e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor}
-                                                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.12)'}
-                                            >
-                                                <option value="hide">Hide (completely hidden)</option>
-                                                <option value="tray">Minimize to tray (tray icon only)</option>
-                                            </select>
-                                        </label>
-                                        <label className="settings-container" style={{
-                                            display: 'flex',
-                                            flexDirection: 'row',
-                                            alignItems: 'center',
-                                            justifyContent: 'space-between',
-                                            gap: 8,
-                                            padding: '12px 16px',
-                                            background: 'rgba(255,255,255,0.03)',
-                                            borderRadius: 8,
-                                            border: '1px solid rgba(255,255,255,0.08)'
-                                        }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Show clipboard window in taskbar</span>
-                                            <Switch
-                                                checked={settingsDraft?.showInTaskbar ?? settings.showInTaskbar}
-                                                onChange={v => setSettingsDraft(s => s ? { ...s, showInTaskbar: v } : null)}
-                                                accentColor={settingsDraft?.accentColor ?? settings.accentColor}
-                                            />
-                                        </label>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                            <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                                <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Shortcut to open clipboard</span>
-                                                <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                                                    {MODIFIER_OPTIONS.map(opt => (
-                                                        <label
-                                                            key={opt.value}
-                                                            className="settings-modifier-button"
-                                                            style={{
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                gap: 6,
-                                                                fontSize: 13,
-                                                                color: '#fff',
-                                                                background: shortcutModifiers.includes(opt.value)
-                                                                    ? settingsDraft?.accentColor ?? settings.accentColor
-                                                                    : 'rgba(255,255,255,0.05)',
-                                                                borderRadius: 6,
-                                                                padding: '8px 12px',
-                                                                cursor: 'pointer',
-                                                                border: shortcutModifiers.includes(opt.value)
-                                                                    ? `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}`
-                                                                    : '1px solid rgba(255,255,255,0.12)',
-                                                                transition: 'background 0.2s, border 0.2s',
-                                                                flex: 1,
-                                                                justifyContent: 'center',
-                                                                userSelect: 'none',
-                                                            }}
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={shortcutModifiers.includes(opt.value)}
-                                                                onChange={e => {
-                                                                    setShortcutModifiers(mods =>
-                                                                        e.target.checked
-                                                                            ? [...mods, opt.value]
-                                                                            : mods.filter(m => m !== opt.value)
-                                                                    );
-                                                                }}
-                                                                style={{
-                                                                    accentColor: settingsDraft?.accentColor ?? settings.accentColor,
-                                                                    margin: 0,
-                                                                    width: 14,
-                                                                    height: 14
-                                                                }}
-                                                            />
-                                                            {opt.label}
-                                                        </label>
-                                                    ))}
-                                                </div>
-                                            </label>
-                                            <select
-                                                className="settings-select"
-                                                value={shortcutMainKey}
-                                                onChange={e => setShortcutMainKey(e.target.value)}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    transition: 'border-color 0.2s, background 0.2s',
-                                                    outline: 'none'
-                                                }}
-                                                onFocus={e => e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor}
-                                                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.12)'}
-                                            >
-                                                <option value="">Select key...</option>
-                                                {MAIN_KEY_OPTIONS.map(opt => (
-                                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                                ))}
-                                            </select>
-                                            <div className="settings-display-box" style={{
-                                                fontSize: 12,
-                                                color: '#888',
-                                                padding: '8px 12px',
-                                                background: 'rgba(255,255,255,0.03)',
-                                                borderRadius: 6,
-                                                border: '1px solid rgba(255,255,255,0.08)',
-                                                fontFamily: 'monospace'
-                                            }}>
-                                                {shortcutModifiers.concat(shortcutMainKey).filter(Boolean).join('+') || 'No shortcut set'}
-                                            </div>
-                                            {shortcutModifiers.includes('Super') && (
-                                                <div style={{
-                                                    fontSize: 12,
-                                                    color: '#e67e22',
-                                                    padding: '8px 12px',
-                                                    background: 'rgba(230, 126, 34, 0.1)',
-                                                    borderRadius: 6,
-                                                    border: '1px solid rgba(230, 126, 34, 0.2)'
-                                                }}>
-                                                    ⚠️ Not all shortcuts with Windows key are supported.
-                                                    <span style={{
-                                                        color: '#888',
-                                                        cursor: 'pointer',
-                                                        textDecoration: 'underline',
-                                                        marginLeft: 4
-                                                    }} onClick={e => {
-                                                        e.stopPropagation();
-                                                        setShowShortcutInfo(v => !v);
-                                                    }}>
-                                                        {showShortcutInfo ? 'Hide info' : 'More info'}
-                                                    </span>
-                                                </div>
-                                            )}
-                                            {shortcutModifiers.includes('Super') && showShortcutInfo && (
-                                                <div style={{
-                                                    padding: 12,
-                                                    background: 'rgba(255,255,255,0.03)',
-                                                    borderRadius: 8,
-                                                    fontSize: 12,
-                                                    color: '#bbb',
-                                                    border: '1px solid rgba(255,255,255,0.08)',
-                                                    lineHeight: 1.4
-                                                }}>
-                                                    <div style={{ fontWeight: 600, color: '#fff', marginBottom: 6 }}>Why this limitation?</div>
-                                                    Windows reserves many shortcuts with the Windows key (like Win+V), so this app uses AutoHotkey to trigger the app directly.
-                                                    <br /><br />
-                                                    <span style={{ color: '#e67e22' }}>However, some shortcuts (like Win+Shift+S) cannot be replaced and are reserved by Windows.</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div>
-                                    <h2 style={{ ...sectionHeaderStyle, color: '#e1e1e1', fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Window Size</h2>
-                                    <div style={{ display: 'flex', gap: 12 }}>
-                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Width (px)</span>
-                                            <input
-                                                className="settings-input"
-                                                type="number"
-                                                min={WINDOW_SIZE_LIMITS.width.min}
-                                                max={WINDOW_SIZE_LIMITS.width.max}
-                                                value={settingsDraft?.windowWidth ?? settings.windowWidth}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, windowWidth: clampWindowWidth(e.target.value) } : null)}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    outline: 'none'
-                                                }}
-                                            />
-                                        </label>
-                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Height (px)</span>
-                                            <input
-                                                className="settings-input"
-                                                type="number"
-                                                min={WINDOW_SIZE_LIMITS.height.min}
-                                                max={WINDOW_SIZE_LIMITS.height.max}
-                                                value={settingsDraft?.windowHeight ?? settings.windowHeight}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, windowHeight: clampWindowHeight(e.target.value) } : null)}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    outline: 'none'
-                                                }}
-                                            />
-                                        </label>
-                                    </div>
-                                    <div style={{ marginTop: 8, fontSize: 12, color: windowSizeError ? '#ff4136' : '#888', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span>{windowSizeError || `Allowed: ${WINDOW_SIZE_LIMITS.width.min}-${WINDOW_SIZE_LIMITS.width.max}px width, ${WINDOW_SIZE_LIMITS.height.min}-${WINDOW_SIZE_LIMITS.height.max}px height.`}</span>
-                                        <button
-                                            onClick={() => {
-                                                setSettingsDraft(s => s ? {
-                                                    ...s,
-                                                    windowWidth: WINDOW_SIZE_LIMITS.width.default,
-                                                    windowHeight: WINDOW_SIZE_LIMITS.height.default
-                                                } : null);
-                                                showToast('info', 'Window dimensions reset to default');
-                                            }}
-                                            style={{
-                                                background: 'rgba(255,255,255,0.08)',
-                                                border: '1px solid rgba(255,255,255,0.15)',
-                                                color: '#ccc',
-                                                borderRadius: 6,
-                                                padding: '4px 10px',
-                                                fontSize: 11,
-                                                cursor: 'pointer',
-                                                transition: 'all 0.2s ease',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 4
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.background = 'rgba(255,255,255,0.12)';
-                                                e.currentTarget.style.color = '#fff';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                                                e.currentTarget.style.color = '#ccc';
-                                            }}
-                                        >
-                                            Reset to Default
-                                        </button>
-                                    </div>
-                                </div>
+                                <SettingsGeneralSection
+                                    settingsDraft={settingsDraft}
+                                    settings={settings}
+                                    setSettingsDraft={setSettingsDraft}
+                                    setSettings={setSettings}
+                                    persistSettings={persistSettings}
+                                    maxItemsInputValue={maxItemsInputValue}
+                                    setMaxItemsInputValue={setMaxItemsInputValue}
+                                    hasMaxItemsChanges={hasMaxItemsChanges}
+                                    setHasMaxItemsChanges={setHasMaxItemsChanges}
+                                    setPendingMaxItems={setPendingMaxItems}
+                                    setBackupCreated={setBackupCreated}
+                                    setShowMaxItemsWarning={setShowMaxItemsWarning}
+                                    itemsLength={items.length}
+                                    shortcutModifiers={shortcutModifiers}
+                                    setShortcutModifiers={setShortcutModifiers}
+                                    shortcutMainKey={shortcutMainKey}
+                                    setShortcutMainKey={setShortcutMainKey}
+                                    showShortcutInfo={showShortcutInfo}
+                                    setShowShortcutInfo={setShowShortcutInfo}
+                                    clampWindowWidth={clampWindowWidth}
+                                    clampWindowHeight={clampWindowHeight}
+                                    windowSizeError={windowSizeError}
+                                    showToast={showToast}
+                                />
                                 <SettingsBackupsSection
                                     settingsDraft={settingsDraft}
                                     settings={settings}
@@ -2027,102 +1415,12 @@ const App: React.FC = () => {
                                     setBackupToDelete={setBackupToDelete}
                                     setBackupDeleteAction={setBackupDeleteAction}
                                 />
-                                {/* Data export/import section */}
-                                <div>
-                                    <h2 style={sectionHeaderStyle}>Data</h2>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20, marginTop: 21 }}>
-                                        <button
-                                            className="settings-button"
-                                            style={{ background: '#23252a', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '7px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15, transition: 'background 0.2s, border 0.2s' }}
-                                            onClick={handleExportSettings}
-                                        >
-                                            Export Settings
-                                        </button>
-                                        <button
-                                            className="settings-button"
-                                            style={{ background: '#23252a', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '7px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15, transition: 'background 0.2s, border 0.2s' }}
-                                            onClick={handleImportSettings}
-                                        >
-                                            Import Settings
-                                        </button>                                        <button
-                                            className="settings-button"
-                                            style={{ background: '#23252a', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '7px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15, transition: 'background 0.2s, border 0.2s' }}
-                                            onClick={async (e) => {
-                                                const button = e.currentTarget;
-                                                const originalText = button.textContent;
-
-                                                try {
-                                                    button.textContent = "Exporting...";
-                                                    button.style.opacity = "0.7";
-
-                                                    const data = await window.electronAPI?.exportDb?.();
-
-                                                    if (data) {
-                                                        const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/octet-stream' });
-                                                        const url = URL.createObjectURL(blob);
-                                                        const a = document.createElement('a');
-                                                        a.href = url;
-                                                        a.download = 'clip-backup-' + new Date().toISOString().substring(0, 10) + '.db';
-                                                        a.click();
-                                                        setTimeout(() => URL.revokeObjectURL(url), 1000);
-                                                        showToast('success', 'Database exported successfully');
-                                                    } else {
-                                                        showToast('error', 'Failed to export database');
-                                                    }
-                                                } catch (error) {
-                                                    log.error('Export error', error instanceof Error ? error.message : String(error));
-                                                    showToast('error', `Export failed: ${error instanceof Error ? error.message : String(error)}`);
-                                                } finally {
-                                                    // Reset button state
-                                                    button.textContent = originalText;
-                                                    button.style.opacity = "1";
-                                                }
-                                            }}
-                                        >
-                                            Export Database
-                                        </button>                                        <button
-                                            className="settings-button"
-                                            style={{ background: '#23252a', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '7px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15, transition: 'background 0.2s, border 0.2s' }}
-                                            onClick={async (e) => {
-                                                const button = e.currentTarget;
-
-                                                const input = document.createElement('input');
-                                                input.type = 'file';
-                                                input.accept = '.db,application/octet-stream';
-                                                input.onchange = async (e: any) => {
-                                                    const file = e.target.files[0];
-                                                    if (!file) return;
-
-                                                    const originalText = button.textContent;
-                                                    button.textContent = "Importing...";
-                                                    button.style.opacity = "0.7";
-
-                                                    try {
-                                                        const buffer = await file.arrayBuffer();
-                                                        const success = await window.electronAPI?.importDb?.(buffer);
-                                                        if (success) {
-                                                            showToast('success', 'Database imported successfully!');
-                                                            // Note: No need to manually request clipboard history -
-                                                            // the backend already sends updated history after import
-                                                        } else {
-                                                            showToast('error', 'Failed to import database');
-                                                        }
-                                                    } catch (error) {
-                                                        log.error('Import error', error instanceof Error ? error.message : String(error));
-                                                        showToast('error', `Import failed: ${error instanceof Error ? error.message : String(error)}`);
-                                                    } finally {
-                                                        // Reset button state
-                                                        button.textContent = originalText;
-                                                        button.style.opacity = "1";
-                                                    }
-                                                };
-                                                input.click();
-                                            }}
-                                        >
-                                            Import Database
-                                        </button>
-                                    </div>
-                                </div>
+                                <SettingsDataSection
+                                    handleExportSettings={handleExportSettings}
+                                    handleImportSettings={handleImportSettings}
+                                    showToast={showToast}
+                                    logger={log}
+                                />
 
                                 <SettingsThemeSection
                                     activeThemeProfileKey={activeThemeProfileKey}
@@ -2150,199 +1448,25 @@ const App: React.FC = () => {
                                     copyTextToClipboard={copyTextToClipboard}
                                     themeSchema={themeSchema}
                                 />
-
-                                {/* Behavior Settings section */}
-                                <div>
-                                    <h2 style={sectionHeaderStyle}>Behavior Settings</h2>
-
-                                    <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 20 }}>
-                                        Show notifications for new clips                                    <Switch
-                                            checked={settingsDraft?.showNotifications ?? settings.showNotifications}
-                                            onChange={v => setSettingsDraft(s => s ? { ...s, showNotifications: v } : null)}
-                                            accentColor={settingsDraft?.accentColor ?? settings.accentColor}
-                                        />
-                                    </label>
-
-                                    <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 20 }}>
-                                        Start with system                                    <Switch
-                                            checked={settingsDraft?.startWithSystem ?? settings.startWithSystem}
-                                            onChange={v => setSettingsDraft(s => s ? { ...s, startWithSystem: v } : null)}
-                                            accentColor={settingsDraft?.accentColor ?? settings.accentColor}
-                                        />
-                                    </label>
-
-                                    <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 20 }}>
-                                        Store images in clipboard history                                    <Switch
-                                            checked={settingsDraft?.storeImagesInClipboard ?? settings.storeImagesInClipboard}
-                                            onChange={v => setSettingsDraft(s => s ? { ...s, storeImagesInClipboard: v } : null)}
-                                            accentColor={settingsDraft?.accentColor ?? settings.accentColor}
-                                        />
-                                    </label>
-
-                                    <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 20 }}>
-                                        Allow pinning favorite items                                    <Switch
-                                            checked={settingsDraft?.pinFavoriteItems ?? settings.pinFavoriteItems}
-                                            onChange={v => setSettingsDraft(s => s ? { ...s, pinFavoriteItems: v } : null)}
-                                            accentColor={settingsDraft?.accentColor ?? settings.accentColor}
-                                        />
-                                    </label>
-
-                                    <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 20 }}>
-                                        Ask before deleting items
-                                        <Switch
-                                            checked={settingsDraft?.deleteConfirm ?? settings.deleteConfirm}
-                                            onChange={v => setSettingsDraft(s => s ? { ...s, deleteConfirm: v } : null)}
-                                            accentColor={settingsDraft?.accentColor ?? settings.accentColor}
-                                        />
-                                    </label>
-                                </div>
-
-                                <div style={{ marginTop: 10, padding: 14, border: `1px solid ${themeColors.border}`, borderRadius: 12, background: themeColors.panelBackground }}>
-                                    <div style={{ fontSize: 13, color: themeColors.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>
-                                        Settings file path:{' '}
-                                        <code
-                                            style={{ color: themeColors.textPrimary, cursor: 'pointer', textDecoration: 'underline' }}
-                                            title="click to copy"
-                                            onClick={() => {
-                                                if (!settingsPaths?.configPath) return;
-                                                void copyTextToClipboard(settingsPaths.configPath, 'Settings file path');
-                                            }}
-                                        >
-                                            {settingsPaths?.configPath || 'AppData/clip-settings.json'}
-                                        </code>
-                                        <br />
-                                        Settings schema path:{' '}
-                                        <code
-                                            style={{ color: themeColors.textPrimary, cursor: 'pointer', textDecoration: 'underline' }}
-                                            title="click to copy"
-                                            onClick={() => {
-                                                if (!settingsPaths?.schemaPath) return;
-                                                void copyTextToClipboard(settingsPaths.schemaPath, 'Settings schema path');
-                                            }}
-                                        >
-                                            {settingsPaths?.schemaPath || 'AppData/clip-settings.schema.json'}
-                                        </code>
-                                    </div>
-                                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                                        <button
-                                            className="settings-button"
-                                            style={{
-                                                background: 'rgba(255,255,255,0.08)',
-                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                borderRadius: 8,
-                                                color: '#fff',
-                                                padding: '9px 12px',
-                                                cursor: 'pointer',
-                                                fontWeight: 600,
-                                            }}
-                                            onClick={() => {
-                                                void openSettingsConfigInSystem();
-                                            }}
-                                        >
-                                            Open Settings JSON
-                                        </button>
-                                        <button
-                                            className="settings-button"
-                                            style={{
-                                                background: 'rgba(255,255,255,0.08)',
-                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                borderRadius: 8,
-                                                color: '#fff',
-                                                padding: '9px 12px',
-                                                cursor: 'pointer',
-                                                fontWeight: 600,
-                                            }}
-                                            onClick={() => {
-                                                void reloadSettingsFromDisk();
-                                            }}
-                                        >
-                                            Reload Settings From Disk
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Danger Area section */}
-                                <div style={{
-                                    marginTop: 32,
-                                    padding: 18,
-                                    border: `2px solid ${themeColors.danger}`,
-                                    borderRadius: 12,
-                                    background: `${themeColors.danger}14`,
-                                    color: themeColors.danger,
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: 16,
-                                }}>
-                                    <h2 id='danger-area' style={{ fontSize: 18, fontWeight: 700, color: themeColors.danger, margin: 0, marginBottom: 8 }}>Danger Area</h2>
-                                    <div style={{ fontSize: 15, color: themeColors.danger, marginBottom: 8 }}>
-                                        These actions are irreversible. Please proceed with caution.
-                                    </div>
-                                    <button
-                                        style={{ background: themeColors.danger, border: `1px solid ${themeColors.danger}`, borderRadius: 8, color: '#fff', padding: '8px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15 }}
-                                        onClick={() => setDangerAction('clear')}
-                                    >
-                                        Clear All Clipboard History
-                                    </button>
-                                    <div style={{ fontSize: 13, color: themeColors.danger, marginBottom: 8, marginTop: -8 }}>
-                                        This will permanently delete all clipboard items.
-                                    </div>
-                                    <button
-                                        style={{ background: themeColors.warning, border: `1px solid ${themeColors.warning}`, borderRadius: 8, color: '#222', padding: '8px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15 }}
-                                        onClick={() => setDangerAction('reset')}
-                                    >
-                                        Reset Settings to Default
-                                    </button>
-                                    <div id='reset-settings-warning' style={{ fontSize: 13, color: themeColors.warning, marginTop: -8 }}>
-                                        This will reset all settings to their original defaults.
-                                    </div>
-                                </div>
-                            </div>                            <div style={{ padding: '12px 24px', borderTop: '1px solid #333', flexShrink: 0, display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'center' }}>                                <button
-                                style={{
-                                    background: '#ff4136',
-                                    border: '1px solid #ff4136',
-                                    borderRadius: 8,
-                                    color: '#fff',
-                                    padding: '8px 18px',
-                                    cursor: 'pointer',
-                                    fontWeight: 600,
-                                    fontSize: 15,
-                                    marginRight: 'auto',
-                                    transition: 'background 0.2s, border 0.2s'
-                                }}
-                                onClick={() => {
-                                    if (hasUnsavedChanges) {
-                                        setShowUnsavedChangesConfirm('quit');
-                                    } else {
-                                        window.electronAPI?.quitApp?.();
-                                    }
-                                }}
-                            >
-                                Quit App
-                            </button>
-                                <button
-                                    className="clip-settings-save-btn"
-                                    style={{
-                                        background: settingsDraft?.accentColor ?? settings.accentColor,
-                                        border: `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}`,
-                                        borderRadius: 8,
-                                        color: '#222',
-                                        padding: '8px 18px',
-                                        cursor: 'pointer',
-                                        fontWeight: 600,
-                                        fontSize: 15
-                                    }}
-                                    onClick={saveSettings}
-                                >
-                                    Save
-                                </button>
-                                <button
-                                    className="clip-settings-cancel-btn"
-                                    style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid #444', borderRadius: 8, color: '#fff', padding: '8px 18px', cursor: 'pointer', fontWeight: 600, fontSize: 15 }}
-                                    onClick={cancelSettings}
-                                >
-                                    Cancel
-                                </button>
+                                <SettingsBehaviorSection
+                                    settingsDraft={settingsDraft}
+                                    settings={settings}
+                                    setSettingsDraft={setSettingsDraft}
+                                    settingsPaths={settingsPaths}
+                                    copyTextToClipboard={copyTextToClipboard}
+                                    openSettingsConfigInSystem={openSettingsConfigInSystem}
+                                    reloadSettingsFromDisk={reloadSettingsFromDisk}
+                                    setDangerAction={setDangerAction}
+                                    themeColors={themeColors}
+                                />
                             </div>
+                            <SettingsModalFooter
+                                settingsDraft={settingsDraft}
+                                settings={settings}
+                                onQuitRequest={handleQuitFromSettings}
+                                onSave={saveSettings}
+                                onCancel={cancelSettings}
+                            />
                         </div>
                     </div>
                 )}

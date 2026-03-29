@@ -293,8 +293,8 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                             {restartReason === 'import'
                                 ? 'Database imported successfully! Do you want to restart the app now?'
                                 : restartReason === 'restore'
-                                ? 'Backup restored successfully! Do you want to restart the app now?'
-                                : 'Operation successful! Do you want to restart the app now?'}
+                                    ? 'Backup restored successfully! Do you want to restart the app now?'
+                                    : 'Operation successful! Do you want to restart the app now?'}
                         </div>
                         <button
                             style={{
