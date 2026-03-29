@@ -4,7 +4,22 @@ import Fuse from 'fuse.js';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import ThemeProvider from './ThemeProvider';
 import ToastContainer from './components/ToastContainer';
-import { log, logger, isDev } from '../logger';
+import { log, isDev } from '../logger';
+import {
+    DEFAULT_SETTINGS,
+    MAIN_KEY_OPTIONS,
+    MODIFIER_OPTIONS,
+    sectionHeaderStyle,
+} from './app-constants';
+import type { BackupEntry, ClipboardItem, Settings, ToastMessage } from './app-types';
+import AppDialogs from './components/AppDialogs';
+import AppInlineStyles from './components/AppInlineStyles';
+import ClipboardList from './components/ClipboardList';
+import IconGlyph from './components/IconGlyph';
+import SettingsBackupsSection from './components/SettingsBackupsSection';
+import SettingsThemeSection from './components/SettingsThemeSection';
+import Switch from './components/Switch';
+import { getActiveThemeProfile } from './theme-utils';
 import {
     WINDOW_SIZE_LIMITS,
     createDefaultThemeConfig,
@@ -13,551 +28,6 @@ import {
     type ThemeConfig,
     type ThemeProfile,
 } from '../theme-config';
-
-// Toast notification type
-interface ToastMessage {
-    id: string;
-    type: 'success' | 'error' | 'info';
-    message: string;
-    isFadingOut?: boolean; // Added for controlled animation
-}
-
-interface ClipboardItem {
-    id: string;
-    type: 'text' | 'image';
-    content: string;
-    timestamp: number;
-    pinned?: boolean;
-}
-
-interface Settings {
-    maxItems: number;
-    windowHideBehavior: 'hide' | 'tray';
-    showInTaskbar: boolean;
-    enableBackups: boolean;
-    backupInterval: number; // ms
-    maxBackups: number;
-
-    // Visual Settings
-    borderRadius: number;
-    transparency: number;
-    accentColor: string;
-    theme: 'dark' | 'light' | 'system';
-
-    // Behavior Settings
-    showNotifications: boolean;
-    startWithSystem: boolean;
-    storeImagesInClipboard: boolean;
-    pinFavoriteItems: boolean;
-    deleteConfirm: boolean;
-
-    // Shortcut
-    globalShortcut: string;
-
-    // Window size
-    windowWidth: number;
-    windowHeight: number;
-}
-
-const BACKUP_INTERVALS = [
-    { label: '5 minutes', value: 5 * 60 * 1000 },
-    { label: '15 minutes', value: 15 * 60 * 1000 },
-    { label: '1 hour', value: 60 * 60 * 1000 },
-    { label: '1 day', value: 24 * 60 * 60 * 1000 },
-];
-
-const MAX_ITEMS_DEFAULT = 100;
-
-const DEFAULT_SETTINGS: Settings = {
-    maxItems: MAX_ITEMS_DEFAULT,
-    windowHideBehavior: 'hide',
-    showInTaskbar: false,
-    enableBackups: false,
-    backupInterval: BACKUP_INTERVALS[1].value, // 15 min default
-    maxBackups: 5,
-
-    // Visual Settings defaults
-    borderRadius: 18,
-    transparency: 0.95,
-    accentColor: '#4682b4', // Steel Blue - professional, calm
-    theme: 'dark',
-
-    // Behavior Settings defaults
-    showNotifications: false,
-    startWithSystem: true,
-    storeImagesInClipboard: true,
-    pinFavoriteItems: true,
-    deleteConfirm: true,
-
-    // Shortcut
-    globalShortcut: 'Control+Shift+V',
-
-    // Window size
-    windowWidth: WINDOW_SIZE_LIMITS.width.default,
-    windowHeight: WINDOW_SIZE_LIMITS.height.default,
-};
-
-function getActiveThemeProfile(config: ThemeConfig): ThemeProfile {
-    const key = normalizeThemeProfileKey(config.activeProfile);
-    if (config.profiles[key]) {
-        return config.profiles[key];
-    }
-
-    const firstKey = Object.keys(config.profiles)[0];
-    if (firstKey) {
-        return config.profiles[firstKey];
-    }
-
-    return createDefaultThemeConfig().profiles.default;
-}
-
-function withFileProtocolIfNeeded(value: string): string {
-    if (/^(data:image\/|https?:\/\/|file:\/\/)/i.test(value)) {
-        return value;
-    }
-
-    if (/^[a-zA-Z]:\\/.test(value)) {
-        return `file:///${value.replace(/\\/g, '/')}`;
-    }
-
-    return value;
-}
-
-function iconToImageSource(icon: string): string | null {
-    const trimmed = icon.trim();
-    if (!trimmed) return null;
-    const lower = trimmed.toLowerCase();
-
-    if (trimmed.startsWith('<svg') && trimmed.endsWith('</svg>')) {
-        return `data:image/svg+xml;utf8,${encodeURIComponent(trimmed)}`;
-    }
-
-    if (
-        lower.startsWith('data:image/') ||
-        lower.startsWith('http://') ||
-        lower.startsWith('https://') ||
-        lower.startsWith('file://') ||
-        trimmed.startsWith('./') ||
-        trimmed.startsWith('../') ||
-        trimmed.startsWith('/') ||
-        /^[a-zA-Z]:\\/.test(trimmed)
-    ) {
-        return withFileProtocolIfNeeded(trimmed);
-    }
-
-    if (/\.(svg|png|jpg|jpeg|webp|ico)(\?.*)?$/i.test(trimmed)) {
-        return withFileProtocolIfNeeded(trimmed);
-    }
-
-    return null;
-}
-
-const IconGlyph: React.FC<{ value: string; fallback: string; size?: number; label: string; tint?: string }> = ({
-    value,
-    fallback,
-    size = 16,
-    label,
-    tint,
-}) => {
-    const source = iconToImageSource(value);
-    if (source) {
-        return (
-            <img
-                src={source}
-                alt={label}
-                style={{ width: size, height: size, objectFit: 'contain', filter: tint ? `drop-shadow(0 0 0 ${tint})` : undefined }}
-            />
-        );
-    }
-
-    const text = value?.trim() || fallback;
-    return (
-        <span title={label} style={{ fontSize: size, lineHeight: 1, color: tint || 'inherit' }}>
-            {text}
-        </span>
-    );
-};
-
-const sectionHeaderStyle: React.CSSProperties = {
-    fontSize: 18,
-    fontWeight: 600,
-    color: '#ccc',
-    // marginTop: 24,
-    marginBottom: 12,
-    borderBottom: '1px solid #555',
-    paddingBottom: 4,
-};
-
-const subHeaderStyle: React.CSSProperties = {
-    fontSize: 16,
-    fontWeight: 500,
-    color: '#aaa',
-    marginTop: 8,
-    marginBottom: 8,
-    // paddingLeft: 12,
-};
-
-// Switch component for modern toggles
-const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; accentColor?: string }> = ({ checked, onChange, disabled, accentColor = '#2ecc40' }) => (
-    <span
-        style={{
-            display: 'inline-block',
-            width: 38,
-            height: 22,
-            borderRadius: 22,
-            background: checked ? accentColor : '#444',
-            position: 'relative',
-            transition: 'background 0.2s',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            opacity: disabled ? 0.5 : 1,
-            verticalAlign: 'middle',
-        }}
-        onClick={() => !disabled && onChange(!checked)}
-        tabIndex={0}
-        role="switch"
-        aria-checked={checked}
-    >
-        <span
-            style={{
-                position: 'absolute',
-                left: checked ? 18 : 2,
-                top: 2,
-                width: 18,
-                height: 18,
-                borderRadius: '50%',
-                background: '#fff',
-                boxShadow: '0 1px 4px #0002',
-                transition: 'left 0.2s ease, background 0.2s ease',
-            }}
-        />
-    </span>
-);
-
-// Add custom CSS for custom sliders that use the accent color
-const getSliderStyles = (accentColor: string) => `
-    /* Slider style for webkit browsers (Chrome, Safari, Edge) */
-    input[type="range"]::-webkit-slider-runnable-track {
-        background: #333;
-        height: 4px;
-        border-radius: 2px;
-    }
-    input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: ${accentColor} !important;
-        cursor: pointer;
-        margin-top: -7px;
-        border: none;
-        transition: transform 0.15s ease, background-color 0.15s ease;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    input[type="range"]::-webkit-slider-thumb:hover {
-        transform: scale(1.1);
-        background: ${accentColor} !important;
-    }
-
-    /* Firefox styles */
-    input[type="range"]::-moz-range-track {
-        background: #333;
-        height: 4px;
-        border-radius: 2px;
-        border: none;
-    }
-    input[type="range"]::-moz-range-thumb {
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: ${accentColor} !important;
-        cursor: pointer;
-        border: none;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        transition: transform 0.15s ease, background-color 0.15s ease;
-    }
-    input[type="range"]::-moz-range-thumb:hover {
-        transform: scale(1.1);
-        background: ${accentColor} !important;
-    }
-`;
-
-// Old code - keeping for reference but not used
-const getCustomRangeStyles = (accentColor: string) => ({
-    // Style the track
-    '::-webkit-slider-runnable-track': {
-        background: '#333',
-        height: '4px',
-        borderRadius: '2px',
-    },
-    // Style the thumb
-    '::-webkit-slider-thumb': {
-        appearance: 'none',
-        width: '18px',
-        height: '18px',
-        borderRadius: '50%',
-        background: accentColor,
-        border: 'none',
-        cursor: 'pointer',
-        marginTop: '-7px',
-        transition: 'transform 0.15s ease',
-    },
-    // Firefox specific styles
-    '::-moz-range-track': {
-        background: '#333',
-        height: '4px',
-        borderRadius: '2px',
-        border: 'none',
-    },
-    '::-moz-range-thumb': {
-        width: '18px',
-        height: '18px',
-        borderRadius: '50%',
-        background: accentColor,
-        border: 'none',
-        cursor: 'pointer',
-        boxShadow: 'none',
-        transition: 'transform 0.15s ease',
-    },
-});
-
-// --- Modern shortcut input (checkboxes for modifiers + text for main key) ---
-const MODIFIER_OPTIONS = [
-    { label: 'Ctrl', value: 'Control' },
-    { label: 'Shift', value: 'Shift' },
-    { label: 'Alt', value: 'Alt' },
-    { label: 'Windows', value: 'Super' },
-];
-const MAIN_KEY_OPTIONS = [
-    ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(k => ({ label: k, value: k })),
-    ...Array.from({ length: 10 }, (_, i) => ({ label: String(i), value: String(i) })),
-    { label: 'Space', value: 'Space' },
-    { label: 'Tab', value: 'Tab' },
-    { label: 'Esc', value: 'Escape' },
-    { label: 'Insert', value: 'Insert' },
-    { label: 'Delete', value: 'Delete' },
-    { label: 'Home', value: 'Home' },
-    { label: 'End', value: 'End' },
-    { label: 'PageUp', value: 'PageUp' },
-    { label: 'PageDown', value: 'PageDown' },
-    { label: 'Up', value: 'ArrowUp' },
-    { label: 'Down', value: 'ArrowDown' },
-    { label: 'Left', value: 'ArrowLeft' },
-    { label: 'Right', value: 'ArrowRight' },
-];
-
-// For transparency to show as hex with percentage
-const transparencyToHex = (value: number): string => {
-    return Math.round(value * 255).toString(16).padStart(2, '0');
-};
-
-// Helper function to format relative time
-const getRelativeTime = (timestamp: number): string => {
-    const now = Date.now();
-    const diff = now - timestamp;
-
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (seconds < 60) return 'Just now';
-    if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
-    if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-    if (days < 7) return `${days} day${days !== 1 ? 's' : ''} ago`;
-    if (days < 30) return `${Math.floor(days / 7)} week${Math.floor(days / 7) !== 1 ? 's' : ''} ago`;
-    if (days < 365) return `${Math.floor(days / 30)} month${Math.floor(days / 30) !== 1 ? 's' : ''} ago`;
-    return `${Math.floor(days / 365)} year${Math.floor(days / 365) !== 1 ? 's' : ''} ago`;
-};
-
-// Toast notification component
-const Toast: React.FC<{
-    message: ToastMessage;
-    onDismiss: (id: string, type: 'manual' | 'auto') => void; // Updated signature
-    accentColor?: string;
-}> = ({ message, onDismiss, accentColor = '#2ecc40' }) => {
-    // const [isRemoving, setIsRemoving] = useState(false); // Local animation state removed, driven by prop
-
-    // Auto-dismissal logic and animation triggering are now fully handled by the App component.
-    // This Toast component is now more presentational regarding its dismissal.
-
-    let bgColor = '';
-    let textColor = '#fff';
-    let icon = '💬';
-
-    switch (message.type) {
-        case 'success':
-            bgColor = accentColor;
-            icon = '✅';
-            break;
-        case 'error':
-            bgColor = '#ff4136';
-            icon = '❌';
-            break;
-        case 'info':
-            bgColor = '#0074D9';
-            icon = 'ℹ️';
-            break;
-    }
-
-    const handleManualDismiss = () => {
-        // Call the onDismiss prop (which is dismissToast from App) with 'manual' type
-        onDismiss(message.id, 'manual');
-    };
-
-    return (
-        <div
-            className={`toast-message ${message.isFadingOut ? 'removing' : ''}`}
-            onClick={handleManualDismiss}
-            style={{
-                background: bgColor,
-                color: textColor,
-                padding: '10px 16px',
-                borderRadius: 8,
-                marginBottom: 10,
-                display: 'flex',
-                alignItems: 'center',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-                cursor: 'pointer',
-                maxWidth: '90%',
-                gap: 8,
-                willChange: 'transform, opacity',
-            }}
-        >
-            <span style={{ fontSize: 18, marginRight: 4 }}>{icon}</span>
-            <span>{message.message}</span>
-        </div>
-    );
-};
-
-type ParsedColor = {
-    r: number;
-    g: number;
-    b: number;
-    a: number;
-};
-
-function clampColorChannel(value: number) {
-    return Math.min(255, Math.max(0, Math.round(value)));
-}
-
-function parseHexColor(value: string): ParsedColor | null {
-    const match = value.trim().match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
-    if (!match) return null;
-
-    const hex = match[1];
-    if (hex.length === 3 || hex.length === 4) {
-        const r = parseInt(hex[0] + hex[0], 16);
-        const g = parseInt(hex[1] + hex[1], 16);
-        const b = parseInt(hex[2] + hex[2], 16);
-        const a = hex.length === 4 ? parseInt(hex[3] + hex[3], 16) / 255 : 1;
-        return { r, g, b, a };
-    }
-
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
-    return { r, g, b, a };
-}
-
-function parseRgbColor(value: string): ParsedColor | null {
-    const match = value.trim().match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([0-9.]+)\s*)?\)$/i);
-    if (!match) return null;
-
-    return {
-        r: clampColorChannel(Number(match[1])),
-        g: clampColorChannel(Number(match[2])),
-        b: clampColorChannel(Number(match[3])),
-        a: match[4] !== undefined ? Math.min(1, Math.max(0, Number(match[4]))) : 1,
-    };
-}
-
-function parseColorValue(value: string): ParsedColor | null {
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-
-    const hex = parseHexColor(trimmed);
-    if (hex) return hex;
-
-    const rgb = parseRgbColor(trimmed);
-    if (rgb) return rgb;
-
-    if (typeof document !== 'undefined') {
-        const probe = document.createElement('span');
-        probe.style.color = trimmed;
-        probe.style.position = 'fixed';
-        probe.style.left = '-9999px';
-        probe.style.top = '-9999px';
-        probe.style.visibility = 'hidden';
-        document.body.appendChild(probe);
-        const computed = getComputedStyle(probe).color;
-        document.body.removeChild(probe);
-        return parseRgbColor(computed);
-    }
-
-    return null;
-}
-
-function colorValueToPickerValue(value: string, fallback = '#4682b4'): string {
-    const parsed = parseColorValue(value);
-    if (!parsed) return fallback;
-    return `#${clampColorChannel(parsed.r).toString(16).padStart(2, '0')}${clampColorChannel(parsed.g).toString(16).padStart(2, '0')}${clampColorChannel(parsed.b).toString(16).padStart(2, '0')}`;
-}
-
-function pickerValueToColorValue(nextValue: string, currentValue: string): string {
-    const picked = parseColorValue(nextValue);
-    if (!picked) return currentValue;
-
-    const current = parseColorValue(currentValue);
-    if (current && current.a < 1) {
-        const alpha = Math.round(current.a * 1000) / 1000;
-        return `rgba(${picked.r}, ${picked.g}, ${picked.b}, ${alpha})`;
-    }
-
-    return nextValue;
-}
-
-const ColorSettingField: React.FC<{
-    label: string;
-    value: string;
-    onChange: (nextValue: string) => void;
-}> = ({ label, value, onChange }) => {
-    const pickerValue = React.useMemo(() => colorValueToPickerValue(value), [value]);
-
-    return (
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-            <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
-            <div style={{ display: 'flex', gap: 8, minWidth: 0, alignItems: 'center' }}>
-                <input
-                    aria-label={label}
-                    className="settings-input"
-                    type="color"
-                    value={pickerValue}
-                    onChange={(e) => onChange(pickerValueToColorValue(e.target.value, value))}
-                    style={{ width: 38, height: 32, border: '1px solid #444', borderRadius: 8, background: 'transparent', cursor: 'pointer', padding: 0, flexShrink: 0 }}
-                />
-                <input
-                    className="settings-input"
-                    type="text"
-                    value={value}
-                    onChange={(e) => onChange(e.target.value)}
-                    style={{
-                        flex: 1,
-                        minWidth: 0,
-                        borderRadius: 8,
-                        border: '1px solid rgba(255,255,255,0.12)',
-                        background: 'rgba(255,255,255,0.05)',
-                        color: '#fff',
-                        padding: '8px 10px',
-                        fontSize: 12,
-                        outline: 'none',
-                    }}
-                />
-            </div>
-        </label>
-    );
-};
 
 const App: React.FC = () => {
     const [items, setItems] = useState<ClipboardItem[]>([]);
@@ -615,8 +85,6 @@ const App: React.FC = () => {
     const [listForceKey, setListForceKey] = useState(0); // Force virtualizer remount on visibility changes
     const [isAnimatingList, setIsAnimatingList] = useState(true); // Track if list should animate
     const [hasLoadedInitially, setHasLoadedInitially] = useState(false); // Track if we've loaded items at least once
-    const [showEmptyMessage, setShowEmptyMessage] = useState(false); // Control when to show empty message
-    const [isDataLoading, setIsDataLoading] = useState(false); // Track if we're currently loading data
     const [isInitialLoading, setIsInitialLoading] = React.useState(true); // Track only the very first load
 
     // High-performance persistent cache system
@@ -631,6 +99,14 @@ const App: React.FC = () => {
         const draft = localStorage.getItem('clip-settingsDraft');
         return draft ? JSON.parse(draft) : null;
     });
+
+    const persistSettings = useCallback((nextSettings: Settings, persistDraft = false) => {
+        localStorage.setItem('clip-settings', JSON.stringify(nextSettings));
+        if (persistDraft) {
+            localStorage.setItem('clip-settingsDraft', JSON.stringify(nextSettings));
+        }
+        window.electronAPI?.saveSettingsToFile?.(nextSettings);
+    }, []);
 
     const windowSizeError = React.useMemo(() => {
         return getWindowSizeValidationError(
@@ -649,18 +125,15 @@ const App: React.FC = () => {
     // Track if there are unsaved changes in settings
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-    const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [showThemeProfileResetConfirm, setShowThemeProfileResetConfirm] = useState(false);
     const [isThemeProfileResetDialogClosing, setIsThemeProfileResetDialogClosing] = useState(false);
     const [showThemeProfileDeleteConfirm, setShowThemeProfileDeleteConfirm] = useState(false);
     const [isThemeProfileDeleteDialogClosing, setIsThemeProfileDeleteDialogClosing] = useState(false);
-    const escListener = useRef<((e: KeyboardEvent) => void) | null>(null);
-    const settingsModalRef = useRef<HTMLDivElement>(null); const [search, setSearch] = useState('');
+    const [search, setSearch] = useState('');
     const [filteredType, setFilteredType] = useState<'all' | 'text' | 'image'>('all');
     const dragStateRef = useRef({ dragging: false, dragStarted: false, offsetX: 0, offsetY: 0, startClientX: 0, startClientY: 0 });
     const lastDragEmitRef = useRef(0);
 
-    const [isClosingSettings, setIsClosingSettings] = useState(false);
     // Settings panel fade state
     const [isSettingsDialogClosing, setIsSettingsDialogClosing] = useState(false);
 
@@ -703,17 +176,11 @@ const App: React.FC = () => {
         // }
     };
 
-    const requestCloseSettings = () => {
-        setIsClosingSettings(true);
-    };
-
     // --- Shortcut warning logic ---
     const [showShortcutInfo, setShowShortcutInfo] = useState(false);
-    const shortcutValue = settingsDraft?.globalShortcut ?? settings.globalShortcut;
-    const shortcutHasWindows = /\b(Win|Windows|Super|Meta)\b/i.test(shortcutValue);
 
     // --- Backup restore dropdown state ---
-    const [backupList, setBackupList] = useState<{ file: string; time: number }[]>([]);
+    const [backupList, setBackupList] = useState<BackupEntry[]>([]);
     const [selectedBackup, setSelectedBackup] = useState<string>('');
 
     // --- Backup selection and deletion state ---
@@ -940,8 +407,7 @@ const App: React.FC = () => {
             const nextSettings = { ...settings, ...loaded };
             setSettings(nextSettings);
             setSettingsDraft(nextSettings);
-            localStorage.setItem('clip-settings', JSON.stringify(nextSettings));
-            localStorage.setItem('clip-settingsDraft', JSON.stringify(nextSettings));
+            persistSettings(nextSettings, true);
 
             const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
             const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
@@ -973,7 +439,7 @@ const App: React.FC = () => {
         } catch (error) {
             showToast('error', `Failed to reload settings from disk: ${error instanceof Error ? error.message : String(error)}`);
         }
-    }, [editorThemeProfile, settings, themeConfig, themeEditorConfig]);
+    }, [editorThemeProfile, persistSettings, settings, themeConfig, themeEditorConfig]);
 
     const copyTextToClipboard = useCallback(async (value: string, label: string) => {
         try {
@@ -1148,18 +614,6 @@ const App: React.FC = () => {
         }
     }, [isAnimatingList]);
 
-    // Control when to show empty message - only after we've had time to load and if truly empty
-    useEffect(() => {
-        if (hasLoadedInitially && items.length === 0) {
-            const timer = setTimeout(() => {
-                setShowEmptyMessage(true);
-            }, 800); // Wait 800ms before showing empty message
-            return () => clearTimeout(timer);
-        } else {
-            setShowEmptyMessage(false);
-        }
-    }, [hasLoadedInitially, items.length]);
-
     const clearAllToasts = () => {
         // Mark all toasts for fading out
         setToasts(prevToasts =>
@@ -1266,7 +720,6 @@ const App: React.FC = () => {
 
     // Delete clipboard item
     const [deleteTarget, setDeleteTarget] = useState<ClipboardItem | null>(null);
-    const [deletingId, setDeletingId] = useState<string | null>(null);
     const [isDeleteDialogClosing, setIsDeleteDialogClosing] = useState(false);
     // Add state for restart confirmation dialog
     const [showRestartConfirm, setShowRestartConfirm] = useState(false);
@@ -1338,8 +791,6 @@ const App: React.FC = () => {
                         setShowThemeProfileResetConfirm(false);
                         setIsThemeProfileResetDialogClosing(false);
                     }, 300);
-                } else if (showResetConfirm) {
-                    setShowResetConfirm(false);
                 } else if (showSettings) {
                     if (hasUnsavedChanges) {
                         setShowUnsavedChangesConfirm('cancel');
@@ -1359,7 +810,7 @@ const App: React.FC = () => {
         };
         window.addEventListener('keydown', escHandler);
         return () => window.removeEventListener('keydown', escHandler);
-    }, [showMaxItemsWarning, isMaxItemsWarningClosing, dangerAction, isDangerDialogClosing, showResetConfirm, showThemeProfileDeleteConfirm, isThemeProfileDeleteDialogClosing, showThemeProfileResetConfirm, isThemeProfileResetDialogClosing, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, restartReason, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges, backupDeleteAction, isBackupDeleteDialogClosing]);
+    }, [showMaxItemsWarning, isMaxItemsWarningClosing, dangerAction, isDangerDialogClosing, showThemeProfileDeleteConfirm, isThemeProfileDeleteDialogClosing, showThemeProfileResetConfirm, isThemeProfileResetDialogClosing, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, restartReason, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges, backupDeleteAction, isBackupDeleteDialogClosing]);
 
     // Force refresh when Ctrl+Shift+V is pressed (global shortcut)
     // This effect is now primarily for development/debugging if needed,
@@ -1412,7 +863,6 @@ const App: React.FC = () => {
             log.renderer(`Cache: Using valid cache (${cacheAge}ms old, ${itemsCache.length} items)`);
             setItems(itemsCache);
             setHasLoadedInitially(true);
-            setIsDataLoading(false);
 
             // Force scrollbar detection after cache load
             setTimeout(() => {
@@ -1445,7 +895,6 @@ const App: React.FC = () => {
                 // Update display items
                 setItems(processedItems);
                 setHasLoadedInitially(true);
-                setIsDataLoading(false);
 
                 // Only set isInitialLoading to false after the very first load
                 setIsInitialLoading(false);
@@ -1556,8 +1005,6 @@ const App: React.FC = () => {
     }
 
     function confirmDelete(item: ClipboardItem) {
-        setDeletingId(item.id);
-
         // Invalidate cache since we're modifying data
         setLastCacheUpdate(0);
 
@@ -1567,7 +1014,6 @@ const App: React.FC = () => {
         // Close delete dialog after fade-out
         setIsDeleteDialogClosing(true);
         setTimeout(() => {
-            setDeletingId(null);
             setIsDeleteDialogClosing(false);
             setDeleteTarget(null);
         }, 300); // match fade-out duration
@@ -1661,12 +1107,7 @@ const App: React.FC = () => {
 
             // Show toast notification for settings saved
             showToast('success', 'Settings saved successfully');
-
-            // Persist settings immediately to localStorage
-            localStorage.setItem('clip-settings', JSON.stringify(settingsDraft));
-
-            // Also save to file for main process to read at startup
-            window.electronAPI?.saveSettingsToFile?.(settingsDraft);
+            persistSettings(settingsDraft);
         }
 
         setThemeConfig(mergedThemeConfig);
@@ -1702,11 +1143,7 @@ const App: React.FC = () => {
         // Update settings draft to reflect the default values
         setSettingsDraft(DEFAULT_SETTINGS);
 
-        // Persist default settings immediately to localStorage
-        localStorage.setItem('clip-settings', JSON.stringify(DEFAULT_SETTINGS));
-
-        // Also save to file for main process to read at startup
-        window.electronAPI?.saveSettingsToFile?.(DEFAULT_SETTINGS);
+        persistSettings(DEFAULT_SETTINGS);
 
         showToast('success', 'Settings reset to default values');
         // Close the settings window after successful reset
@@ -1716,14 +1153,6 @@ const App: React.FC = () => {
             setSettingsDraft(null);
             setIsSettingsDialogClosing(false);
         }, 300);
-    };
-
-    const handleSettingsAnimationEnd = () => {
-        if (isClosingSettings) {
-            setShowSettings(false);
-            setSettingsDraft(null);
-            setIsClosingSettings(false);
-        }
     };
 
     // Enhanced window visibility management with smart caching
@@ -1738,7 +1167,6 @@ const App: React.FC = () => {
                 if (!useCacheIfValid()) {
                     // Cache miss or invalid - fetch fresh data
                     setTimeout(() => {
-                        setIsDataLoading(true);
                         window.electronAPI?.requestClipboardHistory?.();
                     }, 50); // Reduced delay since cache wasn't available
                 }
@@ -1764,7 +1192,6 @@ const App: React.FC = () => {
                 if (!useCacheIfValid()) {
                     // Cache miss or invalid - fetch fresh data
                     setTimeout(() => {
-                        setIsDataLoading(true);
                         window.electronAPI?.requestClipboardHistory?.();
                     }, 50); // Reduced delay since cache wasn't available
                 }
@@ -1792,7 +1219,6 @@ const App: React.FC = () => {
             // Try cache first, then fetch if needed
             if (!useCacheIfValid()) {
                 setTimeout(() => {
-                    setIsDataLoading(true);
                     window.electronAPI?.requestClipboardHistory?.();
                 }, 50);
             }
@@ -1853,6 +1279,190 @@ const App: React.FC = () => {
     const effectiveAccentColor = themeColors.accent || settings.accentColor;
     const effectiveBorderRadius = themeSurface.borderRadius ?? settings.borderRadius;
     const effectiveTransparency = themeSurface.transparency ?? settings.transparency;
+
+    const closeDangerDialog = () => {
+        setIsDangerDialogClosing(true);
+        setTimeout(() => {
+            setDangerAction(null);
+            setIsDangerDialogClosing(false);
+        }, 300);
+    };
+
+    const closeRestartDialog = () => {
+        setIsRestartDialogClosing(true);
+        setTimeout(() => {
+            setShowRestartConfirm(false);
+            setRestartReason(null);
+            setIsRestartDialogClosing(false);
+        }, 300);
+    };
+
+    const handleUnsavedSave = () => {
+        if (settingsDraft) {
+            setSettings(settingsDraft);
+        }
+        const actionType = showUnsavedChangesConfirm;
+
+        setIsUnsavedChangesDialogClosing(true);
+        setTimeout(() => {
+            setShowUnsavedChangesConfirm(null);
+            setIsUnsavedChangesDialogClosing(false);
+
+            if (actionType === 'quit') {
+                window.electronAPI?.quitApp?.();
+            } else {
+                closeSettingsWithoutSaving();
+            }
+        }, 300);
+    };
+
+    const handleUnsavedDontSave = () => {
+        const actionType = showUnsavedChangesConfirm;
+
+        setIsUnsavedChangesDialogClosing(true);
+        setTimeout(() => {
+            setShowUnsavedChangesConfirm(null);
+            setIsUnsavedChangesDialogClosing(false);
+
+            if (actionType === 'quit') {
+                window.electronAPI?.quitApp?.();
+            } else {
+                closeSettingsWithoutSaving();
+            }
+        }, 300);
+    };
+
+    const handleUnsavedCancel = () => {
+        setIsUnsavedChangesDialogClosing(true);
+        setTimeout(() => {
+            setShowUnsavedChangesConfirm(null);
+            setIsUnsavedChangesDialogClosing(false);
+        }, 300);
+    };
+
+    const closeBackupDeleteDialog = () => {
+        setIsBackupDeleteDialogClosing(true);
+        setTimeout(() => {
+            setBackupDeleteAction(null);
+            setBackupToDelete('');
+            setIsBackupDeleteDialogClosing(false);
+        }, 300);
+    };
+
+    const handleConfirmBackupDelete = async () => {
+        try {
+            let success = false;
+
+            if (backupDeleteAction === 'single' && backupToDelete) {
+                success = await window.electronAPI?.deleteBackup?.(backupToDelete);
+                if (success) {
+                    showToast('success', 'Backup deleted successfully');
+                    if (selectedBackup === backupToDelete) {
+                        setSelectedBackup('');
+                    }
+                } else {
+                    showToast('error', 'Failed to delete backup');
+                }
+            } else if (backupDeleteAction === 'multiple' && selectedBackups.size > 0) {
+                const deletedCount = await window.electronAPI?.deleteMultipleBackups?.(Array.from(selectedBackups));
+                if (deletedCount > 0) {
+                    showToast('success', `${deletedCount} backup${deletedCount !== 1 ? 's' : ''} deleted successfully`);
+                    if (selectedBackups.has(selectedBackup)) {
+                        setSelectedBackup('');
+                    }
+                    setSelectedBackups(new Set());
+                } else {
+                    showToast('error', 'Failed to delete backups');
+                }
+            }
+
+            const newList = (await window.electronAPI?.listBackups?.()) || [];
+            setBackupList(newList);
+        } catch (error) {
+            log.error('Delete backup error', error instanceof Error ? error.message : String(error));
+            showToast('error', `Delete failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+
+        closeBackupDeleteDialog();
+    };
+
+    const closeThemeProfileResetDialog = () => {
+        setIsThemeProfileResetDialogClosing(true);
+        setTimeout(() => {
+            setShowThemeProfileResetConfirm(false);
+            setIsThemeProfileResetDialogClosing(false);
+        }, 300);
+    };
+
+    const handleConfirmThemeProfileReset = () => {
+        closeThemeProfileResetDialog();
+        void resetActiveThemeProfileToDefault();
+    };
+
+    const closeThemeProfileDeleteDialog = () => {
+        setIsThemeProfileDeleteDialogClosing(true);
+        setTimeout(() => {
+            setShowThemeProfileDeleteConfirm(false);
+            setIsThemeProfileDeleteDialogClosing(false);
+        }, 300);
+    };
+
+    const handleConfirmThemeProfileDelete = async () => {
+        closeThemeProfileDeleteDialog();
+        await deleteActiveThemeProfile();
+    };
+
+    const closeMaxItemsWarningDialog = () => {
+        setIsMaxItemsWarningClosing(true);
+        setTimeout(() => {
+            setShowMaxItemsWarning(false);
+            setPendingMaxItems(null);
+            setBackupCreated(false);
+            setMaxItemsInputValue(null);
+            setHasMaxItemsChanges(false);
+            setIsMaxItemsWarningClosing(false);
+        }, 300);
+    };
+
+    const handleCreateBackupForMaxItems = async () => {
+        try {
+            const backupPath = await window.electronAPI?.createBackup?.();
+            if (backupPath) {
+                const filename = backupPath.split('\\').pop() || 'backup';
+                showToast('success', `Backup created: ${filename}`);
+                setBackupCreated(true);
+            } else {
+                showToast('error', 'Failed to create backup');
+            }
+        } catch (error) {
+            log.error('Backup error', error instanceof Error ? error.message : String(error));
+            showToast('error', 'Backup failed');
+        }
+    };
+
+    const handleConfirmMaxItemsWarning = async () => {
+        if (pendingMaxItems !== null) {
+            const currentMaxItems = settingsDraft?.maxItems ?? settings.maxItems;
+            const newSettings = settingsDraft
+                ? { ...settingsDraft, maxItems: pendingMaxItems }
+                : { ...settings, maxItems: pendingMaxItems };
+            setSettingsDraft(newSettings);
+            setSettings(newSettings);
+            persistSettings(newSettings);
+
+            if (pendingMaxItems < currentMaxItems && items.length > pendingMaxItems) {
+                try {
+                    await window.electronAPI?.trimClipboardItems?.(pendingMaxItems);
+                    showToast('info', `Clipboard trimmed to ${pendingMaxItems} items`);
+                } catch (error) {
+                    console.error('Failed to trim clipboard items:', error);
+                    showToast('error', 'Failed to trim clipboard items');
+                }
+            }
+        }
+
+        closeMaxItemsWarningDialog();
+    };
 
     // UI: Add settings page/modal
     return (
@@ -2134,12 +1744,7 @@ const App: React.FC = () => {
                                                                 const newSettings = settingsDraft ? { ...settingsDraft, maxItems: newValue } : { ...settings, maxItems: newValue };
                                                                 setSettingsDraft(newSettings);
                                                                 setSettings(newSettings);
-
-                                                                // Persist settings immediately to localStorage
-                                                                localStorage.setItem('clip-settings', JSON.stringify(newSettings));
-
-                                                                // Also save to file for main process to read at startup
-                                                                window.electronAPI?.saveSettingsToFile?.(newSettings);
+                                                                persistSettings(newSettings);
 
                                                                 setMaxItemsInputValue(null);
                                                                 setHasMaxItemsChanges(false);
@@ -2402,484 +2007,26 @@ const App: React.FC = () => {
                                         </button>
                                     </div>
                                 </div>
-                                {/* Backups section */}
-                                <div>
-                                    <h2 style={{ ...sectionHeaderStyle, color: '#e1e1e1', fontSize: 16, fontWeight: 600, marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.12)' }}>Backups</h2>
-                                    <label className="settings-container" style={{
-                                        display: 'flex',
-                                        flexDirection: 'row',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        gap: 8,
-                                        padding: '12px 16px',
-                                        background: 'rgba(255,255,255,0.03)',
-                                        borderRadius: 8,
-                                        border: '1px solid rgba(255,255,255,0.08)',
-                                        marginBottom: 16
-                                    }}>
-                                        <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Enable automatic database backups</span>
-                                        <Switch
-                                            checked={settingsDraft?.enableBackups ?? settings.enableBackups}
-                                            onChange={v => setSettingsDraft(s => s ? { ...s, enableBackups: v } : null)}
-                                            accentColor={settingsDraft?.accentColor ?? settings.accentColor}
-                                        />
-                                    </label>
-                                    <div style={{
-                                        display: 'flex',
-                                        flexDirection: 'row',
-                                        gap: 12,
-                                        opacity: (settingsDraft?.enableBackups ?? settings.enableBackups) ? 1 : 0.5,
-                                        transition: 'opacity 0.2s',
-                                        marginBottom: 16
-                                    }}>
-                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Backup interval</span>
-                                            <select
-                                                className="settings-select"
-                                                value={settingsDraft?.backupInterval ?? settings.backupInterval}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, backupInterval: Number(e.target.value) } : null)}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    transition: 'border-color 0.2s, background 0.2s',
-                                                    outline: 'none'
-                                                }}
-                                                disabled={!(settingsDraft?.enableBackups ?? settings.enableBackups)}
-                                                onFocus={e => e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor}
-                                                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.12)'}
-                                            >
-                                                {BACKUP_INTERVALS.map(opt => (
-                                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                                ))}
-                                            </select>
-                                        </label>
-                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8, width: 100 }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Max backups</span>
-                                            <input
-                                                className="settings-input"
-                                                type="number"
-                                                min={1}
-                                                max={50}
-                                                value={settingsDraft?.maxBackups ?? settings.maxBackups}
-                                                onChange={e => setSettingsDraft(s => s ? { ...s, maxBackups: Number(e.target.value) } : null)}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    transition: 'border-color 0.2s, background 0.2s',
-                                                    outline: 'none'
-                                                }}
-                                                disabled={!(settingsDraft?.enableBackups ?? settings.enableBackups)}
-                                                onFocus={e => e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor}
-                                                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.12)'}
-                                            />
-                                        </label>
-                                    </div>                                    <button
-                                        className="settings-button"
-                                        style={{
-                                            background: isBackingUp ? `${settingsDraft?.accentColor ?? settings.accentColor}44` : '#23252a',
-                                            border: isBackingUp ? `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}` : '1px solid #444',
-                                            marginBottom: 15,
-                                            borderRadius: 8,
-                                            width: '100%',
-                                            color: '#fff',
-                                            padding: '7px 18px',
-                                            cursor: isBackingUp ? 'wait' : 'pointer',
-                                            fontWeight: 600,
-                                            fontSize: 15,
-                                            transition: 'all 0.2s',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 8,
-                                            opacity: isBackingUp ? 0.9 : 1
-                                        }}
-                                        disabled={isBackingUp}
-                                        onClick={async () => {
-                                            try {
-                                                setIsBackingUp(true);
-                                                const backupPath = await window.electronAPI?.createBackup?.();
-                                                const newList = await window.electronAPI?.listBackups?.() || [];
-                                                setBackupList(newList);
-                                                setSelectedBackup(''); // Reset selection
-
-                                                if (backupPath) {
-                                                    const filename = backupPath.split('\\').pop() || 'backup';
-                                                    showToast('success', `Backup created successfully: ${filename}`);
-                                                } else {
-                                                    showToast('error', 'Could not create backup');
-                                                }
-                                            } catch (error) {
-                                                log.error('Backup error', error instanceof Error ? error.message : String(error));
-                                                showToast('error', `Backup failed: ${error instanceof Error ? error.message : String(error)}`);
-                                            } finally {
-                                                setIsBackingUp(false);
-                                            }
-                                        }}
-                                    >
-                                        {isBackingUp ? (
-                                            <>
-                                                <span style={{
-                                                    display: 'inline-block',
-                                                    width: '16px',
-                                                    height: '16px',
-                                                    borderRadius: '50%',
-                                                    border: '2px solid rgba(255,255,255,0.3)',
-                                                    borderTopColor: '#fff',
-                                                    animation: 'spin 1s linear infinite'
-                                                }}></span>
-                                                Creating...
-                                            </>
-                                        ) : (
-                                            'Create Backup Now'
-                                        )}
-                                    </button>
-                                </div>
-                                {/* Backup Management section */}
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                                        <h3 style={{ ...subHeaderStyle, margin: 0 }}>Backup Management</h3>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: 'rgba(255,255,255,0.08)',
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    borderRadius: 6,
-                                                    color: '#fff',
-                                                    padding: '6px 12px',
-                                                    cursor: 'pointer',
-                                                    fontSize: 12,
-                                                    fontWeight: 500,
-                                                    transition: 'background 0.2s'
-                                                }}
-                                                onClick={refreshBackupList}
-                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
-                                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
-                                            >
-                                                Refresh
-                                            </button>
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: 'rgba(255,255,255,0.08)',
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    borderRadius: 6,
-                                                    color: '#fff',
-                                                    padding: '6px 12px',
-                                                    cursor: 'pointer',
-                                                    fontSize: 12,
-                                                    fontWeight: 500,
-                                                    transition: 'background 0.2s'
-                                                }}
-                                                onClick={() => setShowBackupManagement(!showBackupManagement)}
-                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
-                                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
-                                            >
-                                                {showBackupManagement ? 'Simple View' : 'Advanced'}
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
-                                        {backupList.length === 0 ? (
-                                            <div className="settings-display-box" style={{
-                                                padding: 16,
-                                                background: 'rgba(255,255,255,0.03)',
-                                                borderRadius: 8,
-                                                border: '1px solid rgba(255,255,255,0.08)',
-                                                textAlign: 'center',
-                                                color: '#888',
-                                                fontSize: 14
-                                            }}>
-                                                No backups found. Create a backup first.
-                                            </div>
-                                        ) : (
-                                            <>
-                                                <div style={{
-                                                    fontSize: 13,
-                                                    color: '#aaa',
-                                                    marginBottom: 8,
-                                                    display: 'flex',
-                                                    justifyContent: 'space-between',
-                                                    alignItems: 'center'
-                                                }}>
-                                                    <span>Found {backupList.length} backup{backupList.length !== 1 ? 's' : ''}</span>
-                                                    {showBackupManagement && (
-                                                        <div style={{ display: 'flex', gap: 8 }}>
-                                                            <button
-                                                                style={{
-                                                                    background: 'rgba(255,255,255,0.05)',
-                                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                                    borderRadius: 4,
-                                                                    color: '#ccc',
-                                                                    padding: '4px 8px',
-                                                                    cursor: 'pointer',
-                                                                    fontSize: 11,
-                                                                    transition: 'all 0.2s'
-                                                                }}
-                                                                onClick={() => setSelectedBackups(new Set(backupList.map(b => b.file)))}
-                                                            >
-                                                                Select All
-                                                            </button>
-                                                            <button
-                                                                style={{
-                                                                    background: 'rgba(255,255,255,0.05)',
-                                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                                    borderRadius: 4,
-                                                                    color: '#ccc',
-                                                                    padding: '4px 8px',
-                                                                    cursor: 'pointer',
-                                                                    fontSize: 11,
-                                                                    transition: 'all 0.2s'
-                                                                }}
-                                                                onClick={() => setSelectedBackups(new Set())}
-                                                            >
-                                                                Clear All
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div className="settings-display-box" style={{
-                                                    maxHeight: 200,
-                                                    overflowY: 'auto',
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    borderRadius: 8,
-                                                    background: 'rgba(255,255,255,0.03)',
-                                                    scrollbarWidth: 'thin',
-                                                    scrollbarColor: '#444 transparent'
-                                                }}>
-                                                    {backupList.map((backup, index) => {
-                                                        const date = new Date(backup.time);
-                                                        const isSelected = selectedBackup === backup.file;
-                                                        const isChecked = selectedBackups.has(backup.file);
-                                                        const formattedDate = date.toLocaleDateString();
-                                                        const formattedTime = date.toLocaleTimeString();
-                                                        const relativeTime = getRelativeTime(backup.time);
-
-                                                        return (
-                                                            <div
-                                                                key={backup.file}
-                                                                style={{
-                                                                    padding: '12px 16px',
-                                                                    borderBottom: index < backupList.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
-                                                                    background: isSelected ? settingsDraft?.accentColor + '22' : isChecked ? 'rgba(255,255,255,0.08)' : 'transparent',
-                                                                    borderLeft: isSelected ? `3px solid ${settingsDraft?.accentColor ?? settings.accentColor}` : '3px solid transparent',
-                                                                    transition: 'all 0.2s ease',
-                                                                    display: 'flex',
-                                                                    alignItems: 'center',
-                                                                    gap: 12
-                                                                }}
-                                                            >
-                                                                {showBackupManagement && (
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={isChecked}
-                                                                        onChange={(e) => {
-                                                                            const newSelected = new Set(selectedBackups);
-                                                                            if (e.target.checked) {
-                                                                                newSelected.add(backup.file);
-                                                                            } else {
-                                                                                newSelected.delete(backup.file);
-                                                                            }
-                                                                            setSelectedBackups(newSelected);
-                                                                        }}
-                                                                        style={{
-                                                                            accentColor: settingsDraft?.accentColor ?? settings.accentColor,
-                                                                            width: 16,
-                                                                            height: 16,
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    />
-                                                                )}
-
-                                                                <div
-                                                                    style={{
-                                                                        flex: 1,
-                                                                        cursor: 'pointer',
-                                                                        display: 'flex',
-                                                                        flexDirection: 'column',
-                                                                        gap: 4
-                                                                    }}
-                                                                    onClick={() => setSelectedBackup(isSelected ? '' : backup.file)}
-                                                                    onMouseEnter={e => {
-                                                                        if (!isSelected && !isChecked) {
-                                                                            e.currentTarget.parentElement!.style.background = 'rgba(255,255,255,0.05)';
-                                                                        }
-                                                                    }}
-                                                                    onMouseLeave={e => {
-                                                                        if (!isSelected && !isChecked) {
-                                                                            e.currentTarget.parentElement!.style.background = 'transparent';
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    <div style={{
-                                                                        display: 'flex',
-                                                                        justifyContent: 'space-between',
-                                                                        alignItems: 'flex-start'
-                                                                    }}>
-                                                                        <div style={{
-                                                                            fontWeight: 500,
-                                                                            fontSize: 14,
-                                                                            color: isSelected ? '#fff' : '#ccc'
-                                                                        }}>
-                                                                            {formattedDate} at {formattedTime}
-                                                                        </div>
-                                                                        {isSelected && (
-                                                                            <div style={{
-                                                                                fontSize: 12,
-                                                                                color: settingsDraft?.accentColor ?? settings.accentColor,
-                                                                                fontWeight: 600
-                                                                            }}>
-                                                                                SELECTED
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    <div style={{
-                                                                        fontSize: 12,
-                                                                        color: '#888',
-                                                                        fontStyle: 'italic'
-                                                                    }}>
-                                                                        {relativeTime}
-                                                                    </div>
-                                                                    <div style={{
-                                                                        fontSize: 11,
-                                                                        color: '#666',
-                                                                        fontFamily: 'monospace',
-                                                                        marginTop: 2
-                                                                    }}>
-                                                                        {backup.file}
-                                                                    </div>
-                                                                </div>
-
-                                                                <button
-                                                                    style={{
-                                                                        background: 'none',
-                                                                        border: 'none',
-                                                                        color: '#ff4136',
-                                                                        cursor: 'pointer',
-                                                                        padding: '4px 8px',
-                                                                        borderRadius: 4,
-                                                                        fontSize: 18,
-                                                                        lineHeight: 1,
-                                                                        transition: 'background 0.2s',
-                                                                        display: 'flex',
-                                                                        alignItems: 'center',
-                                                                        justifyContent: 'center',
-                                                                        minWidth: 32,
-                                                                        height: 32
-                                                                    }}
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setBackupToDelete(backup.file);
-                                                                        setBackupDeleteAction('single');
-                                                                    }}
-                                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,65,54,0.15)'}
-                                                                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                                                                    title="Delete this backup"
-                                                                >
-                                                                    🗑️
-                                                                </button>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-
-                                                <div style={{ display: 'flex', gap: 12 }}>
-                                                    <button
-                                                        className="settings-button"
-                                                        style={{
-                                                            background: selectedBackup ? (settingsDraft?.accentColor ?? settings.accentColor) : '#23252a',
-                                                            border: selectedBackup ? `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}` : '1px solid #444',
-                                                            flex: 1,
-                                                            borderRadius: 8,
-                                                            color: selectedBackup ? '#000' : '#fff',
-                                                            padding: '12px 18px',
-                                                            cursor: selectedBackup ? 'pointer' : 'not-allowed',
-                                                            fontWeight: 600,
-                                                            fontSize: 15,
-                                                            transition: 'all 0.2s',
-                                                            opacity: selectedBackup ? 1 : 0.5,
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center',
-                                                            gap: 8
-                                                        }}
-                                                        disabled={!selectedBackup}
-                                                        onClick={async () => {
-                                                            if (selectedBackup) {
-                                                                const button = document.activeElement as HTMLButtonElement;
-                                                                const originalText = button.textContent;
-
-                                                                try {
-                                                                    button.textContent = "Restoring...";
-                                                                    button.style.opacity = "0.7";
-                                                                    button.disabled = true;
-
-                                                                    const success = await window.electronAPI?.restoreBackup?.(selectedBackup);
-
-                                                                    if (success) {
-                                                                        showToast('success', 'Backup restored successfully!');
-                                                                        setSelectedBackup('');
-                                                                        // Refresh backup list
-                                                                        const newList = await window.electronAPI?.listBackups?.() || [];
-                                                                        setBackupList(newList);
-                                                                        // Note: No need to manually request clipboard history -
-                                                                        // the backend already sends updated history after restore
-                                                                    } else {
-                                                                        showToast('error', 'Failed to restore backup.');
-                                                                    }
-                                                                } catch (error) {
-                                                                    log.error('Restore error', error instanceof Error ? error.message : String(error));
-                                                                    showToast('error', `Restore failed: ${error instanceof Error ? error.message : String(error)}`);
-                                                                } finally {
-                                                                    button.textContent = originalText;
-                                                                    button.style.opacity = "1";
-                                                                    button.disabled = false;
-                                                                }
-                                                            }
-                                                        }}
-                                                    >
-                                                        {selectedBackup ? '↻ Restore Selected' : 'Select backup to restore'}
-                                                    </button>
-
-                                                    {showBackupManagement && selectedBackups.size > 0 && (
-                                                        <button
-                                                            className="settings-button"
-                                                            style={{
-                                                                background: '#ff4136',
-                                                                border: '1px solid #ff4136',
-                                                                borderRadius: 8,
-                                                                color: '#fff',
-                                                                padding: '12px 18px',
-                                                                cursor: 'pointer',
-                                                                fontWeight: 600,
-                                                                fontSize: 15,
-                                                                transition: 'all 0.2s',
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                                gap: 8,
-                                                                minWidth: 140
-                                                            }}
-                                                            onClick={() => setBackupDeleteAction('multiple')}
-                                                        >
-                                                            🗑️ Delete {selectedBackups.size}
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
+                                <SettingsBackupsSection
+                                    settingsDraft={settingsDraft}
+                                    settings={settings}
+                                    setSettingsDraft={setSettingsDraft}
+                                    isBackingUp={isBackingUp}
+                                    setIsBackingUp={setIsBackingUp}
+                                    setBackupList={setBackupList}
+                                    setSelectedBackup={setSelectedBackup}
+                                    showToast={showToast}
+                                    log={log}
+                                    refreshBackupList={refreshBackupList}
+                                    showBackupManagement={showBackupManagement}
+                                    setShowBackupManagement={setShowBackupManagement}
+                                    backupList={backupList}
+                                    selectedBackups={selectedBackups}
+                                    setSelectedBackups={setSelectedBackups}
+                                    selectedBackup={selectedBackup}
+                                    setBackupToDelete={setBackupToDelete}
+                                    setBackupDeleteAction={setBackupDeleteAction}
+                                />
                                 {/* Data export/import section */}
                                 <div>
                                     <h2 style={sectionHeaderStyle}>Data</h2>
@@ -2977,509 +2124,32 @@ const App: React.FC = () => {
                                     </div>
                                 </div>
 
-                                {/* Theme profiles and custom theme config */}
-                                <div>
-                                    <h2 style={sectionHeaderStyle}>Theme Profiles</h2>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Active profile</span>
-                                            <select
-                                                className="settings-select"
-                                                value={activeThemeProfileKey}
-                                                onChange={async (e) => {
-                                                    const key = e.target.value;
-                                                    setThemeEditorConfig(prev => sanitizeThemeConfig({ ...prev, activeProfile: key }));
-                                                    try {
-                                                        const next = await window.electronAPI?.setActiveThemeProfile?.(key);
-                                                        if (next) {
-                                                            const sanitized = sanitizeThemeConfig(next);
-                                                            setThemeConfig(sanitized);
-                                                            setThemeEditorConfig(sanitized);
-                                                        }
-                                                    } catch (error) {
-                                                        showToast('error', `Failed to switch profile: ${error instanceof Error ? error.message : String(error)}`);
-                                                    }
-                                                }}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    outline: 'none'
-                                                }}
-                                            >
-                                                {Object.entries(themeEditorConfig.profiles).map(([key, profile]) => (
-                                                    <option key={key} value={key}>{profile.name || key}</option>
-                                                ))}
-                                            </select>
-                                        </label>
-
-                                        <div style={{ display: 'flex', gap: 8 }}>
-                                            <input
-                                                className="settings-input"
-                                                type="text"
-                                                value={newThemeProfileName}
-                                                onChange={(e) => setNewThemeProfileName(e.target.value)}
-                                                placeholder="New profile name"
-                                                style={{
-                                                    flex: 1,
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    outline: 'none'
-                                                }}
-                                            />
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: themeColors.accent,
-                                                    border: `1px solid ${themeColors.accent}`,
-                                                    borderRadius: 8,
-                                                    color: '#111',
-                                                    padding: '10px 12px',
-                                                    cursor: newThemeProfileName.trim() ? 'pointer' : 'not-allowed',
-                                                    fontWeight: 600,
-                                                    opacity: newThemeProfileName.trim() ? 1 : 0.6,
-                                                }}
-                                                disabled={!newThemeProfileName.trim()}
-                                                onClick={async () => {
-                                                    try {
-                                                        const saved = await window.electronAPI?.createThemeProfile?.(newThemeProfileName.trim());
-                                                        if (saved) {
-                                                            const sanitized = sanitizeThemeConfig(saved);
-                                                            setThemeConfig(sanitized);
-                                                            setThemeEditorConfig(sanitized);
-                                                            setNewThemeProfileName('');
-                                                            showToast('success', 'Theme profile created.');
-                                                        }
-                                                    } catch (error) {
-                                                        showToast('error', `Failed to create profile: ${error instanceof Error ? error.message : String(error)}`);
-                                                    }
-                                                }}
-                                            >
-                                                Add Profile
-                                            </button>
-                                        </div>
-
-                                        <div style={{ display: 'flex', gap: 8 }}>
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: 'rgba(255,255,255,0.08)',
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    borderRadius: 8,
-                                                    color: '#fff',
-                                                    padding: '8px 12px',
-                                                    cursor: Object.keys(themeEditorConfig.profiles).length > 1 ? 'pointer' : 'not-allowed',
-                                                    opacity: Object.keys(themeEditorConfig.profiles).length > 1 ? 1 : 0.6,
-                                                    fontWeight: 600,
-                                                }}
-                                                disabled={Object.keys(themeEditorConfig.profiles).length <= 1}
-                                                onClick={() => {
-                                                    setShowThemeProfileDeleteConfirm(true);
-                                                    setIsThemeProfileDeleteDialogClosing(false);
-                                                }}
-                                            >
-                                                Delete Profile
-                                            </button>
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: themeColors.warning,
-                                                    border: `1px solid ${themeColors.warning}`,
-                                                    borderRadius: 8,
-                                                    color: '#222',
-                                                    padding: '8px 12px',
-                                                    cursor: 'pointer',
-                                                    fontWeight: 700,
-                                                }}
-                                                onClick={() => {
-                                                    setShowThemeProfileResetConfirm(true);
-                                                    setIsThemeProfileResetDialogClosing(false);
-                                                }}
-                                            >
-                                                Reset Profile Theme
-                                            </button>
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: 'rgba(255,255,255,0.08)',
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    borderRadius: 8,
-                                                    color: '#fff',
-                                                    padding: '8px 12px',
-                                                    cursor: 'pointer',
-                                                    fontWeight: 600,
-                                                }}
-                                                onClick={async () => {
-                                                    try {
-                                                        const next = await window.electronAPI?.reloadThemeConfig?.();
-                                                        if (next) {
-                                                            const sanitized = sanitizeThemeConfig(next);
-                                                            setThemeConfig(sanitized);
-                                                            setThemeEditorConfig(sanitized);
-                                                            showToast('info', 'Theme config reloaded from file/backup.');
-                                                        }
-                                                    } catch (error) {
-                                                        showToast('error', `Failed to reload theme config: ${error instanceof Error ? error.message : String(error)}`);
-                                                    }
-                                                }}
-                                            >
-                                                Reload Theme File
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <h2 style={sectionHeaderStyle}>Full Theme</h2>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                        <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                            <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Profile display name</span>
-                                            <input
-                                                className="settings-input"
-                                                type="text"
-                                                value={editorThemeProfile.name}
-                                                onChange={(e) => updateEditorActiveProfile((profile) => ({ ...profile, name: e.target.value.slice(0, 60) }))}
-                                                style={{
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    color: '#fff',
-                                                    padding: '10px 12px',
-                                                    fontSize: 14,
-                                                    outline: 'none'
-                                                }}
-                                            />
-                                        </label>
-
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>
-                                            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-                                                <span style={{ fontSize: 12, color: '#aaa' }}>Theme mode</span>
-                                                <select
-                                                    className="settings-select"
-                                                    value={settingsDraft?.theme ?? settings.theme}
-                                                    onChange={e => setSettingsDraft(s => s ? { ...s, theme: e.target.value as Settings['theme'] } : null)}
-                                                    style={{
-                                                        borderRadius: 8,
-                                                        border: '1px solid rgba(255,255,255,0.12)',
-                                                        background: 'rgba(255,255,255,0.05)',
-                                                        color: '#fff',
-                                                        padding: '8px 10px',
-                                                        fontSize: 12,
-                                                        outline: 'none',
-                                                        width: '100%',
-                                                        minWidth: 0,
-                                                    }}
-                                                >
-                                                    <option value="dark">Dark</option>
-                                                    <option value="light">Light</option>
-                                                    <option value="system">System</option>
-                                                </select>
-                                            </label>
-
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-                                                <span style={{ fontSize: 12, color: '#aaa' }}>Accent color (quick)</span>
-                                                <ColorSettingField
-                                                    label="Accent color"
-                                                    value={settingsDraft?.accentColor ?? settings.accentColor}
-                                                    onChange={(nextValue) => setSettingsDraft(s => s ? { ...s, accentColor: nextValue } : null)}
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                                            {[
-                                                ['appBackground', 'App background'],
-                                                ['panelBackground', 'Panel background'],
-                                                ['overlayBackground', 'Overlay background'],
-                                                ['itemBackground', 'Item background'],
-                                                ['itemHoverBackground', 'Item hover'],
-                                                ['inputBackground', 'Input background'],
-                                                ['inputBorder', 'Input border'],
-                                                ['border', 'Border'],
-                                                ['textPrimary', 'Text primary'],
-                                                ['textSecondary', 'Text secondary'],
-                                                ['textMuted', 'Text muted'],
-                                                ['accent', 'Accent'],
-                                                ['danger', 'Danger'],
-                                                ['warning', 'Warning'],
-                                                ['success', 'Success'],
-                                                ['scrollbarThumb', 'Scrollbar thumb'],
-                                                ['scrollbarTrack', 'Scrollbar track'],
-                                            ].map(([key, label]) => {
-                                                const colorKey = key as keyof ThemeProfile['colors'];
-                                                return (
-                                                    <ColorSettingField
-                                                        key={key}
-                                                        label={String(label)}
-                                                        value={editorThemeProfile.colors[colorKey]}
-                                                        onChange={(nextValue) => {
-                                                            updateEditorActiveProfile((profile) => ({
-                                                                ...profile,
-                                                                colors: {
-                                                                    ...profile.colors,
-                                                                    [colorKey]: nextValue,
-                                                                },
-                                                            }));
-                                                        }}
-                                                    />
-                                                );
-                                            })}
-                                        </div>
-
-                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                            {[
-                                                ['fontFamily', 'Font family'],
-                                                ['monoFontFamily', 'Mono font'],
-                                            ].map(([key, label]) => {
-                                                const typographyKey = key as keyof ThemeProfile['typography'];
-                                                return (
-                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 160 }}>
-                                                        <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
-                                                        <input
-                                                            className="settings-input"
-                                                            type="text"
-                                                            value={String(editorThemeProfile.typography[typographyKey])}
-                                                            onChange={(e) => {
-                                                                const nextValue = e.target.value;
-                                                                updateEditorActiveProfile((profile) => ({
-                                                                    ...profile,
-                                                                    typography: {
-                                                                        ...profile.typography,
-                                                                        [typographyKey]: nextValue,
-                                                                    },
-                                                                }));
-                                                            }}
-                                                            style={{
-                                                                borderRadius: 8,
-                                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                                background: 'rgba(255,255,255,0.05)',
-                                                                color: '#fff',
-                                                                padding: '8px 10px',
-                                                                fontSize: 12,
-                                                                outline: 'none'
-                                                            }}
-                                                        />
-                                                    </label>
-                                                );
-                                            })}
-                                        </div>
-
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, width: '100%' }}>
-                                            {[
-                                                ['baseFontSize', 'Base size'],
-                                                ['titleFontSize', 'Title size'],
-                                                ['borderRadius', 'Border radius'],
-                                                ['itemRadius', 'Item radius'],
-                                                ['transparency', 'Transparency'],
-                                                ['backdropBlur', 'Backdrop blur'],
-                                            ].map(([key, label]) => {
-                                                const value =
-                                                    key in editorThemeProfile.surface
-                                                        ? (editorThemeProfile.surface as any)[key]
-                                                        : (editorThemeProfile.typography as any)[key];
-                                                return (
-                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-                                                        <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
-                                                        <input
-                                                            className="settings-input"
-                                                            type="number"
-                                                            value={value}
-                                                            onChange={(e) => {
-                                                                const parsed = Number(e.target.value);
-                                                                updateEditorActiveProfile((profile) => {
-                                                                    if (key in profile.surface) {
-                                                                        return {
-                                                                            ...profile,
-                                                                            surface: {
-                                                                                ...profile.surface,
-                                                                                [key]: parsed,
-                                                                            },
-                                                                        };
-                                                                    }
-
-                                                                    return {
-                                                                        ...profile,
-                                                                        typography: {
-                                                                            ...profile.typography,
-                                                                            [key]: parsed,
-                                                                        },
-                                                                    };
-                                                                });
-                                                            }}
-                                                            style={{
-                                                                borderRadius: 8,
-                                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                                background: 'rgba(255,255,255,0.05)',
-                                                                color: '#fff',
-                                                                padding: '8px 10px',
-                                                                fontSize: 12,
-                                                                outline: 'none',
-                                                                width: '100%',
-                                                                minWidth: 0,
-                                                                boxSizing: 'border-box',
-                                                            }}
-                                                        />
-                                                    </label>
-                                                );
-                                            })}
-                                        </div>
-
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                                            {[
-                                                ['delete', 'Delete icon'],
-                                                ['pin', 'Pin icon'],
-                                                ['pinFilled', 'Pin filled icon'],
-                                                ['settings', 'Settings icon'],
-                                                ['close', 'Close icon'],
-                                                ['search', 'Search icon'],
-                                                ['confirm', 'Confirm icon'],
-                                                ['clipboard', 'Clipboard icon'],
-                                            ].map(([key, label]) => {
-                                                const iconKey = key as keyof ThemeProfile['icons'];
-                                                return (
-                                                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                        <span style={{ fontSize: 12, color: '#aaa' }}>{label}</span>
-                                                        <input
-                                                            className="settings-input"
-                                                            type="text"
-                                                            value={editorThemeProfile.icons[iconKey]}
-                                                            onChange={(e) => {
-                                                                const nextValue = e.target.value;
-                                                                updateEditorActiveProfile((profile) => ({
-                                                                    ...profile,
-                                                                    icons: {
-                                                                        ...profile.icons,
-                                                                        [iconKey]: nextValue,
-                                                                    },
-                                                                }));
-                                                            }}
-                                                            style={{
-                                                                borderRadius: 8,
-                                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                                background: 'rgba(255,255,255,0.05)',
-                                                                color: '#fff',
-                                                                padding: '8px 10px',
-                                                                fontSize: 12,
-                                                                outline: 'none'
-                                                            }}
-                                                        />
-                                                    </label>
-                                                );
-                                            })}
-                                        </div>
-
-                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: themeColors.accent,
-                                                    border: `1px solid ${themeColors.accent}`,
-                                                    borderRadius: 8,
-                                                    color: '#111',
-                                                    padding: '9px 12px',
-                                                    cursor: isThemeSaving ? 'wait' : 'pointer',
-                                                    fontWeight: 700,
-                                                    flex: 1,
-                                                    opacity: isThemeSaving ? 0.7 : 1,
-                                                }}
-                                                disabled={isThemeSaving}
-                                                onClick={() => {
-                                                    void saveThemeEditorConfig();
-                                                }}
-                                            >
-                                                {isThemeSaving ? 'Saving...' : 'Save Theme JSON'}
-                                            </button>
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: 'rgba(255,255,255,0.08)',
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    borderRadius: 8,
-                                                    color: '#fff',
-                                                    padding: '9px 12px',
-                                                    cursor: 'pointer',
-                                                    fontWeight: 600,
-                                                }}
-                                                onClick={() => {
-                                                    void openThemeConfigInSystem();
-                                                }}
-                                            >
-                                                Open Theme JSON
-                                            </button>
-                                            <button
-                                                className="settings-button"
-                                                style={{
-                                                    background: 'rgba(255,255,255,0.08)',
-                                                    border: '1px solid rgba(255,255,255,0.12)',
-                                                    borderRadius: 8,
-                                                    color: '#fff',
-                                                    padding: '9px 12px',
-                                                    cursor: 'pointer',
-                                                    fontWeight: 600,
-                                                }}
-                                                onClick={async () => {
-                                                    try {
-                                                        const text = await window.electronAPI?.exportThemeConfig?.();
-                                                        if (!text) return;
-                                                        const blob = new Blob([text], { type: 'application/json' });
-                                                        const url = URL.createObjectURL(blob);
-                                                        const a = document.createElement('a');
-                                                        a.href = url;
-                                                        a.download = 'clip-theme.json';
-                                                        a.click();
-                                                        setTimeout(() => URL.revokeObjectURL(url), 1000);
-                                                        showToast('success', 'Theme JSON exported.');
-                                                    } catch (error) {
-                                                        showToast('error', `Failed to export theme JSON: ${error instanceof Error ? error.message : String(error)}`);
-                                                    }
-                                                }}
-                                            >
-                                                Export Theme JSON
-                                            </button>
-                                        </div>
-
-                                        <div style={{ fontSize: 12, color: '#8f8f8f', lineHeight: 1.5 }}>
-                                            Theme file path:{' '}
-                                            <code
-                                                style={{ color: '#cfcfcf', cursor: 'pointer', textDecoration: 'underline' }}
-                                                title="click to copy"
-                                                onClick={() => {
-                                                    if (!themePaths?.configPath) return;
-                                                    void copyTextToClipboard(themePaths.configPath, 'Theme file path');
-                                                }}
-                                            >
-                                                {themePaths?.configPath || 'AppData/clip-theme.json'}
-                                            </code>
-                                            <br />
-                                            Backup schema path:{' '}
-                                            <code
-                                                style={{ color: '#cfcfcf', cursor: 'pointer', textDecoration: 'underline' }}
-                                                title="click to copy"
-                                                onClick={() => {
-                                                    if (!themePaths?.schemaPath) return;
-                                                    void copyTextToClipboard(themePaths.schemaPath, 'Theme schema path');
-                                                }}
-                                            >
-                                                {themePaths?.schemaPath || 'AppData/clip-theme.schema.json'}
-                                            </code>
-                                            {themeSchema?.notes?.length ? (
-                                                <>
-                                                    <br />
-                                                    {String(themeSchema.notes[0])}
-                                                </>
-                                            ) : null}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Visual Settings section removed (merged into Full Theme). */}
+                                <SettingsThemeSection
+                                    activeThemeProfileKey={activeThemeProfileKey}
+                                    switchThemeProfile={switchThemeProfile}
+                                    themeEditorConfig={themeEditorConfig}
+                                    newThemeProfileName={newThemeProfileName}
+                                    setNewThemeProfileName={setNewThemeProfileName}
+                                    createThemeProfileFromInput={createThemeProfileFromInput}
+                                    setShowThemeProfileDeleteConfirm={setShowThemeProfileDeleteConfirm}
+                                    setIsThemeProfileDeleteDialogClosing={setIsThemeProfileDeleteDialogClosing}
+                                    setShowThemeProfileResetConfirm={setShowThemeProfileResetConfirm}
+                                    setIsThemeProfileResetDialogClosing={setIsThemeProfileResetDialogClosing}
+                                    themeColors={themeColors}
+                                    reloadThemeFromDisk={reloadThemeFromDisk}
+                                    editorThemeProfile={editorThemeProfile}
+                                    settingsDraft={settingsDraft}
+                                    settings={settings}
+                                    setSettingsDraft={setSettingsDraft}
+                                    updateEditorActiveProfile={updateEditorActiveProfile}
+                                    isThemeSaving={isThemeSaving}
+                                    saveThemeEditorConfig={saveThemeEditorConfig}
+                                    openThemeConfigInSystem={openThemeConfigInSystem}
+                                    exportThemeJson={exportThemeJson}
+                                    themePaths={themePaths}
+                                    copyTextToClipboard={copyTextToClipboard}
+                                    themeSchema={themeSchema}
+                                />
 
                                 {/* Behavior Settings section */}
                                 <div>
@@ -3677,1359 +2347,78 @@ const App: React.FC = () => {
                     </div>
                 )}
                 {/* Clipboard list */}
-                <div
-                    ref={listRef}
-                    className="clip-list"
-                    style={{
-                        overflowY: 'auto',
-                        overflowX: 'hidden',
-                        marginTop: 0,
-                        paddingTop: 0,
-                        paddingBottom: 1,
-                        position: 'relative',
-                        display: 'block',
-                        flex: 1,
-                        scrollbarWidth: 'thin',
-                        scrollbarColor: settings.theme === 'light' ? '#ccc #f0f0f0' : '#444 #23252a',
-                        paddingRight: (() => {
-                            const padding = hasScrollbar ? 8 : 0;
-                            log.renderer(`Scrollbar: Applying paddingRight: ${padding} (hasScrollbar: ${hasScrollbar})`);
-                            return padding;
-                        })(), // reserve space for scrollbar gutter
-                    }}
-                >
-                    {/* Show skeleton loading only during the very first data load */}
-                    {isInitialLoading && (
-                        <>
-                            {[1, 2, 3, 4, 5].map((i) => (
-                                <div
-                                    key={`skeleton-${i}`}
-                                    className={`clip-item-skeleton ${isAnimatingList ? 'clip-item-animate' : ''}`}
-                                    style={{
-                                        background: 'rgba(255,255,255,0.02)',
-                                        borderRadius: 12,
-                                        margin: 0,
-                                        padding: '2.5% 3%',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 10,
-                                        height: 60,
-                                        animationDelay: `${i * 50}ms`
-                                    }}
-                                >
-                                    <div style={{
-                                        flex: 1,
-                                        height: 16,
-                                        background: 'rgba(255,255,255,0.06)',
-                                        borderRadius: 4,
-                                        position: 'relative',
-                                        overflow: 'hidden'
-                                    }}>
-                                        <div style={{
-                                            position: 'absolute',
-                                            top: 0,
-                                            left: '-100%',
-                                            width: '100%',
-                                            height: '100%',
-                                            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)',
-                                            animation: 'skeleton-shimmer 2s infinite'
-                                        }} />
-                                    </div>
-                                    <div style={{
-                                        width: 60,
-                                        height: 12,
-                                        background: 'rgba(255,255,255,0.04)',
-                                        borderRadius: 4
-                                    }} />
-                                </div>
-                            ))}
-                        </>
-                    )}
-
-                    {/* Show empty state message when not loading and no items in filtered list */}
-                    {filteredItems.length === 0 && !isInitialLoading && (
-                        <div className="clip-empty" style={{ opacity: 0.7, textAlign: 'center', marginTop: '10%', color: themeColors.textMuted }}>
-                            {search.trim().length > 0
-                                ? 'No results found.'
-                                : filteredType === 'text'
-                                    ? 'No text found.'
-                                    : filteredType === 'image'
-                                        ? 'No images found.'
-                                        : 'No clipboard items found.'}
-                        </div>
-                    )}
-                    {filteredItems.length > 0 && !isInitialLoading && (
-                        <div
-                            style={{
-                                height: `${rowVirtualizer.getTotalSize()}px`,
-                                width: '100%',
-                                position: 'relative',
-                            }}
-                        >
-                            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                                const item = filteredItems[virtualRow.index];
-                                return (
-                                    <div
-                                        key={`${item.id}-${listForceKey}`}
-                                        data-index={virtualRow.index}
-                                        ref={rowVirtualizer.measureElement}
-                                        style={{
-                                            position: 'absolute',
-                                            top: 0,
-                                            left: 0,
-                                            right: 0,
-                                            transform: `translateY(${virtualRow.start}px)`,
-                                            paddingBottom: '10px', // spacing between items
-                                            boxSizing: 'border-box'
-                                        }}
-                                    >
-                                        <div
-                                            className={`clip-item clip-item-${item.type} ${isAnimatingList ? 'clip-item-animate' : ''}`}
-                                            onClick={() => handlePaste(item)}
-                                            style={{
-                                                background: themeColors.itemBackground,
-                                                borderRadius: 12,
-                                                margin: 0,
-                                                padding: '2.5% 3%',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-                                                transition: 'background 0.2s, transform 0.25s cubic-bezier(.4,2,.6,1), box-shadow 0.25s cubic-bezier(.4,2,.6,1)',
-                                                cursor: 'pointer',
-                                                gap: 10,
-                                                boxSizing: 'border-box'
-                                            }}
-                                            onMouseEnter={e => e.currentTarget.style.background = themeColors.itemHoverBackground}
-                                            onMouseLeave={e => e.currentTarget.style.background = themeColors.itemBackground}
-                                        >
-                                            {item.type === 'image' ? (
-                                                <img className="clip-item-image" src={item.content} alt="clip" style={{ width: '13%', minWidth: 36, maxWidth: 48, height: 'auto', aspectRatio: '1/1', borderRadius: 8, objectFit: 'cover', marginRight: '4%' }} />
-                                            ) : (
-                                                <div className="clip-item-text" style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '1rem', lineHeight: 1.4, color: themeColors.textPrimary }}>{item.content.length > 120 ? item.content.slice(0, 120) + '…' : item.content}</div>
-                                            )}
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', minWidth: 60 }}>
-                                                <span className="clip-item-time" style={{ color: themeColors.textMuted, fontSize: '0.85rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{new Date(item.timestamp).toLocaleTimeString()}</span>
-                                                {(settings.pinFavoriteItems) && (
-                                                    <button
-                                                        className="clip-pin-btn"
-                                                        tabIndex={-1}
-                                                        style={{
-                                                            background: 'none',
-                                                            border: 'none',
-                                                            padding: 0,
-                                                            marginLeft: 2,
-                                                            marginTop: 2,
-                                                            cursor: 'pointer',
-                                                            outline: 'none',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            opacity: item.pinned ? 1 : 0.6,
-                                                            transition: 'opacity 0.2s',
-                                                            height: 25,
-                                                            width: 25,
-                                                        }}
-                                                        title={item.pinned ? 'Unpin' : 'Pin'}
-                                                        onClick={e => {
-                                                            e.stopPropagation();
-                                                            if (settings.pinFavoriteItems) handleTogglePin(item);
-                                                        }}
-                                                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                                                        onMouseLeave={e => (e.currentTarget.style.opacity = item.pinned ? '1' : '0.6')}
-                                                    >
-                                                        <IconGlyph
-                                                            value={item.pinned ? themeIcons.pinFilled : themeIcons.pin}
-                                                            fallback={item.pinned ? '📍' : '📌'}
-                                                            label={item.pinned ? 'Pinned' : 'Pin'}
-                                                            size={17}
-                                                        />
-                                                    </button>
-                                                )}
-                                                <button
-                                                    className="clip-delete-btn"
-                                                    tabIndex={-1}
-                                                    style={{
-                                                        background: 'none',
-                                                        border: 'none',
-                                                        padding: 0,
-                                                        marginLeft: 2,
-                                                        marginTop: 2,
-                                                        cursor: 'pointer',
-                                                        outline: 'none',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        opacity: 0.7,
-                                                        transition: 'opacity 0.2s',
-                                                        height: 25,
-                                                        width: 25,
-                                                    }}
-                                                    title="Delete"
-                                                    onClick={e => {
-                                                        e.stopPropagation();
-                                                        handleDeleteItem(item);
-                                                    }}
-                                                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                                                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-                                                >
-                                                    <IconGlyph value={themeIcons.delete} fallback="🗑️" label="Delete" size={17} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-                {deleteTarget && (
-                    <div className={`fade-opacity-${isDeleteDialogClosing ? 'out' : 'in'}`} style={{
-                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
-                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, borderRadius: settings.borderRadius
-                    }}>
-                        <div
-                            className={`delete-confirm-dialog ${isDeleteDialogClosing ? 'fade-out' : 'fade-in'}`}
-                            style={{
-                                background: settings.theme === 'light' ? '#f0f0f0' : '#222',
-                                borderRadius: 10,
-                                padding: 24,
-                                minWidth: 220,
-                                textAlign: 'center',
-                                boxShadow: '0 2px 12px #0008',
-                                border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`
-                            }}
-                        >
-                            <div style={{
-                                marginBottom: 18,
-                                color: settings.theme === 'light' ? '#333' : '#fff',
-                                fontWeight: 500
-                            }}>
-                                Delete this item?
-                            </div>
-                            <button
-                                style={{
-                                    background: settings.accentColor,
-                                    color: '#fff',
-                                    border: '1px solid ' + settings.accentColor,
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    marginRight: 10,
-                                    fontWeight: 600
-                                }}
-                                onClick={() => confirmDelete(deleteTarget)}
-                            >
-                                Yes
-                            </button>
-                            <button
-                                className='no-btn'
-                                style={{
-                                    background: '#ff4136',
-                                    color: '#fff !important',
-                                    border: '1px solid #ff4136',
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    fontWeight: 600
-                                }}
-                                onClick={handleDeleteDialogClose}
-                            >
-                                No
-                            </button>
-                        </div>
-                    </div>
-                )}
-                {/* Danger Area confirmation popup */}
-                {dangerAction && (
-                    <div className={`fade-opacity-${isDangerDialogClosing ? 'out' : 'in'}`} style={{
-                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
-                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, borderRadius: settings.borderRadius
-                    }}>
-                        <div
-                            className={`delete-confirm-dialog ${isDangerDialogClosing ? 'fade-out' : 'fade-in'}`}
-                            style={{
-                                background: settings.theme === 'light' ? '#f0f0f0' : '#222',
-                                borderRadius: 10,
-                                padding: 24,
-                                minWidth: 280,
-                                maxWidth: 280,
-                                textAlign: 'center',
-                                boxShadow: '0 2px 12px #0008',
-                                border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`
-                            }}
-                        >
-                            <div style={{
-                                marginBottom: 18,
-                                color: dangerAction === 'clear' ? '#ff4136' : '#ffb300',
-                                fontWeight: 600,
-                                fontSize: 17
-                            }}>
-                                {dangerAction === 'clear' ? 'Clear ALL clipboard history? This action cannot be undone.' : 'Reset ALL settings to default?'}
-                            </div>
-                            <button
-                                style={{
-                                    background: dangerAction === 'clear' ? '#ff4136' : '#ffb300',
-                                    color: '#222',
-                                    border: '1px solid ' + (dangerAction === 'clear' ? '#ff4136' : '#ffb300'),
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    marginRight: 10,
-                                    fontWeight: 600
-                                }}
-                                onClick={dangerAction === 'clear' ? handleClearAll : resetSettings}
-                            >
-                                Yes
-                            </button>
-                            <button
-                                className='no-btn'
-                                style={{
-                                    background: '#222',
-                                    color: dangerAction === 'clear' ? '#ff4136' : '#ffb300',
-                                    border: '1px solid ' + (dangerAction === 'clear' ? '#ff4136' : '#ffb300'),
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    fontWeight: 600
-                                }}
-                                onClick={() => {
-                                    setIsDangerDialogClosing(true);
-                                    setTimeout(() => {
-                                        setDangerAction(null);
-                                        setIsDangerDialogClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                No
-                            </button>
-                        </div>
-                    </div>
-                )}
-                <style>{`
-                /* Global CSS for clean interface */
-                body {
-                    margin: 0;
-                    font-family: 'Segoe UI', Arial, sans-serif;
-                    overflow: hidden;
-                    -webkit-user-select: none;
-                    user-select: none;
-                }
-
-                /* Custom slider styles */
-                ${getSliderStyles(settings.accentColor)}
-
-                /* Light theme slider styles */
-                .theme-light input[type="range"]::-webkit-slider-runnable-track {
-                    background: #ccc !important;
-                }
-                .theme-light input[type="range"]::-moz-range-track {
-                    background: #ccc !important;
-                }
-                .clip-root {
-                    background: ${themeColors.appBackground};
-                    border-radius: ${effectiveBorderRadius}px;
-                    padding: 3%;
-                    height: ${settings.windowHeight}px;
-                    width: ${settings.windowWidth}px;
-                    color: ${themeColors.textPrimary};
-                    font-family: ${themeTypography.fontFamily};
-                    transition: box-shadow 0.2s, border-radius 0.3s, background 0.3s;
-                    position: relative;
-                    overflow: hidden;
-                    display: flex;
-                    flex-direction: column;
-                    box-sizing: border-box; /* Include padding in dimensions */
-                    padding-bottom: 7px;
-                    backdrop-filter: blur(${themeSurface.backdropBlur}px);
-                    -webkit-backdrop-filter: blur(${themeSurface.backdropBlur}px);
-                }
-
-                /* Dark mode option styling */
-                option {
-                    background: #23252a !important;
-                    color: #fff !important;
-                }
-
-                select option {
-                    background: #23252a !important;
-                    color: #fff !important;
-                }
-
-                /* Theme-based styling */
-                .theme-light .clip-root {
-                    background: ${themeColors.appBackground};
-                    color: ${themeColors.textPrimary};
-                    backdrop-filter: blur(10px);
-                    -webkit-backdrop-filter: blur(10px);
-                }
-
-                .theme-light .clip-item {
-                    background: ${themeColors.itemBackground} !important;
-                    color: ${themeColors.textPrimary};
-                    border: 1px solid ${themeColors.border} !important;
-                }
-
-                .theme-light .clip-item:hover {
-                    background: ${themeColors.itemHoverBackground} !important;
-                    border: 1px solid ${themeColors.border} !important;
-                }
-
-                .theme-light .clip-settings-page {
-                    background: ${themeColors.panelBackground} !important;
-                    color: ${themeColors.textPrimary};
-                }
-
-
-                .theme-light .clip-settings-scroll::-webkit-scrollbar-thumb {
-                    background: ${themeColors.scrollbarThumb};
-                    border: 2px solid ${themeColors.scrollbarTrack};
-                    max-height: 90%;
-                }
-
-                .theme-light .clip-settings-scroll::-webkit-scrollbar-thumb:hover {
-                    background: ${themeColors.accent};
-                }
-
-                .theme-light input, .theme-light select {
-                    background: ${themeColors.inputBackground} !important;
-                    color: ${themeColors.textPrimary} !important;
-                    border: 1px solid ${themeColors.inputBorder} !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                }
-
-                /* Only apply input-like styling to labels that have background styling (container labels) */
-                .theme-light label[style*="background: rgba(255,255,255,0.03)"],
-                .theme-light label[style*="background: rgba(255,255,255,0.05)"],
-                .theme-light label[style*="background: rgba(255,255,255,0.08)"] {
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #e5e7eb !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-                }
-
-                .theme-light input:focus, .theme-light select:focus {
-                    border-color: ${themeColors.accent} !important;
-                    box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
-                    outline: none !important;
-                }
-
-                .theme-light option {
-                    background: ${themeColors.panelBackground} !important;
-                    color: ${themeColors.textPrimary} !important;
-                }
-
-                /* Dark mode theme-specific option styling */
-                .theme-dark option {
-                    background: #23252a !important;
-                    color: #fff !important;
-                }
-
-                .theme-dark select option {
-                    background: #23252a !important;
-                    color: #fff !important;
-                }
-
-                .theme-light button:not(.no-btn, .clip-pin-btn, .clip-delete-btn) {
-                    color: ${themeColors.textSecondary} !important;
-                    border: 1px solid ${themeColors.inputBorder} !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                    transition: all 0.2s ease !important;
-                }
-
-                .theme-light button:hover:not(.clip-pin-btn, .clip-delete-btn) {
-                    border-color: ${themeColors.accent} !important;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.15) !important;
-                }
-
-                .theme-light button.clip-settings-save-btn {
-                    background: ${settings.accentColor} !important;
-                    color: #fff !important;
-                    border-color: ${settings.accentColor} !important;
-                }
-
-                .theme-light button.clip-settings-save-btn:hover {
-                    background: ${settings.accentColor}dd !important;
-                    box-shadow: 0 2px 8px rgba(70, 130, 180, 0.3) !important;
-                }
-
-                .theme-light h2 {
-                    color: ${themeColors.textPrimary} !important;
-                    border-bottom-color: ${themeColors.border} !important;
-                }
-
-                .theme-light h3 {
-                    color: ${themeColors.textSecondary} !important;
-                }
-
-                .theme-light span:not(.toast-message>span) {
-                    color: ${themeColors.textMuted} !important;
-                }
-
-                /* Light mode text labels - only for text labels, not container labels */
-                .theme-light label:not([style*="background:"]) {
-                    color: ${themeColors.textSecondary} !important;
-                }
-
-                /* Light mode simple class-based styling */
-
-                /* Settings inputs and selects */
-                .theme-light .settings-input,
-                .theme-light .settings-select {
-                    background: rgba(255,255,255,0.95) !important;
-                    color: #2c3e50 !important;
-                    border: 1px solid #d1d5db !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                }
-
-                #danger-area {
-                    color: ${themeColors.danger} !important;
-                }
-
-                .theme-light #reset-settings-warning {
-                    color: ${themeColors.warning} !important;
-                }
-
-                .theme-light .settings-input:focus,
-                .theme-light .settings-select:focus {
-                    border-color: ${settings.accentColor} !important;
-                    box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
-                }
-
-                /* Settings container labels (switch containers) */
-                .theme-light .settings-container {
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #e5e7eb !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-                }
-
-                /* Settings buttons */
-                .theme-light .settings-button {
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #d1d5db !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                }
-
-                .theme-light .settings-button:hover {
-                    border-color: #9ca3af !important;
-                }
-
-                /* Settings display boxes (shortcut display, backup list, etc.) */
-                .theme-light .settings-display-box {
-                    background: rgba(255,255,255,0.9) !important;
-                    color: #374151 !important;
-                    border: 1px solid #e5e7eb !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-                }
-
-                /* Danger zone styling for light mode */
-                .theme-light div[style*="background: rgba(255,65,54,0.08)"] {
-                    background: rgba(120,120,120,0.15) !important;
-                }
-
-                .theme-light div[style*="color: #ffb300"] {
-                    color: #ff4136 !important;
-                }
-
-                /* Shortcut modifier buttons */
-                .theme-light .settings-modifier-button {
-                    background: rgba(255,255,255,0.9) !important;
-                    color: #2c3e50 !important;
-                    border: 1px solid #d1d5db !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                }
-                    
-                .theme-light #settings-title {
-                    color: #575f6c !important;
-                }
-
-                .theme-light .settings-modifier-button:hover {
-                    background: rgba(255,255,255,1) !important;
-                    border-color: #9ca3af !important;
-                }
-
-                /* Light mode section backgrounds */
-                .theme-light div[style*="background: rgba(255,255,255,0.03)"] {
-                    background: rgba(255,255,255,0.7) !important;
-                    border: 1px solid #e5e7eb !important;
-                }
-
-                .theme-light div[style*="background: rgba(255,255,255,0.05)"] {
-                    background: rgba(255,255,255,0.8) !important;
-                    border: 1px solid #e5e7eb !important;
-                }
-
-                .theme-light div[style*="background: rgba(255,255,255,0.08)"] {
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #d1d5db !important;
-                }
-
-                @keyframes clip-fadein {
-                    from { opacity: 0; transform: translateY(16px) scale(0.98); }
-                    to { opacity: 1; transform: none; }
-                }
-                @keyframes clip-fadeout {
-                from { opacity: 1; transform: none; }
-                to { opacity: 0; transform: translateY(16px) scale(0.98); }
-                }
-                @keyframes clip-item-slide-in {
-                    from {
-                        opacity: 0;
-                        transform: translateY(20px) scale(0.95);
-                    }
-                    to {
-                        opacity: 1;
-                        transform: translateY(0) scale(1);
-                    }
-                }
-                .clip-item-animate {
-                    animation: clip-item-slide-in 0.4s ease-out forwards;
-                }
-                .fade-in { animation: clip-fadein 0.3s forwards; }
-                .fade-out { animation: clip-fadeout 0.3s forwards; }
-                .fade-opacity-in { opacity: 1; transition: opacity 0.3s; }
-                .fade-opacity-out { opacity: 0; transition: opacity 0.3s; }
-
-                /* Toast notifications */
-                @keyframes toast-in {
-                    from { opacity: 0; transform: translateY(20px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-                @keyframes toast-out {
-                    from { opacity: 1; transform: translateY(0); }
-                    to { opacity: 0; transform: translateY(20px); }
-                }
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-                @keyframes skeleton-shimmer {
-                    0% { left: -100%; }
-                    100% { left: 100%; }
-                }
-                .toast-message {
-                    animation: toast-in 0.3s ease-out forwards;
-                }
-                .toast-message.removing {
-                    animation: toast-out 0.3s ease-in forwards;
-                }
-
-                /* Other elements */
-                .clip-item {
-                    will-change: transform, opacity;
-                    border-radius: ${themeSurface.itemRadius}px !important;
-                }
-                .clip-item:active {
-                    transform: scale(0.97);
-                    box-shadow: 0 2px 16px 0 #ffb30044;
-                }
-                .clip-settings-page {
-                    overflow: hidden;
-                }
-                .clip-settings-scroll {
-                    scrollbar-width: thin;
-                    scrollbar-color: #444 #23252a;
-                }
-                .clip-settings-scroll::-webkit-scrollbar {
-                    width: 8px;
-                    background: transparent;
-                    transition: opacity 0.2s;
-                    opacity: 0;
-                    position: absolute;
-                    right: 0;
-                    z-index: 10;
-                }
-                .clip-settings-scroll:hover::-webkit-scrollbar {
-                    opacity: 1;
-                }
-                .clip-settings-scroll::-webkit-scrollbar-thumb {
-                    background: #444;
-                    border-radius: 6px;
-                    border: 2px solid #23252a;
-                    min-height: 40px;
-                    transition: background 0.2s;
-                    max-height: 90%;
-                }
-                .clip-settings-scroll::-webkit-scrollbar-thumb:hover {
-                    background: #2ecc40;
-                }
-                /* Clipboard list scrollbar styling */
-                .clip-list {
-                    overflow-y: overlay;
-                    scrollbar-width: thin;
-                    scrollbar-color: #444 #23252a;
-                }
-                .clip-list::-webkit-scrollbar {
-                    width: 8px;
-                    background: transparent;
-                    opacity: 0;
-                    transition: opacity 0.2s;
-                }
-                .clip-list:hover::-webkit-scrollbar {
-                    opacity: 1;
-                }
-                .clip-list::-webkit-scrollbar-thumb {
-                    background: ${themeColors.scrollbarThumb};
-                    border-radius: 6px;
-                    border: 2px solid ${themeColors.scrollbarTrack};
-                    min-height: 20px !important;
-                    transition: background 0.2s;
-                }
-                .clip-list::-webkit-scrollbar-thumb:hover {
-                    background: ${themeColors.accent};
-                }
-
-                /* Backup list scrollbar styling */
-                .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar {
-                    width: 6px;
-                    background: transparent;
-                }
-                .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar-thumb {
-                    background: #444;
-                    border-radius: 3px;
-                    transition: background 0.2s;
-                }
-                .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar-thumb:hover {
-                    background: ${settings.accentColor};
-                }
-            `}                </style>
-                {/* Restart confirmation dialog */}
-                {showRestartConfirm && (
-                    <div className={`fade-opacity-${isRestartDialogClosing ? 'out' : 'in'}`} style={{
-                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
-                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, borderRadius: settings.borderRadius
-                    }}>
-                        <div
-                            className={`${isRestartDialogClosing ? 'fade-out' : 'fade-in'}`}
-                            style={{
-                                background: settings.theme === 'light' ? '#f0f0f0' : '#222',
-                                borderRadius: 10,
-                                padding: 24,
-                                minWidth: 280,
-                                maxWidth: 350,
-                                textAlign: 'center',
-                                boxShadow: '0 2px 12px #0008',
-                                border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`
-                            }}
-                        >
-                            <div style={{ marginBottom: 18, fontWeight: 600, fontSize: 17 }}>
-                                {restartReason === 'import'
-                                    ? "Database imported successfully! Do you want to restart the app now?"
-                                    : restartReason === 'restore'
-                                        ? "Backup restored successfully! Do you want to restart the app now?"
-                                        : "Operation successful! Do you want to restart the app now?"}
-                            </div>
-                            <button
-                                style={{
-                                    background: settings.accentColor,
-                                    color: '#222',
-                                    border: `1px solid ${settings.accentColor}`,
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    marginRight: 10,
-                                    fontWeight: 600
-                                }}
-                                onClick={() => window.electronAPI?.restartApp?.()}
-                            >
-                                Yes, Restart Now
-                            </button>
-                            <button
-                                style={{
-                                    background: '#222',
-                                    color: '#fff',
-                                    border: '1px solid #444',
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    fontWeight: 600
-                                }}
-                                onClick={() => {
-                                    setIsRestartDialogClosing(true);
-                                    setTimeout(() => {
-                                        setShowRestartConfirm(false);
-                                        setRestartReason(null); // Reset reason
-                                        setIsRestartDialogClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                Later
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Unsaved changes confirmation dialog */}
-                {showUnsavedChangesConfirm && (
-                    <div className={`fade-opacity-${isUnsavedChangesDialogClosing ? 'out' : 'in'}`} style={{
-                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
-                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100, borderRadius: settings.borderRadius
-                    }}>
-                        <div
-                            className={`${isUnsavedChangesDialogClosing ? 'fade-out' : 'fade-in'}`}
-                            style={{
-                                background: settings.theme === 'light' ? '#f0f0f0' : '#222',
-                                borderRadius: 10,
-                                padding: 24,
-                                minWidth: 280,
-                                maxWidth: 350,
-                                textAlign: 'center',
-                                boxShadow: '0 2px 12px #0008',
-                                border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`
-                            }}
-                        >
-                            <div style={{ marginBottom: 18, fontWeight: 600, fontSize: 17 }}>
-                                You have unsaved changes. Do you want to save them?
-                            </div>
-                            <button
-                                style={{
-                                    background: settings.accentColor,
-                                    color: '#222',
-                                    border: `1px solid ${settings.accentColor}`,
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    marginRight: 10,
-                                    fontWeight: 600
-                                }}
-                                onClick={() => {
-                                    if (settingsDraft) setSettings(settingsDraft);
-                                    const actionType = showUnsavedChangesConfirm;
-
-                                    setIsUnsavedChangesDialogClosing(true);
-                                    setTimeout(() => {
-                                        setShowUnsavedChangesConfirm(null);
-                                        setIsUnsavedChangesDialogClosing(false);
-
-                                        if (actionType === 'quit') {
-                                            window.electronAPI?.quitApp?.();
-                                        } else {
-                                            closeSettingsWithoutSaving();
-                                        }
-                                    }, 300);
-                                }}
-                            >
-                                Save
-                            </button>
-                            <button
-                                style={{
-                                    background: '#ff4136',
-                                    color: '#fff',
-                                    border: '1px solid #ff4136',
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    marginRight: 10,
-                                    fontWeight: 600
-                                }}
-                                onClick={() => {
-                                    const actionType = showUnsavedChangesConfirm;
-
-                                    setIsUnsavedChangesDialogClosing(true);
-                                    setTimeout(() => {
-                                        setShowUnsavedChangesConfirm(null);
-                                        setIsUnsavedChangesDialogClosing(false);
-
-                                        if (actionType === 'quit') {
-                                            window.electronAPI?.quitApp?.();
-                                        } else {
-                                            closeSettingsWithoutSaving();
-                                        }
-                                    }, 300);
-                                }}
-                            >
-                                Don't Save
-                            </button>
-                            <button
-                                style={{
-                                    background: '#222',
-                                    color: '#fff',
-                                    border: '1px solid #444',
-                                    borderRadius: 6,
-                                    padding: '6px 18px',
-                                    fontWeight: 600
-                                }}
-                                onClick={() => {
-                                    setIsUnsavedChangesDialogClosing(true);
-                                    setTimeout(() => {
-                                        setShowUnsavedChangesConfirm(null);
-                                        setIsUnsavedChangesDialogClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Backup deletion confirmation dialog */}
-                {backupDeleteAction && (
-                    <div className={`fade-opacity-${isBackupDeleteDialogClosing ? 'out' : 'in'}`} style={{
-                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
-                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200, borderRadius: settings.borderRadius
-                    }}>
-                        <div
-                            className={`${isBackupDeleteDialogClosing ? 'fade-out' : 'fade-in'}`}
-                            style={{
-                                background: settings.theme === 'light' ? '#f0f0f0' : '#222',
-                                borderRadius: 10,
-                                padding: 24,
-                                minWidth: 280,
-                                maxWidth: 400,
-                                textAlign: 'center',
-                                boxShadow: '0 2px 12px #0008',
-                                border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`
-                            }}
-                        >
-                            <div style={{
-                                marginBottom: 18,
-                                color: '#ff4136',
-                                fontWeight: 600,
-                                fontSize: 17,
-                                lineHeight: 1.4
-                            }}>
-                                {backupDeleteAction === 'single'
-                                    ? `Delete backup permanently?`
-                                    : `Delete ${selectedBackups.size} backup${selectedBackups.size !== 1 ? 's' : ''} permanently?`
-                                }
-                                <div style={{
-                                    fontSize: 14,
-                                    fontWeight: 400,
-                                    color: '#ccc',
-                                    marginTop: 8
-                                }}>
-                                    This action cannot be undone.
-                                </div>
-                            </div>
-                            <button
-                                style={{
-                                    background: '#ff4136',
-                                    color: '#fff',
-                                    border: '1px solid #ff4136',
-                                    borderRadius: 6,
-                                    padding: '8px 18px',
-                                    marginRight: 10,
-                                    fontWeight: 600,
-                                    cursor: 'pointer'
-                                }}
-                                onClick={async () => {
-                                    try {
-                                        let success = false;
-
-                                        if (backupDeleteAction === 'single' && backupToDelete) {
-                                            success = await window.electronAPI?.deleteBackup?.(backupToDelete);
-                                            if (success) {
-                                                showToast('success', 'Backup deleted successfully');
-                                                // Clear selection if the deleted backup was selected
-                                                if (selectedBackup === backupToDelete) {
-                                                    setSelectedBackup('');
-                                                }
-                                            } else {
-                                                showToast('error', 'Failed to delete backup');
-                                            }
-                                        } else if (backupDeleteAction === 'multiple' && selectedBackups.size > 0) {
-                                            const deletedCount = await window.electronAPI?.deleteMultipleBackups?.(Array.from(selectedBackups));
-                                            if (deletedCount > 0) {
-                                                showToast('success', `${deletedCount} backup${deletedCount !== 1 ? 's' : ''} deleted successfully`);
-                                                // Clear restore selection if it was in the deleted backups
-                                                if (selectedBackups.has(selectedBackup)) {
-                                                    setSelectedBackup('');
-                                                }
-                                                setSelectedBackups(new Set());
-                                            } else {
-                                                showToast('error', 'Failed to delete backups');
-                                            }
-                                        }
-
-                                        // Refresh backup list
-                                        const newList = await window.electronAPI?.listBackups?.() || [];
-                                        setBackupList(newList);
-
-                                    } catch (error) {
-                                        log.error('Delete backup error', error instanceof Error ? error.message : String(error));
-                                        showToast('error', `Delete failed: ${error instanceof Error ? error.message : String(error)}`);
-                                    }
-
-                                    // Close dialog
-                                    setIsBackupDeleteDialogClosing(true);
-                                    setTimeout(() => {
-                                        setBackupDeleteAction(null);
-                                        setBackupToDelete('');
-                                        setIsBackupDeleteDialogClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                Yes, Delete
-                            </button>
-                            <button
-                                style={{
-                                    background: '#222',
-                                    color: '#fff',
-                                    border: `1px solid ${themeColors.border}`,
-                                    borderRadius: 6,
-                                    padding: '8px 18px',
-                                    fontWeight: 600,
-                                    cursor: 'pointer'
-                                }}
-                                onClick={() => {
-                                    setIsBackupDeleteDialogClosing(true);
-                                    setTimeout(() => {
-                                        setBackupDeleteAction(null);
-                                        setBackupToDelete('');
-                                        setIsBackupDeleteDialogClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Theme profile reset confirmation dialog */}
-                {showThemeProfileResetConfirm && (
-                    <div className={`fade-opacity-${isThemeProfileResetDialogClosing ? 'out' : 'in'}`} style={{
-                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
-                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2350, borderRadius: settings.borderRadius
-                    }}>
-                        <div
-                            className={`${isThemeProfileResetDialogClosing ? 'fade-out' : 'fade-in'}`}
-                            style={{
-                                background: themeColors.panelBackground,
-                                borderRadius: 10,
-                                padding: 24,
-                                minWidth: 340,
-                                maxWidth: 460,
-                                textAlign: 'center',
-                                boxShadow: '0 2px 12px #0008',
-                                border: `1px solid ${themeColors.border}`
-                            }}
-                        >
-                            <div style={{
-                                marginBottom: 18,
-                                color: themeColors.warning,
-                                fontWeight: 700,
-                                fontSize: 17,
-                                lineHeight: 1.4
-                            }}>
-                                Reset this profile's theme to default?
-                            </div>
-                            <div style={{
-                                fontSize: 14,
-                                color: themeColors.textSecondary,
-                                marginBottom: 18,
-                                lineHeight: 1.55,
-                                textAlign: 'left'
-                            }}>
-                                This will overwrite the selected profile's colors, typography, surface settings, and icons with Clip's default theme values.
-                                <br /><br />
-                                The profile name will stay the same.
-                                <br /><br />
-                                <strong style={{ color: themeColors.danger }}>This cannot be undone.</strong>
-                            </div>
-                            <button
-                                style={{
-                                    background: themeColors.warning,
-                                    color: '#222',
-                                    border: `1px solid ${themeColors.warning}`,
-                                    borderRadius: 6,
-                                    padding: '8px 18px',
-                                    marginRight: 10,
-                                    marginBottom: 8,
-                                    fontWeight: 700,
-                                    cursor: 'pointer'
-                                }}
-                                onClick={() => {
-                                    setIsThemeProfileResetDialogClosing(true);
-                                    setTimeout(() => {
-                                        setShowThemeProfileResetConfirm(false);
-                                        setIsThemeProfileResetDialogClosing(false);
-                                    }, 300);
-                                    void resetActiveThemeProfileToDefault();
-                                }}
-                            >
-                                Yes, Reset Profile
-                            </button>
-                            <button
-                                style={{
-                                    background: '#222',
-                                    color: '#fff',
-                                    border: `1px solid ${themeColors.border}`,
-                                    borderRadius: 6,
-                                    padding: '8px 18px',
-                                    fontWeight: 600,
-                                    cursor: 'pointer'
-                                }}
-                                onClick={() => {
-                                    setIsThemeProfileResetDialogClosing(true);
-                                    setTimeout(() => {
-                                        setShowThemeProfileResetConfirm(false);
-                                        setIsThemeProfileResetDialogClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Theme profile delete confirmation dialog */}
-                {showThemeProfileDeleteConfirm && (
-                    <div className={`fade-opacity-${isThemeProfileDeleteDialogClosing ? 'out' : 'in'}`} style={{
-                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
-                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2351, borderRadius: settings.borderRadius
-                    }}>
-                        <div
-                            className={`${isThemeProfileDeleteDialogClosing ? 'fade-out' : 'fade-in'}`}
-                            style={{
-                                background: themeColors.panelBackground,
-                                borderRadius: 10,
-                                padding: 24,
-                                minWidth: 340,
-                                maxWidth: 460,
-                                textAlign: 'center',
-                                boxShadow: '0 2px 12px #0008',
-                                border: `1px solid ${themeColors.border}`
-                            }}
-                        >
-                            <div style={{
-                                marginBottom: 18,
-                                color: themeColors.danger,
-                                fontWeight: 700,
-                                fontSize: 17,
-                                lineHeight: 1.4
-                            }}>
-                                Delete this theme profile?
-                            </div>
-                            <div style={{
-                                fontSize: 14,
-                                color: themeColors.textSecondary,
-                                marginBottom: 18,
-                                lineHeight: 1.55,
-                                textAlign: 'left'
-                            }}>
-                                This will permanently delete the active profile{' '}
-                                <strong style={{ color: themeColors.textPrimary }}>{themeEditorConfig.profiles[activeThemeProfileKey]?.name || activeThemeProfileKey}</strong>.
-                                <br /><br />
-                                If you delete the current profile, Clip will switch to another available profile.
-                                <br /><br />
-                                <strong style={{ color: themeColors.danger }}>This cannot be undone.</strong>
-                            </div>
-                            <button
-                                style={{
-                                    background: themeColors.danger,
-                                    color: '#fff',
-                                    border: `1px solid ${themeColors.danger}`,
-                                    borderRadius: 6,
-                                    padding: '8px 18px',
-                                    marginRight: 10,
-                                    marginBottom: 8,
-                                    fontWeight: 700,
-                                    cursor: 'pointer'
-                                }}
-                                onClick={async () => {
-                                    setIsThemeProfileDeleteDialogClosing(true);
-                                    setTimeout(() => {
-                                        setShowThemeProfileDeleteConfirm(false);
-                                        setIsThemeProfileDeleteDialogClosing(false);
-                                    }, 300);
-
-                                    try {
-                                        const saved = await window.electronAPI?.deleteThemeProfile?.(activeThemeProfileKey);
-                                        if (saved) {
-                                            const sanitized = sanitizeThemeConfig(saved);
-                                            setThemeConfig(sanitized);
-                                            setThemeEditorConfig(sanitized);
-                                            showToast('success', 'Theme profile deleted.');
-                                        }
-                                    } catch (error) {
-                                        showToast('error', `Failed to delete profile: ${error instanceof Error ? error.message : String(error)}`);
-                                    }
-                                }}
-                            >
-                                Yes, Delete Profile
-                            </button>
-                            <button
-                                style={{
-                                    background: '#222',
-                                    color: '#fff',
-                                    border: `1px solid ${themeColors.border}`,
-                                    borderRadius: 6,
-                                    padding: '8px 18px',
-                                    fontWeight: 600,
-                                    cursor: 'pointer'
-                                }}
-                                onClick={() => {
-                                    setIsThemeProfileDeleteDialogClosing(true);
-                                    setTimeout(() => {
-                                        setShowThemeProfileDeleteConfirm(false);
-                                        setIsThemeProfileDeleteDialogClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Max items warning dialog */}
-                {showMaxItemsWarning && (
-                    <div className={`fade-opacity-${isMaxItemsWarningClosing ? 'out' : 'in'}`} style={{
-                        position: 'fixed', left: 0, top: 0, right: 0, bottom: 0,
-                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2300, borderRadius: settings.borderRadius
-                    }}>
-                        <div
-                            className={`${isMaxItemsWarningClosing ? 'fade-out' : 'fade-in'}`}
-                            style={{
-                                background: settings.theme === 'light' ? '#f0f0f0' : '#222',
-                                borderRadius: 10,
-                                padding: 24,
-                                minWidth: 320,
-                                maxWidth: 450,
-                                textAlign: 'center',
-                                boxShadow: '0 2px 12px #0008',
-                                border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`
-                            }}
-                        >
-                            <div style={{
-                                marginBottom: 18,
-                                color: pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) ? themeColors.danger : themeColors.warning,
-                                fontWeight: 600,
-                                fontSize: 17,
-                                lineHeight: 1.4
-                            }}>
-                                {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems)
-                                    ? 'Data Loss Warning'
-                                    : 'Performance Warning'}
-                            </div>
-                            <div style={{
-                                fontSize: 14,
-                                color: themeColors.textSecondary,
-                                marginBottom: 18,
-                                lineHeight: 1.5
-                            }}>
-                                {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) ? (
-                                    <>
-                                        You're decreasing the max items from <strong>{settingsDraft?.maxItems ?? settings.maxItems}</strong> to <strong>{pendingMaxItems}</strong>.
-                                        <br /><br />
-                                        <span style={{ color: themeColors.danger, fontWeight: 600 }}>⚠️ This will immediately delete {Math.max(0, items.length - pendingMaxItems)} clipboard items from the oldest entries.</span>
-                                        <br /><br />
-                                        <strong>This action is irreversible.</strong> Consider creating a backup first if you might want to restore these items later.
-                                    </>
-                                ) : (
-                                    <>
-                                        You're setting the max items to <strong>{pendingMaxItems}</strong>, which is significantly higher than your current {items.length} items.
-                                        <br /><br />
-                                        Large clipboard histories may impact performance. Are you sure you want to continue?
-                                    </>
-                                )}
-                            </div>
-                            {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems) && !backupCreated && (
-                                <button
-                                    style={{
-                                        background: themeColors.success,
-                                        color: '#fff',
-                                        border: `1px solid ${themeColors.success}`,
-                                        borderRadius: 6,
-                                        padding: '6px 16px',
-                                        marginBottom: 12,
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        width: '100%',
-                                        fontSize: 13
-                                    }}
-                                    onClick={async () => {
-                                        try {
-                                            const backupPath = await window.electronAPI?.createBackup?.();
-                                            if (backupPath) {
-                                                const filename = backupPath.split('\\').pop() || 'backup';
-                                                showToast('success', `Backup created: ${filename}`);
-                                                setBackupCreated(true);
-                                            } else {
-                                                showToast('error', 'Failed to create backup');
-                                            }
-                                        } catch (error) {
-                                            log.error('Backup error', error instanceof Error ? error.message : String(error));
-                                            showToast('error', 'Backup failed');
-                                        }
-                                    }}
-                                >
-                                    📦 Create Backup First
-                                </button>
-                            )}
-                            <button
-                                style={{
-                                    background: themeColors.success,
-                                    color: '#222',
-                                    border: `1px solid ${themeColors.success}`,
-                                    borderRadius: 6,
-                                    padding: '8px 18px',
-                                    marginRight: 10,
-                                    marginBottom: 8,
-                                    fontWeight: 600,
-                                    cursor: 'pointer'
-                                }}
-                                onClick={async () => {
-                                    if (pendingMaxItems !== null) {
-                                        const currentMaxItems = settingsDraft?.maxItems ?? settings.maxItems;
-
-                                        // Update both the settings draft and main settings
-                                        const newSettings = settingsDraft ? { ...settingsDraft, maxItems: pendingMaxItems } : { ...settings, maxItems: pendingMaxItems };
-                                        setSettingsDraft(newSettings);
-                                        setSettings(newSettings);
-
-                                        // Persist settings immediately to localStorage
-                                        localStorage.setItem('clip-settings', JSON.stringify(newSettings));
-
-                                        // Also save to file for main process to read at startup
-                                        window.electronAPI?.saveSettingsToFile?.(newSettings);
-
-                                        // If decreasing max items and we have more items than the new limit, trim them
-                                        if (pendingMaxItems < currentMaxItems && items.length > pendingMaxItems) {
-                                            try {
-                                                // Tell the main process to trim clipboard items to the new limit
-                                                await window.electronAPI?.trimClipboardItems?.(pendingMaxItems);
-                                                showToast('info', `Clipboard trimmed to ${pendingMaxItems} items`);
-                                            } catch (error) {
-                                                console.error('Failed to trim clipboard items:', error);
-                                                showToast('error', 'Failed to trim clipboard items');
-                                            }
-                                        }
-                                    }
-                                    setIsMaxItemsWarningClosing(true);
-                                    setTimeout(() => {
-                                        setShowMaxItemsWarning(false);
-                                        setPendingMaxItems(null);
-                                        setBackupCreated(false); // Reset backup status
-                                        setMaxItemsInputValue(null); // Reset input states
-                                        setHasMaxItemsChanges(false);
-                                        setIsMaxItemsWarningClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                {pendingMaxItems !== null && pendingMaxItems < (settingsDraft?.maxItems ?? settings.maxItems)
-                                    ? (backupCreated ? 'Continue' : 'Continue Anyway (not recommended)')
-                                    : 'Yes, Continue'
-                                }
-                            </button>
-                            <button
-                                style={{
-                                    background: '#222',
-                                    color: '#fff',
-                                    border: '1px solid #444',
-                                    borderRadius: 6,
-                                    padding: '8px 18px',
-                                    fontWeight: 600,
-                                    cursor: 'pointer'
-                                }}
-                                onClick={() => {
-                                    setIsMaxItemsWarningClosing(true);
-                                    setTimeout(() => {
-                                        setShowMaxItemsWarning(false);
-                                        setPendingMaxItems(null);
-                                        setBackupCreated(false); // Reset backup status
-                                        setMaxItemsInputValue(null); // Reset input states
-                                        setHasMaxItemsChanges(false);
-                                        setIsMaxItemsWarningClosing(false);
-                                    }, 300);
-                                }}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                )}
+                <ClipboardList
+                    listRef={listRef}
+                    settings={settings}
+                    hasScrollbar={hasScrollbar}
+                    logger={log}
+                    isInitialLoading={isInitialLoading}
+                    isAnimatingList={isAnimatingList}
+                    filteredItems={filteredItems}
+                    search={search}
+                    filteredType={filteredType}
+                    rowVirtualizer={rowVirtualizer}
+                    listForceKey={listForceKey}
+                    themeColors={themeColors}
+                    themeIcons={themeIcons}
+                    handlePaste={handlePaste}
+                    handleTogglePin={handleTogglePin}
+                    handleDeleteItem={handleDeleteItem}
+                />
+                <AppInlineStyles
+                    settings={settings}
+                    themeColors={themeColors}
+                    themeTypography={themeTypography}
+                    themeSurface={themeSurface}
+                    effectiveBorderRadius={effectiveBorderRadius}
+                />
+
+                <AppDialogs
+                    settings={settings}
+                    themeColors={themeColors}
+                    itemsLength={items.length}
+                    deleteTarget={deleteTarget}
+                    isDeleteDialogClosing={isDeleteDialogClosing}
+                    confirmDelete={confirmDelete}
+                    handleDeleteDialogClose={handleDeleteDialogClose}
+                    dangerAction={dangerAction}
+                    isDangerDialogClosing={isDangerDialogClosing}
+                    handleClearAll={handleClearAll}
+                    resetSettings={resetSettings}
+                    closeDangerDialog={closeDangerDialog}
+                    showRestartConfirm={showRestartConfirm}
+                    isRestartDialogClosing={isRestartDialogClosing}
+                    restartReason={restartReason}
+                    closeRestartDialog={closeRestartDialog}
+                    restartApp={() => window.electronAPI?.restartApp?.()}
+                    showUnsavedChangesConfirm={showUnsavedChangesConfirm}
+                    isUnsavedChangesDialogClosing={isUnsavedChangesDialogClosing}
+                    handleUnsavedSave={handleUnsavedSave}
+                    handleUnsavedDontSave={handleUnsavedDontSave}
+                    handleUnsavedCancel={handleUnsavedCancel}
+                    backupDeleteAction={backupDeleteAction}
+                    isBackupDeleteDialogClosing={isBackupDeleteDialogClosing}
+                    selectedBackupsSize={selectedBackups.size}
+                    onConfirmBackupDelete={handleConfirmBackupDelete}
+                    onCancelBackupDelete={closeBackupDeleteDialog}
+                    showThemeProfileResetConfirm={showThemeProfileResetConfirm}
+                    isThemeProfileResetDialogClosing={isThemeProfileResetDialogClosing}
+                    onConfirmThemeProfileReset={handleConfirmThemeProfileReset}
+                    onCancelThemeProfileReset={closeThemeProfileResetDialog}
+                    showThemeProfileDeleteConfirm={showThemeProfileDeleteConfirm}
+                    isThemeProfileDeleteDialogClosing={isThemeProfileDeleteDialogClosing}
+                    activeThemeProfileName={themeEditorConfig.profiles[activeThemeProfileKey]?.name || activeThemeProfileKey}
+                    onConfirmThemeProfileDelete={handleConfirmThemeProfileDelete}
+                    onCancelThemeProfileDelete={closeThemeProfileDeleteDialog}
+                    showMaxItemsWarning={showMaxItemsWarning}
+                    isMaxItemsWarningClosing={isMaxItemsWarningClosing}
+                    pendingMaxItems={pendingMaxItems}
+                    currentMaxItems={settingsDraft?.maxItems ?? settings.maxItems}
+                    backupCreated={backupCreated}
+                    onCreateBackupFirst={handleCreateBackupForMaxItems}
+                    onConfirmMaxItemsWarning={handleConfirmMaxItemsWarning}
+                    onCancelMaxItemsWarning={closeMaxItemsWarningDialog}
+                />
             </div>
         </ThemeProvider>
     );
