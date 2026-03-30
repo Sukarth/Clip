@@ -36,7 +36,7 @@ export const MODIFIER_OPTIONS = [
     { label: 'Ctrl', value: 'Control' },
     { label: 'Shift', value: 'Shift' },
     { label: 'Alt', value: 'Alt' },
-    { label: 'Windows', value: 'Super' },
+    { label: 'Windows', value: 'Windows' },
 ] as const;
 
 export const MAIN_KEY_OPTIONS = [

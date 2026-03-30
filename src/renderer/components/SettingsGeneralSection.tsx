@@ -298,7 +298,7 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
                         >
                             {shortcutModifiers.concat(shortcutMainKey).filter(Boolean).join('+') || 'No shortcut set'}
                         </div>
-                        {shortcutModifiers.includes('Super') && (
+                        {shortcutModifiers.includes('Windows') && (
                             <div
                                 style={{
                                     fontSize: 12,
@@ -326,7 +326,7 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
                                 </span>
                             </div>
                         )}
-                        {shortcutModifiers.includes('Super') && showShortcutInfo && (
+                        {shortcutModifiers.includes('Windows') && showShortcutInfo && (
                             <div
                                 style={{
                                     padding: 12,
