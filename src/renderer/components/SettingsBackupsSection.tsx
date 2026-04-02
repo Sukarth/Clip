@@ -122,9 +122,11 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                             min={1}
                             max={50}
                             value={settingsDraft?.maxBackups ?? settings.maxBackups}
-                            onChange={(e) =>
-                                setSettingsDraft((s) => (s ? { ...s, maxBackups: Number(e.target.value) } : null))
-                            }
+                            onChange={(e) => {
+                                const parsed = Number(e.target.value);
+                                const clamped = Math.max(1, Math.min(50, isNaN(parsed) ? 1 : parsed));
+                                setSettingsDraft((s) => (s ? { ...s, maxBackups: clamped } : null));
+                            }}
                             style={{
                                 borderRadius: 8,
                                 border: '1px solid rgba(255,255,255,0.12)',
@@ -333,11 +335,12 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                             >
                                 {backupList.map((backup, index) => {
                                     const date = new Date(backup.time);
+                                    const isValidDate = !isNaN(date.getTime());
                                     const isSelected = selectedBackup === backup.file;
                                     const isChecked = selectedBackups.has(backup.file);
-                                    const formattedDate = date.toLocaleDateString();
-                                    const formattedTime = date.toLocaleTimeString();
-                                    const relativeTime = getRelativeTime(backup.time);
+                                    const formattedDate = isValidDate ? date.toLocaleDateString() : '—';
+                                    const formattedTime = isValidDate ? date.toLocaleTimeString() : '';
+                                    const relativeTime = isValidDate ? getRelativeTime(backup.time) : '';
 
                                     return (
                                         <div
@@ -385,6 +388,9 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                                             )}
 
                                             <div
+                                                tabIndex={0}
+                                                role="button"
+                                                aria-pressed={isSelected}
                                                 style={{
                                                     flex: 1,
                                                     cursor: 'pointer',
@@ -393,6 +399,12 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                                                     gap: 4,
                                                 }}
                                             onClick={() => setSelectedBackup(isSelected ? '' : backup.file)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    setSelectedBackup(isSelected ? '' : backup.file);
+                                                }
+                                            }}
                                             onMouseEnter={(e) => {
                                                 if (!isSelected && !isChecked) {
                                                     const parent = e.currentTarget.parentElement;

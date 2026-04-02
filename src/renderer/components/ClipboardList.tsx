@@ -152,6 +152,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                 >
                     {rowVirtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
                         const item = filteredItems[virtualRow.index];
+                        if (!item) return null;
                         const isTemporary = !!item.isTemporary;
                         const itemBackground = isTemporary
                             ? 'linear-gradient(135deg, rgba(255, 183, 0, 0.18), rgba(255,255,255,0.03))'
@@ -178,7 +179,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                 className={`clip-item clip-item-${item.type} ${isTemporary ? 'clip-item-temporary' : ''} ${isAnimatingList ? 'clip-item-animate' : ''}`}
                                 tabIndex={0}
                                 role="button"
-                                aria-label={`Clipboard item: ${item.type === 'image' ? 'Image' : item.content.slice(0, 50)}${item.content.length > 50 ? '...' : ''}`}
+                                aria-label={`Clipboard item: ${item.type === 'image' ? 'Image' : `${item.content.slice(0, 50)}${item.content.length > 50 ? '...' : ''}`}`}
                                 onClick={() => handlePaste(item)}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter' || e.key === ' ') {
