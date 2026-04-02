@@ -17,10 +17,11 @@
   },
   "main": "dist/main/main.js",
   "scripts": {
-    "dev": "npm run build:main && concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "rebuild:native": "electron-builder install-app-deps",
+    "dev": "npm run rebuild:native && npm run build:main && concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "wait-on http-get://localhost:5173/@vite/client && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
-    "build": "npm run build:main && npm run build:renderer",
+    "build": "npm run rebuild:native && npm run build:main && npm run build:renderer",
     "build:main": "tsc --project src/tsconfig.main.json && node -e \"require('fs').copyFileSync('src/preload.js','dist/main/preload.js')\" && node scripts/copy-clipmsg.js",
     "build:renderer": "vite build",
     "package": "npm run build && electron-builder --publish never",
