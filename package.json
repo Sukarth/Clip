@@ -12,17 +12,21 @@
   "bugs": {
     "url": "https://github.com/Sukarth/Clip/issues"
   },
+  "engines": {
+    "node": ">=20.19.0 || >=22.12.0"
+  },
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "npm run build:main && concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
-    "dev:electron": "wait-on tcp:5173 && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "dev:electron": "wait-on http-get://localhost:5173/@vite/client && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc --project src/tsconfig.main.json && node -e \"require('fs').copyFileSync('src/preload.js','dist/main/preload.js')\" && node scripts/copy-clipmsg.js",
     "build:renderer": "vite build",
-    "package": "npm run build && electron-builder",
-    "package:fast": "npm run build && electron-builder --dir --config.compression=store",
-    "package:zip": "npm run build && electron-builder --config.win.target=zip",
+    "package": "npm run build && electron-builder --publish never",
+    "package:fast": "npm run build && electron-builder --dir --config.compression=store --publish never",
+    "package:zip": "npm run build && electron-builder --config.win.target=zip --publish never",
+    "release": "npm run build && electron-builder --publish always",
     "postinstall": "electron-builder install-app-deps"
   },
   "keywords": [],
@@ -38,15 +42,15 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^24.12.0",
+    "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "41.0.2",
+    "electron": "^41.1.1",
     "electron-builder": "^26.8.1",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.2",
     "vite": "^8.0.0",
     "wait-on": "^9.0.4"
   },

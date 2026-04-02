@@ -12,17 +12,14 @@ export function useToastManager() {
         toastIdCounter.current += 1;
         const id = `toast-${toastIdCounter.current}`;
         const newToast: ToastMessage = { id, type, message: messageText, isFadingOut: false };
-        setToasts((prev) => [...prev, newToast]);
-
-        // Keep toast stack compact and readable.
-        setTimeout(() => {
-            setToasts((currentToasts) => {
-                if (currentToasts.length > 3) {
-                    return currentToasts.slice(currentToasts.length - 3);
-                }
-                return currentToasts;
-            });
-        }, 100);
+        setToasts((prev) => {
+            const updated = [...prev, newToast];
+            // Keep toast stack compact and readable - trim synchronously
+            if (updated.length > 3) {
+                return updated.slice(updated.length - 3);
+            }
+            return updated;
+        });
     }, []);
 
     const dismissToast = React.useCallback((id: string) => {

@@ -241,9 +241,6 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
 
         return () => {
             document.removeEventListener('keydown', handleKeyDown);
-            if (!isAnyDialogOpen) {
-                return;
-            }
             if (previousFocusedElementRef.current) {
                 previousFocusedElementRef.current.focus();
             }

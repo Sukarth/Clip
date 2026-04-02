@@ -174,10 +174,19 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                     boxSizing: 'border-box',
                                 }}
                             >
-                                <div
-                                    className={`clip-item clip-item-${item.type} ${isTemporary ? 'clip-item-temporary' : ''} ${isAnimatingList ? 'clip-item-animate' : ''}`}
-                                    onClick={() => handlePaste(item)}
-                                    style={{
+                            <div
+                                className={`clip-item clip-item-${item.type} ${isTemporary ? 'clip-item-temporary' : ''} ${isAnimatingList ? 'clip-item-animate' : ''}`}
+                                tabIndex={0}
+                                role="button"
+                                aria-label={`Clipboard item: ${item.type === 'image' ? 'Image' : item.content.slice(0, 50)}${item.content.length > 50 ? '...' : ''}`}
+                                onClick={() => handlePaste(item)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        handlePaste(item);
+                                    }
+                                }}
+                                style={{
                                         background: itemBackground,
                                         borderRadius: 12,
                                         margin: 0,
@@ -269,8 +278,9 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                         ) : null}
                                         {!isTemporary && settings.pinFavoriteItems && (
                                             <button
+                                                type="button"
                                                 className="clip-pin-btn"
-                                                tabIndex={-1}
+                                                tabIndex={0}
                                                 style={{
                                                     background: 'none',
                                                     border: 'none',
@@ -287,9 +297,17 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                                     width: 25,
                                                 }}
                                                 title={item.pinned ? 'Unpin' : 'Pin'}
+                                                aria-label={item.pinned ? 'Unpin item' : 'Pin item'}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     if (settings.pinFavoriteItems) handleTogglePin(item);
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        if (settings.pinFavoriteItems) handleTogglePin(item);
+                                                    }
                                                 }}
                                                 onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
                                                 onMouseLeave={(e) =>
@@ -306,8 +324,9 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                         )}
                                         {!isTemporary && (
                                             <button
+                                                type="button"
                                                 className="clip-delete-btn"
-                                                tabIndex={-1}
+                                                tabIndex={0}
                                                 style={{
                                                     background: 'none',
                                                     border: 'none',
@@ -324,9 +343,17 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                                     width: 25,
                                                 }}
                                                 title="Delete"
+                                                aria-label="Delete item"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     handleDeleteItem(item);
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        handleDeleteItem(item);
+                                                    }
                                                 }}
                                                 onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
                                                 onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}

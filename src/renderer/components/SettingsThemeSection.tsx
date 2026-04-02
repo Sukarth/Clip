@@ -369,6 +369,9 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                                         value={value}
                                         onChange={(e) => {
                                             const parsed = Number(e.target.value);
+                                            if (!Number.isFinite(parsed)) {
+                                                return;
+                                            }
                                             updateEditorActiveProfile((profile) => {
                                                 if (key in profile.surface) {
                                                     return {

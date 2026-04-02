@@ -392,19 +392,24 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                                                     flexDirection: 'column',
                                                     gap: 4,
                                                 }}
-                                                onClick={() => setSelectedBackup(isSelected ? '' : backup.file)}
-                                                onMouseEnter={(e) => {
-                                                    if (!isSelected && !isChecked) {
-                                                        e.currentTarget.parentElement!.style.background =
-                                                            'rgba(255,255,255,0.05)';
+                                            onClick={() => setSelectedBackup(isSelected ? '' : backup.file)}
+                                            onMouseEnter={(e) => {
+                                                if (!isSelected && !isChecked) {
+                                                    const parent = e.currentTarget.parentElement;
+                                                    if (parent) {
+                                                        parent.style.background = 'rgba(255,255,255,0.05)';
                                                     }
-                                                }}
-                                                onMouseLeave={(e) => {
-                                                    if (!isSelected && !isChecked) {
-                                                        e.currentTarget.parentElement!.style.background = 'transparent';
+                                                }
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                if (!isSelected && !isChecked) {
+                                                    const parent = e.currentTarget.parentElement;
+                                                    if (parent) {
+                                                        parent.style.background = 'transparent';
                                                     }
-                                                }}
-                                            >
+                                                }
+                                            }}
+                                        >
                                                 <div
                                                     style={{
                                                         display: 'flex',
