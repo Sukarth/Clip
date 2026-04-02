@@ -27,9 +27,23 @@ const Switch: React.FC<SwitchProps> = ({
             verticalAlign: 'middle',
         }}
         onClick={() => !disabled && onChange(!checked)}
-        tabIndex={0}
+        onKeyDown={(event) => {
+            if (disabled) {
+                return;
+            }
+            if (
+                event.key === 'Enter' ||
+                event.key === ' ' ||
+                event.key === 'Spacebar'
+            ) {
+                event.preventDefault();
+                onChange(!checked);
+            }
+        }}
+        tabIndex={disabled ? -1 : 0}
         role="switch"
         aria-checked={checked}
+        aria-disabled={disabled}
     >
         <span
             style={{

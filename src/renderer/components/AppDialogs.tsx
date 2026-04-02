@@ -112,6 +112,143 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
 }) => {
     const isReducingMaxItems = pendingMaxItems !== null && pendingMaxItems < currentMaxItems;
     const itemsToDelete = pendingMaxItems !== null ? Math.max(0, itemsLength - pendingMaxItems) : 0;
+    const activeDialogRef = React.useRef<HTMLDivElement | null>(null);
+    const previousFocusedElementRef = React.useRef<HTMLElement | null>(null);
+
+    const closeActiveDialog = React.useCallback(() => {
+        if (showThemeProfileDeleteConfirm) {
+            onCancelThemeProfileDelete();
+            return;
+        }
+        if (showThemeProfileResetConfirm) {
+            onCancelThemeProfileReset();
+            return;
+        }
+        if (backupDeleteAction) {
+            onCancelBackupDelete();
+            return;
+        }
+        if (showUnsavedChangesConfirm) {
+            handleUnsavedCancel();
+            return;
+        }
+        if (showRestartConfirm) {
+            closeRestartDialog();
+            return;
+        }
+        if (dangerAction) {
+            closeDangerDialog();
+            return;
+        }
+        if (deleteTarget) {
+            handleDeleteDialogClose();
+            return;
+        }
+        if (showMaxItemsWarning) {
+            onCancelMaxItemsWarning();
+        }
+    }, [
+        backupDeleteAction,
+        closeDangerDialog,
+        closeRestartDialog,
+        dangerAction,
+        deleteTarget,
+        handleDeleteDialogClose,
+        handleUnsavedCancel,
+        onCancelBackupDelete,
+        onCancelMaxItemsWarning,
+        onCancelThemeProfileDelete,
+        onCancelThemeProfileReset,
+        showMaxItemsWarning,
+        showRestartConfirm,
+        showThemeProfileDeleteConfirm,
+        showThemeProfileResetConfirm,
+        showUnsavedChangesConfirm,
+    ]);
+
+    const isAnyDialogOpen = Boolean(
+        deleteTarget ||
+        dangerAction ||
+        showRestartConfirm ||
+        showUnsavedChangesConfirm ||
+        backupDeleteAction ||
+        showThemeProfileResetConfirm ||
+        showThemeProfileDeleteConfirm ||
+        showMaxItemsWarning,
+    );
+
+    React.useEffect(() => {
+        if (!isAnyDialogOpen) {
+            return;
+        }
+
+        previousFocusedElementRef.current =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+        const dialog = activeDialogRef.current;
+        if (dialog) {
+            const autofocusTarget = dialog.querySelector<HTMLElement>('[data-dialog-autofocus]');
+            (autofocusTarget ?? dialog).focus();
+        }
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            const dialogElement = activeDialogRef.current;
+            if (!dialogElement) {
+                return;
+            }
+
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeActiveDialog();
+                return;
+            }
+
+            if (event.key !== 'Tab') {
+                return;
+            }
+
+            const focusable = Array.from(
+                dialogElement.querySelectorAll<HTMLElement>(
+                    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+                ),
+            ).filter((el) => !el.hasAttribute('aria-hidden') && el.offsetParent !== null);
+
+            if (focusable.length === 0) {
+                event.preventDefault();
+                dialogElement.focus();
+                return;
+            }
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            const active = document.activeElement as HTMLElement | null;
+
+            if (event.shiftKey) {
+                if (!active || active === first || !dialogElement.contains(active)) {
+                    event.preventDefault();
+                    last.focus();
+                }
+                return;
+            }
+
+            if (!active || active === last || !dialogElement.contains(active)) {
+                event.preventDefault();
+                first.focus();
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+            if (!isAnyDialogOpen) {
+                return;
+            }
+            if (previousFocusedElementRef.current) {
+                previousFocusedElementRef.current.focus();
+            }
+        };
+    }, [closeActiveDialog, isAnyDialogOpen]);
 
     return (
         <>
@@ -133,7 +270,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     }}
                 >
                     <div
+                        ref={activeDialogRef}
                         className={`delete-confirm-dialog ${isDeleteDialogClosing ? 'fade-out' : 'fade-in'}`}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Delete item confirmation"
+                        tabIndex={-1}
                         style={{
                             background: settings.theme === 'light' ? '#f0f0f0' : '#222',
                             borderRadius: 10,
@@ -169,9 +311,10 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                         </button>
                         <button
                             className="no-btn"
+                            data-dialog-autofocus
                             style={{
                                 background: '#ff4136',
-                                color: '#fff !important',
+                                color: '#fff',
                                 border: '1px solid #ff4136',
                                 borderRadius: 6,
                                 padding: '6px 18px',
@@ -203,7 +346,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     }}
                 >
                     <div
+                        ref={activeDialogRef}
                         className={`delete-confirm-dialog ${isDangerDialogClosing ? 'fade-out' : 'fade-in'}`}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Danger action confirmation"
+                        tabIndex={-1}
                         style={{
                             background: settings.theme === 'light' ? '#f0f0f0' : '#222',
                             borderRadius: 10,
@@ -243,6 +391,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                         </button>
                         <button
                             className="no-btn"
+                            data-dialog-autofocus
                             style={{
                                 background: '#222',
                                 color: dangerAction === 'clear' ? '#ff4136' : '#ffb300',
@@ -277,7 +426,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     }}
                 >
                     <div
+                        ref={activeDialogRef}
                         className={`${isRestartDialogClosing ? 'fade-out' : 'fade-in'}`}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Restart confirmation"
+                        tabIndex={-1}
                         style={{
                             background: settings.theme === 'light' ? '#f0f0f0' : '#222',
                             borderRadius: 10,
@@ -311,6 +465,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                             Yes, Restart Now
                         </button>
                         <button
+                            data-dialog-autofocus
                             style={{
                                 background: '#222',
                                 color: '#fff',
@@ -345,7 +500,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     }}
                 >
                     <div
+                        ref={activeDialogRef}
                         className={`${isUnsavedChangesDialogClosing ? 'fade-out' : 'fade-in'}`}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Unsaved changes confirmation"
+                        tabIndex={-1}
                         style={{
                             background: settings.theme === 'light' ? '#f0f0f0' : '#222',
                             borderRadius: 10,
@@ -389,6 +549,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                             Don't Save
                         </button>
                         <button
+                            data-dialog-autofocus
                             style={{
                                 background: '#222',
                                 color: '#fff',
@@ -423,7 +584,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     }}
                 >
                     <div
+                        ref={activeDialogRef}
                         className={`${isBackupDeleteDialogClosing ? 'fade-out' : 'fade-in'}`}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Backup delete confirmation"
+                        tabIndex={-1}
                         style={{
                             background: settings.theme === 'light' ? '#f0f0f0' : '#222',
                             borderRadius: 10,
@@ -476,6 +642,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                             Yes, Delete
                         </button>
                         <button
+                            data-dialog-autofocus
                             style={{
                                 background: '#222',
                                 color: '#fff',
@@ -511,7 +678,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     }}
                 >
                     <div
+                        ref={activeDialogRef}
                         className={`${isThemeProfileResetDialogClosing ? 'fade-out' : 'fade-in'}`}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Theme profile reset confirmation"
+                        tabIndex={-1}
                         style={{
                             background: themeColors.panelBackground,
                             borderRadius: 10,
@@ -569,6 +741,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                             Yes, Reset Profile
                         </button>
                         <button
+                            data-dialog-autofocus
                             style={{
                                 background: '#222',
                                 color: '#fff',
@@ -604,7 +777,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     }}
                 >
                     <div
+                        ref={activeDialogRef}
                         className={`${isThemeProfileDeleteDialogClosing ? 'fade-out' : 'fade-in'}`}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Theme profile delete confirmation"
+                        tabIndex={-1}
                         style={{
                             background: themeColors.panelBackground,
                             borderRadius: 10,
@@ -664,6 +842,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                             Yes, Delete Profile
                         </button>
                         <button
+                            data-dialog-autofocus
                             style={{
                                 background: '#222',
                                 color: '#fff',
@@ -699,7 +878,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     }}
                 >
                     <div
+                        ref={activeDialogRef}
                         className={`${isMaxItemsWarningClosing ? 'fade-out' : 'fade-in'}`}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Max items warning"
+                        tabIndex={-1}
                         style={{
                             background: settings.theme === 'light' ? '#f0f0f0' : '#222',
                             borderRadius: 10,
@@ -798,6 +982,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                                 : 'Yes, Continue'}
                         </button>
                         <button
+                            data-dialog-autofocus
                             style={{
                                 background: '#222',
                                 color: '#fff',

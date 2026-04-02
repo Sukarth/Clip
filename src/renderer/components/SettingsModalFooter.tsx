@@ -1,6 +1,34 @@
 import * as React from 'react';
 import type { Settings } from '../app-types';
 
+function getReadableTextColor(background: string): string {
+    const value = background.trim();
+    const shortHex = /^#([\da-fA-F]{3})$/;
+    const longHex = /^#([\da-fA-F]{6})$/;
+
+    const shortMatch = value.match(shortHex);
+    const longMatch = value.match(longHex);
+
+    let r = 255;
+    let g = 179;
+    let b = 0;
+
+    if (shortMatch) {
+        const [rs, gs, bs] = shortMatch[1].split('');
+        r = parseInt(rs + rs, 16);
+        g = parseInt(gs + gs, 16);
+        b = parseInt(bs + bs, 16);
+    } else if (longMatch) {
+        const hex = longMatch[1];
+        r = parseInt(hex.slice(0, 2), 16);
+        g = parseInt(hex.slice(2, 4), 16);
+        b = parseInt(hex.slice(4, 6), 16);
+    }
+
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness < 150 ? '#fff' : '#222';
+}
+
 interface SettingsModalFooterProps {
     settingsDraft: Settings | null;
     settings: Settings;
@@ -17,6 +45,7 @@ const SettingsModalFooter: React.FC<SettingsModalFooterProps> = ({
     onCancel,
 }) => {
     const accentColor = settingsDraft?.accentColor ?? settings.accentColor;
+    const saveTextColor = getReadableTextColor(accentColor);
 
     return (
         <div
@@ -53,7 +82,7 @@ const SettingsModalFooter: React.FC<SettingsModalFooterProps> = ({
                     background: accentColor,
                     border: `1px solid ${accentColor}`,
                     borderRadius: 8,
-                    color: '#222',
+                    color: saveTextColor,
                     padding: '8px 18px',
                     cursor: 'pointer',
                     fontWeight: 600,

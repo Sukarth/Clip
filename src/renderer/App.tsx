@@ -301,6 +301,42 @@ const App: React.FC = () => {
         });
     }, [settingsDraft, settings, themeEditorConfig, themeConfig]);
 
+    useEffect(() => {
+        if (!showSettings) {
+            return;
+        }
+
+        setSettingsDraft((draft) => {
+            if (!draft) {
+                return draft;
+            }
+
+            const syncedAccent = editorThemeProfile.colors.accent;
+            const syncedBorderRadius = editorThemeProfile.surface.borderRadius;
+            const syncedTransparency = editorThemeProfile.surface.transparency;
+
+            if (
+                draft.accentColor === syncedAccent
+                && draft.borderRadius === syncedBorderRadius
+                && draft.transparency === syncedTransparency
+            ) {
+                return draft;
+            }
+
+            return {
+                ...draft,
+                accentColor: syncedAccent,
+                borderRadius: syncedBorderRadius,
+                transparency: syncedTransparency,
+            };
+        });
+    }, [
+        showSettings,
+        editorThemeProfile.colors.accent,
+        editorThemeProfile.surface.borderRadius,
+        editorThemeProfile.surface.transparency,
+    ]);
+
     const refreshBackupList = useCallback(async () => {
         const list = await window.electronAPI?.listBackups?.();
         setBackupList(list || []);
@@ -348,14 +384,18 @@ const App: React.FC = () => {
             result = result.filter(i => i.type === filteredType);
         }
 
-        // Sort the items - pinned items first, then by timestamp
-        return result.sort((a, b) => {
-            // First compare pinned status
-            if (a.pinned && !b.pinned) return -1;
-            if (!a.pinned && b.pinned) return 1;
-            // Then sort by timestamp (newest first)
-            return b.timestamp - a.timestamp;
-        });
+        const temporaryItems = result
+            .filter((item) => item.isTemporary)
+            .sort((a, b) => b.timestamp - a.timestamp);
+        const regularItems = result
+            .filter((item) => !item.isTemporary)
+            .sort((a, b) => {
+                if (a.pinned && !b.pinned) return -1;
+                if (!a.pinned && b.pinned) return 1;
+                return b.timestamp - a.timestamp;
+            });
+
+        return [...temporaryItems, ...regularItems];
     }, [items, search, filteredType, fuse]);
 
     // Track if the clipboard list is scrollable via a sentinel IntersectionObserver

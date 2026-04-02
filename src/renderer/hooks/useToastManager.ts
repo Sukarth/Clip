@@ -25,7 +25,7 @@ export function useToastManager() {
         }, 100);
     }, []);
 
-    const dismissToast = React.useCallback((id: string, _type: 'manual' | 'auto') => {
+    const dismissToast = React.useCallback((id: string) => {
         setToasts((prevToasts) =>
             prevToasts.map((toast) =>
                 toast.id === id ? { ...toast, isFadingOut: true } : toast,
@@ -48,7 +48,7 @@ export function useToastManager() {
         toasts.forEach((toast) => {
             if (!toast.isFadingOut && !newTimers[toast.id]) {
                 newTimers[toast.id] = setTimeout(() => {
-                    dismissToast(toast.id, 'auto');
+                    dismissToast(toast.id);
                 }, 3000);
             } else if (toast.isFadingOut && newTimers[toast.id]) {
                 clearTimeout(newTimers[toast.id]);
@@ -64,12 +64,14 @@ export function useToastManager() {
         });
 
         toastTimersRef.current = newTimers;
+    }, [toasts, dismissToast]);
 
+    React.useEffect(() => {
         return () => {
             Object.values(toastTimersRef.current).forEach(clearTimeout);
             toastTimersRef.current = {};
         };
-    }, [toasts, dismissToast]);
+    }, []);
 
     const clearAllToasts = React.useCallback(() => {
         setToasts((prevToasts) =>

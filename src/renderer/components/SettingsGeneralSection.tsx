@@ -63,8 +63,13 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
             return;
         }
 
-        const newValue = maxItemsInputValue;
-        if (newValue < currentMaxItems) {
+        const newValue = Math.trunc(maxItemsInputValue);
+        if (!Number.isInteger(newValue) || newValue < 10 || newValue > 500) {
+            showToast('error', 'Max clipboard items must be between 10 and 500.');
+            return;
+        }
+
+        if (newValue < currentMaxItems && itemsLength > newValue) {
             setPendingMaxItems(newValue);
             setBackupCreated(false);
             setShowMaxItemsWarning(true);
@@ -78,13 +83,11 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
             return;
         }
 
-        const newSettings = settingsDraft
-            ? { ...settingsDraft, maxItems: newValue }
-            : { ...settings, maxItems: newValue };
+        const persistedSettings = { ...settings, maxItems: newValue };
 
-        setSettingsDraft(newSettings);
-        setSettings(newSettings);
-        persistSettings(newSettings);
+        setSettings(persistedSettings);
+        persistSettings(persistedSettings);
+        setSettingsDraft((draft) => (draft ? { ...draft, maxItems: newValue } : persistedSettings));
         setMaxItemsInputValue(null);
         setHasMaxItemsChanges(false);
     };
@@ -106,7 +109,20 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
                                 max={500}
                                 value={maxItemsInputValue ?? currentMaxItems}
                                 onChange={(e) => {
-                                    const newValue = Number(e.target.value);
+                                    const rawValue = e.target.value.trim();
+                                    if (rawValue === '') {
+                                        setMaxItemsInputValue(null);
+                                        setHasMaxItemsChanges(false);
+                                        return;
+                                    }
+
+                                    const newValue = Number(rawValue);
+                                    if (!Number.isFinite(newValue)) {
+                                        setMaxItemsInputValue(null);
+                                        setHasMaxItemsChanges(false);
+                                        return;
+                                    }
+
                                     setMaxItemsInputValue(newValue);
                                     setHasMaxItemsChanges(newValue !== currentMaxItems);
                                 }}

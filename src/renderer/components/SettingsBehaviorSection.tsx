@@ -3,6 +3,15 @@ import { sectionHeaderStyle } from '../app-constants';
 import type { Settings } from '../app-types';
 import Switch from './Switch';
 
+const behaviorLabelStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 20,
+};
+
 interface SettingsBehaviorSectionProps {
     settingsDraft: Settings | null;
     settings: Settings;
@@ -34,22 +43,22 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
     themeColors,
 }) => {
     const accentColor = settingsDraft?.accentColor ?? settings.accentColor;
+    const actionButtonStyle: React.CSSProperties = {
+        background: themeColors.panelBackground,
+        border: `1px solid ${themeColors.border}`,
+        borderRadius: 8,
+        color: themeColors.textPrimary,
+        padding: '9px 12px',
+        cursor: 'pointer',
+        fontWeight: 600,
+    };
 
     return (
         <>
             <div>
                 <h2 style={sectionHeaderStyle}>Behavior Settings</h2>
 
-                <label
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        marginBottom: 20,
-                    }}
-                >
+                <label style={behaviorLabelStyle}>
                     Show notifications for new clips
                     <Switch
                         checked={settingsDraft?.showNotifications ?? settings.showNotifications}
@@ -58,16 +67,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     />
                 </label>
 
-                <label
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        marginBottom: 20,
-                    }}
-                >
+                <label style={behaviorLabelStyle}>
                     Start with system
                     <Switch
                         checked={settingsDraft?.startWithSystem ?? settings.startWithSystem}
@@ -76,16 +76,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     />
                 </label>
 
-                <label
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        marginBottom: 20,
-                    }}
-                >
+                <label style={behaviorLabelStyle}>
                     Store images in clipboard history
                     <Switch
                         checked={settingsDraft?.storeImagesInClipboard ?? settings.storeImagesInClipboard}
@@ -94,16 +85,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     />
                 </label>
 
-                <label
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        marginBottom: 20,
-                    }}
-                >
+                <label style={behaviorLabelStyle}>
                     Allow pinning favorite items
                     <Switch
                         checked={settingsDraft?.pinFavoriteItems ?? settings.pinFavoriteItems}
@@ -112,16 +94,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     />
                 </label>
 
-                <label
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        marginBottom: 20,
-                    }}
-                >
+                <label style={behaviorLabelStyle}>
                     Ask before deleting items
                     <Switch
                         checked={settingsDraft?.deleteConfirm ?? settings.deleteConfirm}
@@ -168,15 +141,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button
                         className="settings-button"
-                        style={{
-                            background: 'rgba(255,255,255,0.08)',
-                            border: '1px solid rgba(255,255,255,0.12)',
-                            borderRadius: 8,
-                            color: '#fff',
-                            padding: '9px 12px',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                        }}
+                        style={actionButtonStyle}
                         onClick={() => {
                             void openSettingsConfigInSystem();
                         }}
@@ -185,15 +150,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     </button>
                     <button
                         className="settings-button"
-                        style={{
-                            background: 'rgba(255,255,255,0.08)',
-                            border: '1px solid rgba(255,255,255,0.12)',
-                            borderRadius: 8,
-                            color: '#fff',
-                            padding: '9px 12px',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                        }}
+                        style={actionButtonStyle}
                         onClick={() => {
                             void reloadSettingsFromDisk();
                         }}

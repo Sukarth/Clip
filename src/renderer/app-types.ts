@@ -11,6 +11,7 @@ export interface ClipboardItem {
     content: string;
     timestamp: number;
     pinned?: boolean;
+    isTemporary?: boolean;
 }
 
 export interface Settings {

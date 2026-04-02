@@ -1,4 +1,5 @@
 import * as React from 'react';
+import type { VirtualItem, Virtualizer } from '@tanstack/react-virtual';
 import IconGlyph from './IconGlyph';
 import type { ClipboardItem } from '../app-types';
 
@@ -12,7 +13,7 @@ interface ClipboardListProps {
     filteredItems: ClipboardItem[];
     search: string;
     filteredType: 'all' | 'text' | 'image';
-    rowVirtualizer: any;
+    rowVirtualizer: Virtualizer<HTMLDivElement, Element>;
     listForceKey: number;
     themeColors: {
         itemBackground: string;
@@ -48,6 +49,12 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
     handleTogglePin,
     handleDeleteItem,
 }) => {
+    const scrollbarPadding = hasScrollbar ? 8 : 0;
+
+    React.useEffect(() => {
+        logger.renderer(`Scrollbar: Applying paddingRight: ${scrollbarPadding} (hasScrollbar: ${hasScrollbar})`);
+    }, [hasScrollbar, scrollbarPadding, logger]);
+
     return (
         <div
             ref={listRef}
@@ -63,11 +70,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                 flex: 1,
                 scrollbarWidth: 'thin',
                 scrollbarColor: settings.theme === 'light' ? '#ccc #f0f0f0' : '#444 #23252a',
-                paddingRight: (() => {
-                    const padding = hasScrollbar ? 8 : 0;
-                    logger.renderer(`Scrollbar: Applying paddingRight: ${padding} (hasScrollbar: ${hasScrollbar})`);
-                    return padding;
-                })(),
+                paddingRight: scrollbarPadding,
             }}
         >
             {isInitialLoading && (
@@ -147,8 +150,15 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                         position: 'relative',
                     }}
                 >
-                    {rowVirtualizer.getVirtualItems().map((virtualRow: any) => {
+                    {rowVirtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
                         const item = filteredItems[virtualRow.index];
+                        const isTemporary = !!item.isTemporary;
+                        const itemBackground = isTemporary
+                            ? 'linear-gradient(135deg, rgba(255, 183, 0, 0.18), rgba(255,255,255,0.03))'
+                            : themeColors.itemBackground;
+                        const itemHoverBackground = isTemporary
+                            ? 'linear-gradient(135deg, rgba(255, 183, 0, 0.24), rgba(255,255,255,0.05))'
+                            : themeColors.itemHoverBackground;
                         return (
                             <div
                                 key={`${item.id}-${listForceKey}`}
@@ -165,24 +175,26 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                 }}
                             >
                                 <div
-                                    className={`clip-item clip-item-${item.type} ${isAnimatingList ? 'clip-item-animate' : ''}`}
+                                    className={`clip-item clip-item-${item.type} ${isTemporary ? 'clip-item-temporary' : ''} ${isAnimatingList ? 'clip-item-animate' : ''}`}
                                     onClick={() => handlePaste(item)}
                                     style={{
-                                        background: themeColors.itemBackground,
+                                        background: itemBackground,
                                         borderRadius: 12,
                                         margin: 0,
                                         padding: '2.5% 3%',
                                         display: 'flex',
                                         alignItems: 'center',
-                                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                                        boxShadow: isTemporary ? '0 2px 12px rgba(255,183,0,0.12)' : '0 2px 8px rgba(0,0,0,0.08)',
                                         transition:
                                             'background 0.2s, transform 0.25s cubic-bezier(.4,2,.6,1), box-shadow 0.25s cubic-bezier(.4,2,.6,1)',
                                         cursor: 'pointer',
                                         gap: 10,
                                         boxSizing: 'border-box',
+                                        border: isTemporary ? '1px dashed rgba(255, 183, 0, 0.6)' : '1px solid transparent',
+                                        opacity: isTemporary ? 0.98 : 1,
                                     }}
-                                    onMouseEnter={(e) => (e.currentTarget.style.background = themeColors.itemHoverBackground)}
-                                    onMouseLeave={(e) => (e.currentTarget.style.background = themeColors.itemBackground)}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = itemHoverBackground)}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = itemBackground)}
                                 >
                                     {item.type === 'image' ? (
                                         <img
@@ -198,6 +210,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                                 borderRadius: 8,
                                                 objectFit: 'cover',
                                                 marginRight: '4%',
+                                                filter: isTemporary ? 'saturate(0.95) contrast(1.02)' : 'none',
                                             }}
                                         />
                                     ) : (
@@ -215,7 +228,16 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                             {item.content.length > 120 ? item.content.slice(0, 120) + '…' : item.content}
                                         </div>
                                     )}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', minWidth: 60 }}>
+                                    <div
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: isTemporary ? 'flex-end' : 'center',
+                                            flexDirection: isTemporary ? 'column' : 'row',
+                                            gap: 4,
+                                            marginLeft: 'auto',
+                                            minWidth: isTemporary ? 88 : 60,
+                                        }}
+                                    >
                                         <span
                                             className="clip-item-time"
                                             style={{
@@ -227,7 +249,25 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                         >
                                             {new Date(item.timestamp).toLocaleTimeString()}
                                         </span>
-                                        {settings.pinFavoriteItems && (
+                                        {isTemporary ? (
+                                            <span
+                                                style={{
+                                                    fontSize: 10,
+                                                    lineHeight: 1,
+                                                    color: '#ffb300',
+                                                    background: 'rgba(255, 183, 0, 0.12)',
+                                                    border: '1px solid rgba(255, 183, 0, 0.28)',
+                                                    borderRadius: 999,
+                                                    padding: '4px 8px',
+                                                    fontWeight: 700,
+                                                    letterSpacing: '0.03em',
+                                                    textTransform: 'uppercase',
+                                                }}
+                                            >
+                                                Temporary
+                                            </span>
+                                        ) : null}
+                                        {!isTemporary && settings.pinFavoriteItems && (
                                             <button
                                                 className="clip-pin-btn"
                                                 tabIndex={-1}
@@ -264,7 +304,8 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                                 />
                                             </button>
                                         )}
-                                        <button
+                                        {!isTemporary && (
+                                            <button
                                             className="clip-delete-btn"
                                             tabIndex={-1}
                                             style={{
@@ -291,7 +332,8 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                             onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
                                         >
                                             <IconGlyph value={themeIcons.delete} fallback="🗑️" label="Delete" size={17} />
-                                        </button>
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             </div>

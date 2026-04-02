@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification, screen, shell } from 'electron';
 import * as path from 'path';
 import fs from 'fs';
@@ -43,14 +42,14 @@ const MAX_HISTORY = 100;
 let mainWindow: BrowserWindow | null = null;
 let lastText = '';
 let lastImageDataUrl = '';
-let lastImageSizeKey = '';
 let tray: Tray | null = null;
 let windowHideBehavior: 'hide' | 'tray' = 'hide';
 let showInTaskbar: boolean = false;
 let showNotifications: boolean = false;
+let storeImagesInClipboard: boolean = true;
 let maxHistoryItems: number = MAX_HISTORY;
-let windowWidth = WINDOW_SIZE_LIMITS.width.default;
-let windowHeight = WINDOW_SIZE_LIMITS.height.default;
+let windowWidth: number = WINDOW_SIZE_LIMITS.width.default;
+let windowHeight: number = WINDOW_SIZE_LIMITS.height.default;
 let cachedAppDataPath: string | null = null;
 let activeThemeConfig = createDefaultThemeConfig();
 let suppressBlurHideUntil = 0;
@@ -61,6 +60,15 @@ let cacheTimestamp = 0;
 const CACHE_DURATION = 3000; // 3 seconds cache
 let isHistoryLoading = false;
 let pendingHistoryRequests: Array<(data: any[]) => void> = [];
+type ClipboardHistoryItem = {
+    id: string;
+    type: 'text' | 'image';
+    content: string;
+    timestamp: number;
+    pinned?: boolean;
+    isTemporary?: boolean;
+};
+let temporaryClipboardItem: ClipboardHistoryItem | null = null;
 
 // --- Win+V override state ---
 let winVOverrideEnabled = false;
@@ -148,16 +156,88 @@ function sanitizeShortcut(shortcut: string) {
     return normalized.length > 0 ? normalized : SAFE_SHORTCUT_FALLBACK;
 }
 
+function setTemporaryClipboardItem(item: ClipboardHistoryItem | null) {
+    const nextItem = item ? { ...item, isTemporary: true } : null;
+    const changed =
+        temporaryClipboardItem?.id !== nextItem?.id ||
+        temporaryClipboardItem?.type !== nextItem?.type ||
+        temporaryClipboardItem?.content !== nextItem?.content ||
+        temporaryClipboardItem?.timestamp !== nextItem?.timestamp ||
+        !!temporaryClipboardItem !== !!nextItem;
+
+    if (!changed) {
+        return;
+    }
+
+    temporaryClipboardItem = nextItem;
+    invalidateHistoryCache();
+}
+
 function ahkShortcutString(shortcut: string) {
-    let s = shortcut;
-    s = s.replace(/Control/gi, '^');
-    s = s.replace(/Ctrl/gi, '^');
-    s = s.replace(/Shift/gi, '+');
-    s = s.replace(/Alt/gi, '!');
-    s = s.replace(/(Win|Windows|Super|Meta)/gi, '#');
-    const parts = s.split('+');
-    const mainKey = parts.pop();
-    return parts.join('') + (mainKey ? mainKey.toLowerCase() : '');
+    const toAhkMainKey = (mainKey: string) => {
+        const key = mainKey.trim();
+        const lower = key.toLowerCase();
+
+        if (/^[a-z]$/i.test(key)) return key.toLowerCase();
+        if (/^[0-9]$/.test(key)) return key;
+
+        switch (lower) {
+            case 'escape':
+            case 'esc':
+                return 'Esc';
+            case 'space':
+                return 'Space';
+            case 'tab':
+                return 'Tab';
+            case 'insert':
+                return 'Insert';
+            case 'delete':
+                return 'Delete';
+            case 'home':
+                return 'Home';
+            case 'end':
+                return 'End';
+            case 'pageup':
+                return 'PgUp';
+            case 'pagedown':
+                return 'PgDn';
+            case 'arrowup':
+                return 'Up';
+            case 'arrowdown':
+                return 'Down';
+            case 'arrowleft':
+                return 'Left';
+            case 'arrowright':
+                return 'Right';
+            default:
+                return key;
+        }
+    };
+
+    const tokens = shortcut
+        .split('+')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+    const mainKeyToken = tokens[tokens.length - 1] ?? '';
+    const modifierTokens = tokens.slice(0, -1);
+
+    const modifierSymbols: string[] = [];
+    for (const token of modifierTokens) {
+        const lower = token.toLowerCase();
+        if (lower === 'control' || lower === 'ctrl') {
+            modifierSymbols.push('^');
+        } else if (lower === 'shift') {
+            modifierSymbols.push('+');
+        } else if (lower === 'alt') {
+            modifierSymbols.push('!');
+        } else if (lower === 'win' || lower === 'windows' || lower === 'super' || lower === 'meta') {
+            modifierSymbols.push('#');
+        }
+    }
+
+    const mainKey = toAhkMainKey(mainKeyToken);
+    return modifierSymbols.join('') + mainKey;
 }
 
 function generateAhkScript(shortcut: string) {
@@ -179,6 +259,10 @@ ${ahkHotkey}:: {
     }
 }
 `;
+}
+
+function composeClipboardHistory(history: ClipboardHistoryItem[]) {
+    return temporaryClipboardItem ? [temporaryClipboardItem, ...history] : history;
 }
 
 // Clean shutdown of AHK processes (only clean up processes that are not our current one)
@@ -715,6 +799,7 @@ function applySettingsRuntime(settings: any) {
     windowHideBehavior = settings.windowHideBehavior === 'tray' ? 'tray' : 'hide';
     showInTaskbar = !!settings.showInTaskbar;
     showNotifications = !!settings.showNotifications;
+    storeImagesInClipboard = settings.storeImagesInClipboard !== false;
     backendShortcut = sanitizeShortcut(settings.globalShortcut || SAFE_SHORTCUT_FALLBACK);
 
     const parsedMaxItems = Number(settings.maxItems);
@@ -1005,8 +1090,20 @@ function initDatabase() {
 function insertClipboardItem(item: { type: 'text' | 'image'; content: string; timestamp: number; pinned?: boolean }, maxItems: number = maxHistoryItems) {
     const last = db.prepare('SELECT content, type FROM history ORDER BY id DESC LIMIT 1').get() as { content?: string, type?: string } | undefined;
     if (last && last.content === item.content && last.type === item.type) return;
-    db.prepare('INSERT INTO history (type, content, timestamp, pinned) VALUES (?, ?, ?, ?)')
-        .run(item.type, item.content, item.timestamp, item.pinned ? 1 : 0);
+
+    const existing = db.prepare('SELECT COUNT(*) as count, MAX(pinned) as pinned FROM history WHERE type = ? AND content = ?')
+        .get(item.type, item.content) as { count: number; pinned: number | null } | undefined;
+
+    if (existing && existing.count > 0) {
+        const pinnedValue = item.pinned ? 1 : Number(existing.pinned || 0);
+        db.prepare('DELETE FROM history WHERE type = ? AND content = ?').run(item.type, item.content);
+        db.prepare('INSERT INTO history (type, content, timestamp, pinned) VALUES (?, ?, ?, ?)')
+            .run(item.type, item.content, item.timestamp, pinnedValue);
+    } else {
+        db.prepare('INSERT INTO history (type, content, timestamp, pinned) VALUES (?, ?, ?, ?)')
+            .run(item.type, item.content, item.timestamp, item.pinned ? 1 : 0);
+    }
+
     const countRow = db.prepare('SELECT COUNT(*) as count FROM history').get() as { count: number };
     if (countRow && countRow.count > maxItems) {
         db.prepare('DELETE FROM history WHERE id IN (SELECT id FROM history WHERE pinned = 0 ORDER BY id DESC LIMIT -1 OFFSET ?)').run(maxItems);
@@ -1040,12 +1137,12 @@ function getClipboardHistory() {
     }
 
     // Fetch fresh data and cache it
-    const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(maxHistoryItems);
-    cachedClipboardHistory = history;
+    const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(maxHistoryItems) as ClipboardHistoryItem[];
+    cachedClipboardHistory = composeClipboardHistory(history);
     cacheTimestamp = now;
-    console.log(`[main] Cached ${history.length} clipboard items`);
+    console.log(`[main] Cached ${cachedClipboardHistory.length} clipboard items`);
 
-    return history;
+    return cachedClipboardHistory;
 }
 
 // Async version for non-blocking operations
@@ -1076,22 +1173,23 @@ function getClipboardHistoryAsync(): Promise<any[]> {
         // Use setImmediate to avoid blocking the event loop
         setImmediate(() => {
             try {
-                const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(maxHistoryItems);
+                const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(maxHistoryItems) as ClipboardHistoryItem[];
+                const combinedHistory = composeClipboardHistory(history);
 
                 // Only log and update if the length has changed
-                if (lastHistoryLength !== history.length) {
-                    console.log(`[main] Async cached ${history.length} clipboard items`);
-                    lastHistoryLength = history.length;
+                if (lastHistoryLength !== combinedHistory.length) {
+                    console.log(`[main] Async cached ${combinedHistory.length} clipboard items`);
+                    lastHistoryLength = combinedHistory.length;
                 }
 
-                cachedClipboardHistory = history;
+                cachedClipboardHistory = combinedHistory;
                 cacheTimestamp = Date.now();
 
                 // Resolve current request
-                resolve(history);
+                resolve(combinedHistory);
 
                 // Resolve any pending requests
-                pendingHistoryRequests.forEach(callback => callback(history));
+                pendingHistoryRequests.forEach(callback => callback(combinedHistory));
                 pendingHistoryRequests = [];
             } catch (error) {
                 console.error('[main] Error in async clipboard history fetch:', error);
@@ -1192,7 +1290,7 @@ function createMainWindow() {
     mainWindow.loadURL(
         process.env.NODE_ENV === 'development'
             ? devServerUrl
-            : `file://${path.resolve(__dirname, '../index.html')}`
+            : `file://${path.resolve(__dirname, '../renderer/index.html')}`
     );
 
     mainWindow.on('close', (e) => {
@@ -1296,15 +1394,8 @@ function pollClipboard() {
         const image = clipboard.readImage();
         let imageDataUrl = '';
         if (!image.isEmpty()) {
-            // Fast bailout: avoid expensive toDataURL unless image size changed.
-            const size = image.getSize();
-            const sizeKey = `${size.width}x${size.height}`;
-            if (sizeKey !== lastImageSizeKey) {
-                imageDataUrl = image.toDataURL();
-                lastImageSizeKey = sizeKey;
-            } else {
-                imageDataUrl = lastImageDataUrl;
-            }
+            // Compare image content, not dimensions, so same-size updates are detected.
+            imageDataUrl = image.toDataURL();
         }
 
         // Track last seen clipboard content to avoid unnecessary DB/cache/log updates
@@ -1314,6 +1405,7 @@ function pollClipboard() {
         if (text && text !== lastText) {
             lastText = text;
             shouldUpdate = true;
+            setTemporaryClipboardItem(null);
             const item = { type: 'text' as const, content: text, timestamp: Date.now() };
             insertClipboardItem(item);
             console.log('[main] New text detected:', text);
@@ -1332,27 +1424,57 @@ function pollClipboard() {
             lastText = '';
         }
 
-        // Only insert if image is non-empty and different from last
-        if (imageDataUrl && imageDataUrl !== lastImageDataUrl) {
-            lastImageDataUrl = imageDataUrl;
-            shouldUpdate = true;
-            const item = { type: 'image' as const, content: imageDataUrl, timestamp: Date.now() };
-            insertClipboardItem(item);
-            console.log('[main] New image detected');
-            if (mainWindow && mainWindow.isVisible()) {
-                mainWindow.webContents.send('clipboard-item', item);
-                console.log('[main] Sent clipboard-item (image) to renderer');
+        if (storeImagesInClipboard) {
+            if (imageDataUrl && imageDataUrl !== lastImageDataUrl) {
+                lastImageDataUrl = imageDataUrl;
+                shouldUpdate = true;
+                setTemporaryClipboardItem(null);
+                const item = { type: 'image' as const, content: imageDataUrl, timestamp: Date.now() };
+                insertClipboardItem(item);
+                console.log('[main] New image detected');
+                if (mainWindow && mainWindow.isVisible()) {
+                    mainWindow.webContents.send('clipboard-item', item);
+                    console.log('[main] Sent clipboard-item (image) to renderer');
+                }
+                if (showNotifications) {
+                    const notification = {
+                        title: 'Clip - New Image Copied',
+                        body: 'An image was copied to clipboard'
+                    };
+                    new Notification(notification).show();
+                }
+            } else if (!imageDataUrl) {
+                lastImageDataUrl = '';
+                setTemporaryClipboardItem(null);
             }
-            if (showNotifications) {
-                const notification = {
-                    title: 'Clip - New Image Copied',
-                    body: 'An image was copied to clipboard'
+        } else {
+            if (imageDataUrl && imageDataUrl !== lastImageDataUrl) {
+                lastImageDataUrl = imageDataUrl;
+                shouldUpdate = true;
+                const tempItem = {
+                    id: `temp-image-${Date.now()}`,
+                    type: 'image' as const,
+                    content: imageDataUrl,
+                    timestamp: Date.now(),
+                    isTemporary: true,
                 };
-                new Notification(notification).show();
+                setTemporaryClipboardItem(tempItem);
+                console.log('[main] New temporary image detected');
+                if (mainWindow && mainWindow.isVisible()) {
+                    mainWindow.webContents.send('clipboard-item', tempItem);
+                    console.log('[main] Sent clipboard-item (temporary image) to renderer');
+                }
+                if (showNotifications) {
+                    const notification = {
+                        title: 'Clip - Temporary Image Copied',
+                        body: 'An image was copied to clipboard'
+                    };
+                    new Notification(notification).show();
+                }
+            } else if (!imageDataUrl) {
+                lastImageDataUrl = '';
+                setTemporaryClipboardItem(null);
             }
-        } else if (!imageDataUrl) {
-            lastImageDataUrl = '';
-            lastImageSizeKey = '';
         }
 
         // If clipboard is empty and last seen was also empty, do nothing (prevents log spam)

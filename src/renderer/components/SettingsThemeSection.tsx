@@ -245,10 +245,17 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                             <span style={{ fontSize: 12, color: '#aaa' }}>Accent color (quick)</span>
                             <ColorSettingField
                                 label="Accent color"
-                                value={settingsDraft?.accentColor ?? settings.accentColor}
-                                onChange={(nextValue) =>
-                                    setSettingsDraft((s) => (s ? { ...s, accentColor: nextValue } : null))
-                                }
+                                value={editorThemeProfile.colors.accent}
+                                onChange={(nextValue) => {
+                                    updateEditorActiveProfile((profile) => ({
+                                        ...profile,
+                                        colors: {
+                                            ...profile.colors,
+                                            accent: nextValue,
+                                        },
+                                    }));
+                                    setSettingsDraft((s) => (s ? { ...s, accentColor: nextValue } : null));
+                                }}
                             />
                         </div>
                     </div>

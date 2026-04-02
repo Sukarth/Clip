@@ -18,8 +18,8 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
     themeSurface,
     effectiveBorderRadius,
 }) => {
-    return (
-        <style>{`
+    const styles = React.useMemo(
+        () => `
                 /* Global CSS for clean interface */
                 body {
                     margin: 0;
@@ -60,13 +60,13 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
 
                 /* Dark mode option styling */
                 option {
-                    background: #23252a !important;
-                    color: #fff !important;
+                    background: ${themeColors.panelBackground} !important;
+                    color: ${themeColors.textPrimary} !important;
                 }
 
                 select option {
-                    background: #23252a !important;
-                    color: #fff !important;
+                    background: ${themeColors.panelBackground} !important;
+                    color: ${themeColors.textPrimary} !important;
                 }
 
                 /* Theme-based styling */
@@ -133,13 +133,13 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
 
                 /* Dark mode theme-specific option styling */
                 .theme-dark option {
-                    background: #23252a !important;
-                    color: #fff !important;
+                    background: ${themeColors.panelBackground} !important;
+                    color: ${themeColors.textPrimary} !important;
                 }
 
                 .theme-dark select option {
-                    background: #23252a !important;
-                    color: #fff !important;
+                    background: ${themeColors.panelBackground} !important;
+                    color: ${themeColors.textPrimary} !important;
                 }
 
                 .theme-light button:not(.no-btn, .clip-pin-btn, .clip-delete-btn) {
@@ -367,7 +367,8 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 }
                 /* Clipboard list scrollbar styling */
                 .clip-list {
-                    overflow-y: overlay;
+                    overflow-y: auto;
+                    scrollbar-gutter: stable;
                     scrollbar-width: thin;
                     scrollbar-color: #444 #23252a;
                 }
@@ -404,8 +405,11 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar-thumb:hover {
                     background: ${settings.accentColor};
                 }
-            `}</style>
+            `,
+        [effectiveBorderRadius, settings, themeColors, themeSurface, themeTypography],
     );
+
+    return <style>{styles}</style>;
 };
 
 export default React.memo(AppInlineStyles);

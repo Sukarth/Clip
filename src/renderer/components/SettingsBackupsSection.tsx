@@ -45,6 +45,8 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
     setBackupToDelete,
     setBackupDeleteAction,
 }) => {
+    const [isRestoring, setIsRestoring] = React.useState(false);
+
     return (
         <>
             <div>
@@ -171,7 +173,7 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                             setSelectedBackup('');
 
                             if (backupPath) {
-                                const filename = backupPath.split('\\').pop() || 'backup';
+                                const filename = backupPath.split(/[\\/]/).pop() || 'backup';
                                 showToast('success', `Backup created successfully: ${filename}`);
                             } else {
                                 showToast('error', 'Could not create backup');
@@ -347,7 +349,7 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                                                         ? '1px solid rgba(255,255,255,0.06)'
                                                         : 'none',
                                                 background: isSelected
-                                                    ? settingsDraft?.accentColor + '22'
+                                                    ? (settingsDraft?.accentColor ?? settings.accentColor) + '22'
                                                     : isChecked
                                                         ? 'rgba(255,255,255,0.08)'
                                                         : 'transparent',
@@ -495,52 +497,50 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                                         borderRadius: 8,
                                         color: selectedBackup ? '#000' : '#fff',
                                         padding: '12px 18px',
-                                        cursor: selectedBackup ? 'pointer' : 'not-allowed',
+                                        cursor: selectedBackup && !isRestoring ? 'pointer' : 'not-allowed',
                                         fontWeight: 600,
                                         fontSize: 15,
                                         transition: 'all 0.2s',
-                                        opacity: selectedBackup ? 1 : 0.5,
+                                        opacity: selectedBackup && !isRestoring ? 1 : 0.5,
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                         gap: 8,
                                     }}
-                                    disabled={!selectedBackup}
+                                    disabled={!selectedBackup || isRestoring}
                                     onClick={async () => {
-                                        if (selectedBackup) {
-                                            const button = document.activeElement as HTMLButtonElement;
-                                            const originalText = button.textContent;
+                                        if (!selectedBackup || isRestoring) {
+                                            return;
+                                        }
 
-                                            try {
-                                                button.textContent = 'Restoring...';
-                                                button.style.opacity = '0.7';
-                                                button.disabled = true;
+                                        setIsRestoring(true);
+                                        try {
+                                            const success = await window.electronAPI?.restoreBackup?.(selectedBackup);
 
-                                                const success = await window.electronAPI?.restoreBackup?.(selectedBackup);
-
-                                                if (success) {
-                                                    showToast('success', 'Backup restored successfully!');
-                                                    setSelectedBackup('');
-                                                    const newList = (await window.electronAPI?.listBackups?.()) || [];
-                                                    setBackupList(newList);
-                                                } else {
-                                                    showToast('error', 'Failed to restore backup.');
-                                                }
-                                            } catch (error) {
-                                                log.error('Restore error', error instanceof Error ? error.message : String(error));
-                                                showToast(
-                                                    'error',
-                                                    `Restore failed: ${error instanceof Error ? error.message : String(error)}`,
-                                                );
-                                            } finally {
-                                                button.textContent = originalText;
-                                                button.style.opacity = '1';
-                                                button.disabled = false;
+                                            if (success) {
+                                                showToast('success', 'Backup restored successfully!');
+                                                setSelectedBackup('');
+                                                const newList = (await window.electronAPI?.listBackups?.()) || [];
+                                                setBackupList(newList);
+                                            } else {
+                                                showToast('error', 'Failed to restore backup.');
                                             }
+                                        } catch (error) {
+                                            log.error('Restore error', error instanceof Error ? error.message : String(error));
+                                            showToast(
+                                                'error',
+                                                `Restore failed: ${error instanceof Error ? error.message : String(error)}`,
+                                            );
+                                        } finally {
+                                            setIsRestoring(false);
                                         }
                                     }}
                                 >
-                                    {selectedBackup ? '↻ Restore Selected' : 'Select backup to restore'}
+                                    {isRestoring
+                                        ? 'Restoring...'
+                                        : selectedBackup
+                                            ? '↻ Restore Selected'
+                                            : 'Select backup to restore'}
                                 </button>
 
                                 {showBackupManagement && selectedBackups.size > 0 && (

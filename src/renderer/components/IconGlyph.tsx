@@ -8,13 +8,37 @@ export interface IconGlyphProps {
     tint?: string;
 }
 
+function windowsPathToFileUrl(value: string): string {
+    const normalized = value.replace(/\\/g, '/');
+    const url = new URL('file://');
+    const pathname = normalized.startsWith('/') ? normalized : `/${normalized}`;
+    url.pathname = pathname
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+    return url.toString();
+}
+
+function posixPathToFileUrl(value: string): string {
+    const url = new URL('file://');
+    url.pathname = value
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+    return url.toString();
+}
+
 function withFileProtocolIfNeeded(value: string): string {
     if (/^(data:image\/|https?:\/\/|file:\/\/)/i.test(value)) {
         return value;
     }
 
     if (/^[a-zA-Z]:\\/.test(value)) {
-        return `file:///${value.replace(/\\/g, '/')}`;
+        return windowsPathToFileUrl(value);
+    }
+
+    if (value.startsWith('/')) {
+        return posixPathToFileUrl(value);
     }
 
     return value;
@@ -56,12 +80,19 @@ const IconGlyph: React.FC<IconGlyphProps> = ({
     label,
     tint,
 }) => {
-    const source = iconToImageSource(value);
+    const [imgErrored, setImgErrored] = React.useState(false);
+
+    React.useEffect(() => {
+        setImgErrored(false);
+    }, [value]);
+
+    const source = imgErrored ? null : iconToImageSource(value);
     if (source) {
         return (
             <img
                 src={source}
                 alt={label}
+                onError={() => setImgErrored(true)}
                 style={{
                     width: size,
                     height: size,

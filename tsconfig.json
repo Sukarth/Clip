@@ -6,7 +6,7 @@
             "ES2020",
             "DOM"
         ],
-        "outDir": "distold",
+        "outDir": "out",
         "strict": true,
         "esModuleInterop": true,
         "jsx": "react-jsx",

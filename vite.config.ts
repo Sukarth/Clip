@@ -11,7 +11,7 @@ export default defineConfig({
         strictPort: true,
     },
     build: {
-        outDir: path.resolve(__dirname, 'dist'),
-        emptyOutDir: false,
+        outDir: path.resolve(__dirname, 'dist/renderer'),
+        emptyOutDir: true,
     },
 });

@@ -16,6 +16,7 @@ const ThemeProvider: React.FC<ThemeProviderProps> = ({ theme, children, onSystem
         if (theme !== 'system') return;
 
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        setSystemPrefersDark(mediaQuery.matches);
         const handleChange = (e: MediaQueryListEvent) => {
             setSystemPrefersDark(e.matches);
             if (onSystemThemeChange) onSystemThemeChange();

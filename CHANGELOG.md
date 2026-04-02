@@ -5,6 +5,70 @@ All notable changes to Clip will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-30
+
+### 🎨 Theming & Customization
+
+#### JSON Theme System
+- **Theme Configuration Files**: Full support for JSON-based theme profiles with proper validation
+- **JSON Schema Support**: Comprehensive JSON Schema (draft 2020-12) for theme configuration with IntelliSense
+- **Theme File APIs**: IPC methods to access theme and settings file paths and open them in external editors
+- **Reload on Disk Changes**: Ability to reload theme and settings configuration from disk without restart
+
+#### Visual Enhancements
+- **Draggable Window**: Make window draggable by the title bar or any custom drag handle
+- **Window Size Controls**: Add min/max window size constraints and user-resizable window bounds
+- **Theme Profiles**: Support for multiple theme profiles that users can switch between
+
+### ⚡ Performance Improvements
+
+#### Build & Runtime Optimization
+- **Vite Migration**: Migrated renderer build system from Webpack to Vite for significantly faster builds
+- **Optimized Polling**: Reduced CPU usage by optimizing clipboard polling intervals and efficiency
+- **Virtual Scroller Fixes**: Resolved useVirtualizer cache staleness issues that caused rendering glitches and spacing problems
+
+### 🐛 Bug Fixes
+
+#### Window & Focus Management
+- **Win+V Reliability**: Fixed Win+V keyboard shortcut to reliably show the window even in edge cases
+- **Focus Restoration**: Improved automatic focus restoration after pasting operations
+
+- Also Solved [#1](https://github.com/Sukarth/Clip/issues/1) and [#2](https://github.com/Sukarth/Clip/issues/2)
+
+### ♻️ Code Refactoring & Architecture
+
+#### Component Modularization
+- **App.tsx Refactor**: Split monolithic App.tsx into focused, reusable components for better maintainability:
+  - `ClipboardList.tsx`: Clipboard history display with virtualization
+  - `AppDialogs.tsx`: Dialog management and modal components
+  - `SettingsGeneralSection.tsx`: General application settings
+  - `SettingsBehaviorSection.tsx`: Behavior and interaction settings
+  - `SettingsThemeSection.tsx`: Theme configuration and color customization
+  - `SettingsDataSection.tsx`: Data management and cache settings
+  - `SettingsBackupsSection.tsx`: Backup and restore functionality
+  - `SettingsModalFooter.tsx`: Settings modal footer controls
+  - `ColorSettingField.tsx`: Reusable color picker component
+  - `IconGlyph.tsx`: Icon rendering utilities
+  - `ToastContainer.tsx`: Toast notification system
+  - `Switch.tsx`: Reusable toggle switch component
+  - `AppInlineStyles.tsx`: Inline style management
+
+#### Custom Hooks
+- **useThemeConfigManager**: Manages theme configuration state and persistence
+- **useToastManager**: Handles toast notifications and message queuing
+- **useShortcutDraft**: Manages keyboard shortcut input and validation during configuration
+
+### 📦 Dependencies
+
+- **Upgraded Dependencies**: Updated all major dependencies for improved stability and compatibility
+- **Build Tools**: Updated build tools and development dependencies
+
+### 🏢 Technical Improvements
+
+- **Type Safety**: Enhanced TypeScript type definitions and global type utilities
+- **HTML Structure**: Optimized HTML structure and meta tags for better compatibility
+- **Configuration**: Added centralized app constants and type definitions for cross-module consistency
+
 ## [1.0.0-beta] - 2025-05-30
 
 ### 🎉 Initial Beta Release

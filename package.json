@@ -1,7 +1,7 @@
 {
   "name": "clip",
   "description": "A fast, modern clipboard manager for Windows.",
-  "version": "1.0.0-beta",
+  "version": "1.1.0",
   "author": "Sukarth Acharya",
   "copyright": "© 2025 Sukarth Acharya",
   "homepage": "https://github.com/Sukarth/Clip",
@@ -89,7 +89,7 @@
     "compression": "normal",
     "buildDependenciesFromSource": false,
     "nodeGypRebuild": false,
-    "buildVersion": "1.0.0-beta",
+    "buildVersion": "1.1.0",
     "win": {
       "icon": "assets/icon.ico",
       "executableName": "Clip",

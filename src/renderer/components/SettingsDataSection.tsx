@@ -49,7 +49,9 @@ const SettingsDataSection: React.FC<SettingsDataSectionProps> = ({
 
                             const data = await window.electronAPI?.exportDb?.();
                             if (data) {
-                                const blob = new Blob([data.buffer as ArrayBuffer], {
+                                const bytes = new Uint8Array(data.byteLength);
+                                bytes.set(data);
+                                const blob = new Blob([bytes.buffer], {
                                     type: 'application/octet-stream',
                                 });
                                 const url = URL.createObjectURL(blob);

@@ -1,4 +1,7 @@
 // Type definitions for Electron contextBridge API exposed in preload.js
+type ThemeConfig = import('../theme-config').ThemeConfig;
+type ThemeSchema = Record<string, unknown>;
+
 interface ElectronAPI {
     dragWindow: (cursorX: number, cursorY: number, offsetX?: number, offsetY?: number) => void;
     hideWindow: () => void;
@@ -32,20 +35,20 @@ interface ElectronAPI {
     setBackendShortcut: (shortcut: string) => void;
     restartApp: () => void;
     saveSettingsToFile: (settings: any) => void;
-    getThemeConfig: () => Promise<any>;
-    getThemeSchema: () => Promise<any>;
-    saveThemeConfig: (config: any) => Promise<any>;
-    reloadThemeConfig: () => Promise<any>;
+    getThemeConfig: () => Promise<ThemeConfig>;
+    getThemeSchema: () => Promise<ThemeSchema>;
+    saveThemeConfig: (config: ThemeConfig) => Promise<ThemeConfig>;
+    reloadThemeConfig: () => Promise<ThemeConfig>;
     exportThemeConfig: () => Promise<string>;
     getThemePaths: () => Promise<{ configPath: string; schemaPath: string }>;
     openThemeConfigFile: () => Promise<{ ok: boolean; error?: string; path?: string }>;
     getSettingsPaths: () => Promise<{ configPath: string; schemaPath: string }>;
     openSettingsConfigFile: () => Promise<{ ok: boolean; error?: string; path?: string }>;
     reloadSettingsFromDisk: () => Promise<any>;
-    createThemeProfile: (profileName: string) => Promise<any>;
-    deleteThemeProfile: (profileKey: string) => Promise<any>;
-    setActiveThemeProfile: (profileKey: string) => Promise<any>;
-    onThemeConfigUpdated: (callback: (data: any) => void) => (() => void) | void;
+    createThemeProfile: (profileName: string) => Promise<ThemeConfig>;
+    deleteThemeProfile: (profileKey: string) => Promise<ThemeConfig>;
+    setActiveThemeProfile: (profileKey: string) => Promise<ThemeConfig>;
+    onThemeConfigUpdated: (callback: (data: ThemeConfig) => void) => (() => void) | void;
     isDevelopment: () => boolean;
 }
 

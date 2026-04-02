@@ -29,7 +29,7 @@ If applicable, add screenshots to help explain your problem.
 ## 💻 System Information
 - **OS**: [e.g. Windows 10, Windows 11]
 - **OS Build**: [e.g. 19044.1234]
-- **Clip Version**: [e.g. 1.0.0-beta]
+- **Clip Version**: [e.g. 1.0.1]
 - **Installation Type**: [Installer / Portable]
 
 ## 📋 Additional Context

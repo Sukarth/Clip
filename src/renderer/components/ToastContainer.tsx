@@ -1,22 +1,16 @@
 import * as React from 'react';
-
-interface ToastMessage {
-    id: string;
-    type: 'success' | 'error' | 'info';
-    message: string;
-    isFadingOut?: boolean;
-}
+import type { ToastMessage } from '../app-types';
 
 interface ToastContainerProps {
     toasts: ToastMessage[];
     accentColor: string;
-    onDismiss: (id: string, type: 'manual' | 'auto') => void;
+    onDismiss: (id: string) => void;
     onClearAll: () => void;
 }
 
 const Toast: React.FC<{
     message: ToastMessage;
-    onDismiss: (id: string, type: 'manual' | 'auto') => void;
+    onDismiss: (id: string) => void;
     accentColor: string;
 }> = ({ message, onDismiss, accentColor }) => {
     let bgColor = '';
@@ -40,7 +34,7 @@ const Toast: React.FC<{
     return (
         <div
             className={`toast-message ${message.isFadingOut ? 'removing' : ''}`}
-            onClick={() => onDismiss(message.id, 'manual')}
+            onClick={() => onDismiss(message.id)}
             style={{
                 background: bgColor,
                 color: '#fff',

@@ -1,5 +1,6 @@
 import {
     createDefaultThemeConfig,
+    DEFAULT_THEME_PROFILE_KEY,
     normalizeThemeProfileKey,
     type ThemeConfig,
     type ThemeProfile,
@@ -16,10 +17,26 @@ export function getActiveThemeProfile(config: ThemeConfig): ThemeProfile {
         return config.profiles[firstKey];
     }
 
-    return createDefaultThemeConfig().profiles.default;
+    return createDefaultThemeConfig().profiles[DEFAULT_THEME_PROFILE_KEY];
 }
 
-export const getSliderStyles = (accentColor: string) => `
+function sanitizeSliderAccentColor(accentColor: string): string {
+    const candidate = typeof accentColor === 'string' ? accentColor.trim() : '';
+    if (!candidate) {
+        return '#ffb300';
+    }
+
+    if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('color', candidate)) {
+        return candidate;
+    }
+
+    return '#ffb300';
+}
+
+export const getSliderStyles = (accentColor: string) => {
+    const safeAccentColor = sanitizeSliderAccentColor(accentColor);
+
+    return `
     input[type="range"]::-webkit-slider-runnable-track {
         background: #333;
         height: 4px;
@@ -31,7 +48,7 @@ export const getSliderStyles = (accentColor: string) => `
         width: 18px;
         height: 18px;
         border-radius: 50%;
-        background: ${accentColor} !important;
+        background: ${safeAccentColor} !important;
         cursor: pointer;
         margin-top: -7px;
         border: none;
@@ -40,7 +57,7 @@ export const getSliderStyles = (accentColor: string) => `
     }
     input[type="range"]::-webkit-slider-thumb:hover {
         transform: scale(1.1);
-        background: ${accentColor} !important;
+        background: ${safeAccentColor} !important;
     }
 
     input[type="range"]::-moz-range-track {
@@ -53,7 +70,7 @@ export const getSliderStyles = (accentColor: string) => `
         width: 18px;
         height: 18px;
         border-radius: 50%;
-        background: ${accentColor} !important;
+        background: ${safeAccentColor} !important;
         cursor: pointer;
         border: none;
         box-shadow: 0 2px 4px rgba(0,0,0,0.2);
@@ -61,9 +78,10 @@ export const getSliderStyles = (accentColor: string) => `
     }
     input[type="range"]::-moz-range-thumb:hover {
         transform: scale(1.1);
-        background: ${accentColor} !important;
+        background: ${safeAccentColor} !important;
     }
 `;
+};
 
 export const getRelativeTime = (timestamp: number): string => {
     const now = Date.now();
