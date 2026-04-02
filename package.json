@@ -1,7 +1,7 @@
 {
   "name": "clip",
   "description": "A fast, modern clipboard manager for Windows.",
-  "version": "1.0.0-beta",
+  "version": "1.1.0",
   "author": "Sukarth Acharya",
   "copyright": "© 2025 Sukarth Acharya",
   "homepage": "https://github.com/Sukarth/Clip",
@@ -12,44 +12,48 @@
   "bugs": {
     "url": "https://github.com/Sukarth/Clip/issues"
   },
+  "engines": {
+    "node": ">=20.19.0 || >=22.12.0"
+  },
   "main": "dist/main/main.js",
   "scripts": {
+    "rebuild:native": "electron-builder install-app-deps",
+    "dev": "npm run rebuild:native && npm run build:main && concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:electron": "wait-on http-get://localhost:5173/@vite/client && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "build": "npm run rebuild:native && npm run build:main && npm run build:renderer",
     "build:main": "tsc --project src/tsconfig.main.json && node -e \"require('fs').copyFileSync('src/preload.js','dist/main/preload.js')\" && node scripts/copy-clipmsg.js",
-    "build:renderer": "webpack --mode production",
-    "build:all": "npm run build:main && npm run build:renderer",
-    "dist": "npm run build:all && electron-builder",
-    "dist:fast": "npm run build:all && electron-builder --config.compression=store",
-    "dist:fast-installer": "npm run build:all && electron-builder --config.compression=store --config.win.target=nsis",
-    "dist:fast-zip": "npm run build:all && electron-builder --config.compression=store --config.win.target=zip",
-    "build:dir": "npm run build:all && electron-builder --dir",
-    "build:dir-fast": "npm run build:all && electron-builder --dir --config.compression=store",
-    "start": "npm run build:all && echo \"starting electron...\" && electron .",
-    "dev": "npm run build:main && webpack --mode development --watch && echo \"starting electron...\" && electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:renderer": "vite build",
+    "package": "npm run build && electron-builder --publish never",
+    "package:fast": "npm run build && electron-builder --dir --config.compression=store --publish never",
+    "package:zip": "npm run build && electron-builder --config.win.target=zip --publish never",
+    "release": "npm run build && electron-builder --publish always",
+    "postinstall": "electron-builder install-app-deps"
   },
   "keywords": [],
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "@tanstack/react-virtual": "^3.13.22",
+    "better-sqlite3": "^12.8.0",
     "fuse.js": "^7.1.0",
-    "node-addon-api": "^8.3.1",
-    "node-key-sender": "^1.0.11",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "node-addon-api": "^8.6.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^22.15.18",
-    "@types/react": "^19.1.4",
-    "@types/react-dom": "^19.1.5",
-    "electron": "25.9.0",
-    "html-webpack-plugin": "^5.6.3",
-    "ts-loader": "^9.5.2",
-    "typescript": "^5.8.3",
-    "webpack": "^5.99.8",
-    "webpack-cli": "^6.0.1",
-    "electron-builder": "^26.0.12"
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.1.1",
+    "electron-builder": "^26.8.1",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.0",
+    "wait-on": "^9.0.4"
   },
   "build": {
     "appId": "com.sukarth.clip",
@@ -58,6 +62,7 @@
     "icon": "assets/icon.ico",
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "src/preload.js",
       "native/SendPaste.exe",
       "native/AutoHotkey.exe",
@@ -84,13 +89,13 @@
     ],
     "directories": {
       "buildResources": ".",
-      "output": "dist"
+      "output": "release"
     },
     "fileAssociations": [],
     "compression": "normal",
     "buildDependenciesFromSource": false,
     "nodeGypRebuild": false,
-    "buildVersion": "1.0.0-beta",
+    "buildVersion": "1.1.0",
     "win": {
       "icon": "assets/icon.ico",
       "executableName": "Clip",
@@ -148,6 +153,10 @@
       "warningsAsErrors": false
     },
     "extraResources": [
+      {
+        "from": "assets/icon.ico",
+        "to": "icon.ico"
+      },
       {
         "from": "native/AutoHotkey.exe",
         "to": "AutoHotkey.exe"

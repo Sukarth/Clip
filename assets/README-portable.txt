@@ -18,7 +18,7 @@ Features:
 - Search functionality
 
 Folder Structure:
-📁 Clip-1.0.0-win/
+📁 Clip-1.1.0-win/
 ├── 📄 Clip.exe                    (Main application)
 ├── 📁 resources/                  (Native components)
 │   ├── 📄 AutoHotkey.exe

@@ -6,7 +6,7 @@
 
 **A fast, modern, and lightweight clipboard manager for Windows**
 
-[![Version](https://img.shields.io/badge/version-1.0.0--beta-blue.svg)](https://github.com/Sukarth/Clip/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0--beta-blue.svg)](https://github.com/Sukarth/Clip/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/Sukarth/Clip/releases)
 
@@ -162,17 +162,12 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📋 Roadmap
 
-### Current (v1.0.0-beta)
-- [x] Core clipboard management
-- [x] Modern UI with themes
-- [x] Global hotkeys and shortcuts
-- [x] Backup/restore functionality
-- [x] Portable and installer versions
+### Current (v1.1.0)
+- [x] Performance improvements
+- [x] Color theme customization options
 
 ### Planned Features
 - [ ] Cloud synchronization
-- [ ] Performance improvements
-- [ ] Color theme customization options
 - [ ] Advanced search filters and tags
 - [ ] Clipboard templates and snippets
 - [ ] Multi-monitor support improvements

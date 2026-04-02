@@ -16,6 +16,7 @@ out/
 *.swp
 *.swo
 *~
+designs
 
 # OS generated files
 .DS_Store

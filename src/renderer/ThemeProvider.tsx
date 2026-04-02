@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 
 interface ThemeProviderProps {
     theme: 'dark' | 'light' | 'system';
@@ -7,23 +7,19 @@ interface ThemeProviderProps {
 }
 
 const ThemeProvider: React.FC<ThemeProviderProps> = ({ theme, children, onSystemThemeChange }) => {
-    // Determine theme class based on settings
-    const getThemeClass = () => {
-        if (theme === 'system') {
-            // Check if system theme is dark or light
-            const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-            return isDarkMode ? 'theme-dark' : 'theme-light';
-        }
-        return `theme-${theme}`;
-    };
+    const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => {
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    });
 
     // Listen for system theme changes if using system theme
     useEffect(() => {
-        if (theme !== 'system' || !onSystemThemeChange) return;
+        if (theme !== 'system') return;
 
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-        const handleChange = () => {
-            onSystemThemeChange();
+        setSystemPrefersDark(mediaQuery.matches);
+        const handleChange = (e: MediaQueryListEvent) => {
+            setSystemPrefersDark(e.matches);
+            if (onSystemThemeChange) onSystemThemeChange();
         };
 
         // Modern way with addEventListener
@@ -31,9 +27,15 @@ const ThemeProvider: React.FC<ThemeProviderProps> = ({ theme, children, onSystem
         return () => mediaQuery.removeEventListener('change', handleChange);
     }, [theme, onSystemThemeChange]);
 
+    const themeClass = useMemo(() => {
+        if (theme === 'system') {
+            return systemPrefersDark ? 'theme-dark' : 'theme-light';
+        }
+        return `theme-${theme}`;
+    }, [theme, systemPrefersDark]);
+
     useEffect(() => {
         // Set theme class on body for global CSS (scrollbars, etc)
-        const themeClass = getThemeClass();
         document.body.classList.remove('theme-dark', 'theme-light');
         document.body.classList.add(themeClass);
         // Also set on html element for maximum compatibility
@@ -43,9 +45,9 @@ const ThemeProvider: React.FC<ThemeProviderProps> = ({ theme, children, onSystem
             document.body.classList.remove('theme-dark', 'theme-light');
             document.documentElement.classList.remove('theme-dark', 'theme-light');
         };
-    }, [theme]);
+    }, [themeClass]);
 
-    return <div className={getThemeClass()}>{children}</div>;
+    return <div className={themeClass}>{children}</div>;
 };
 
 export default ThemeProvider;
