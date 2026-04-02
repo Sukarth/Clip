@@ -34,7 +34,11 @@ logError('--- Clip main process started ---');
 
 // Set app name for Windows (affects process name and window titles)
 if (process.platform === 'win32') {
-    app.setAppUserModelId('com.sukarth.clip');
+    // Only set AUMID explicitly in dev mode or Windows taskbar icon grouping gets confused
+    // when running a naked .exe without an installed Start Menu shortcut.
+    if (!app.isPackaged) {
+        app.setAppUserModelId(process.execPath);
+    }
     app.setName('Clip');
 }
 
@@ -81,6 +85,29 @@ let currentAhkShortcut = '';
 let lastAhkScriptPath: string | null = null;
 let ahkProcessPid: number | null = null;
 let isAhkShuttingDown = false;
+
+function getAppIconPath(): string {
+    if (app.isPackaged) {
+        const resourceIconPath = path.join(process.resourcesPath, 'icon.ico');
+
+        if (fs.existsSync(resourceIconPath)) {
+            return resourceIconPath;
+        }
+    }
+
+    return path.join(app.getAppPath(), 'assets', 'icon.ico');
+}
+
+function getAppIconImage() {
+    try {
+        const image = nativeImage.createFromPath(getAppIconPath());
+        return image;
+    } catch (e) {
+        console.error('Failed to load icon:', e);
+        return nativeImage.createEmpty();
+    }
+}
+
 // Fix AHK path - extract from asar if packaged, otherwise use direct path
 function getAhkExePath(): string {
     const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -1211,11 +1238,7 @@ function invalidateHistoryCache() {
 
 function ensureTray(mainWindow: BrowserWindow) {
     if (!tray) {
-        const distIconPath = path.join(__dirname, '../assets/icon.ico');
-        const appIconPath = path.join(app.getAppPath(), 'assets', 'icon.ico');
-        const iconPath = fs.existsSync(distIconPath) ? distIconPath : appIconPath;
-        tray = new Tray(iconPath);
-        // tray = new Tray(''); // No icon provided
+        tray = new Tray(getAppIconImage());
         tray.setToolTip('Clip - Clipboard Manager');
         tray.setContextMenu(Menu.buildFromTemplate([
             {
@@ -1268,9 +1291,7 @@ function createMainWindow() {
         roundedCorners: false,
         show: false,
         skipTaskbar: !showInTaskbar,
-        icon: fs.existsSync(path.join(__dirname, '../assets/icon.ico'))
-            ? path.join(__dirname, '../assets/icon.ico')
-            : path.join(app.getAppPath(), 'assets', 'icon.ico'),
+        icon: getAppIconPath(),
         backgroundColor: 'rgba(0,0,0,0)',
         titleBarStyle: 'hidden' as const,
         frame: false, // Key setting
@@ -1285,6 +1306,7 @@ function createMainWindow() {
     };
     console.log('[main] Creating main window with options:', JSON.stringify(windowOptions, null, 2)); // Log the options
     mainWindow = new BrowserWindow(windowOptions);
+    mainWindow.setIcon(getAppIconPath());
 
     const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
     mainWindow.loadURL(

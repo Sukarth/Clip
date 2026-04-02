@@ -62,6 +62,7 @@
     "icon": "assets/icon.ico",
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "src/preload.js",
       "native/SendPaste.exe",
       "native/AutoHotkey.exe",
@@ -152,6 +153,10 @@
       "warningsAsErrors": false
     },
     "extraResources": [
+      {
+        "from": "assets/icon.ico",
+        "to": "icon.ico"
+      },
       {
         "from": "native/AutoHotkey.exe",
         "to": "AutoHotkey.exe"
