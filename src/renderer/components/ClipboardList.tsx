@@ -306,32 +306,32 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                         )}
                                         {!isTemporary && (
                                             <button
-                                            className="clip-delete-btn"
-                                            tabIndex={-1}
-                                            style={{
-                                                background: 'none',
-                                                border: 'none',
-                                                padding: 0,
-                                                marginLeft: 2,
-                                                marginTop: 2,
-                                                cursor: 'pointer',
-                                                outline: 'none',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                opacity: 0.7,
-                                                transition: 'opacity 0.2s',
-                                                height: 25,
-                                                width: 25,
-                                            }}
-                                            title="Delete"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDeleteItem(item);
-                                            }}
-                                            onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
-                                            onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
-                                        >
-                                            <IconGlyph value={themeIcons.delete} fallback="🗑️" label="Delete" size={17} />
+                                                className="clip-delete-btn"
+                                                tabIndex={-1}
+                                                style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    padding: 0,
+                                                    marginLeft: 2,
+                                                    marginTop: 2,
+                                                    cursor: 'pointer',
+                                                    outline: 'none',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    opacity: 0.7,
+                                                    transition: 'opacity 0.2s',
+                                                    height: 25,
+                                                    width: 25,
+                                                }}
+                                                title="Delete"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteItem(item);
+                                                }}
+                                                onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                                                onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+                                            >
+                                                <IconGlyph value={themeIcons.delete} fallback="🗑️" label="Delete" size={17} />
                                             </button>
                                         )}
                                     </div>
