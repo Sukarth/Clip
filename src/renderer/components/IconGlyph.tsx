@@ -44,13 +44,37 @@ function withFileProtocolIfNeeded(value: string): string {
     return value;
 }
 
+function sanitizeInlineSvg(svg: string): string | null {
+    const trimmed = svg.trim();
+    if (!/^<svg[\s>]/i.test(trimmed) || !/<\/svg>\s*$/i.test(trimmed)) {
+        return null;
+    }
+
+    let sanitized = trimmed;
+    sanitized = sanitized.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+    sanitized = sanitized.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    sanitized = sanitized.replace(/\s(?:href|xlink:href)\s*=\s*("|')\s*(?:javascript:|data:|https?:|file:)[\s\S]*?\1/gi, '');
+
+    const normalized = sanitized.trim();
+    if (!/^<svg[\s>]/i.test(normalized) || !/<\/svg>\s*$/i.test(normalized)) {
+        return null;
+    }
+
+    return normalized;
+}
+
 function iconToImageSource(icon: string): string | null {
     const trimmed = icon.trim();
     if (!trimmed) return null;
     const lower = trimmed.toLowerCase();
 
     if (trimmed.startsWith('<svg') && trimmed.endsWith('</svg>')) {
-        return `data:image/svg+xml;utf8,${encodeURIComponent(trimmed)}`;
+        const sanitized = sanitizeInlineSvg(trimmed);
+        if (!sanitized) {
+            return null;
+        }
+
+        return `data:image/svg+xml;utf8,${encodeURIComponent(sanitized)}`;
     }
 
     if (
@@ -88,6 +112,30 @@ const IconGlyph: React.FC<IconGlyphProps> = ({
 
     const source = imgErrored ? null : iconToImageSource(value);
     if (source) {
+        if (tint) {
+            return (
+                <span
+                    role="img"
+                    aria-label={label}
+                    title={label}
+                    style={{
+                        display: 'inline-block',
+                        width: size,
+                        height: size,
+                        backgroundColor: tint,
+                        WebkitMaskImage: `url("${source}")`,
+                        maskImage: `url("${source}")`,
+                        WebkitMaskRepeat: 'no-repeat',
+                        maskRepeat: 'no-repeat',
+                        WebkitMaskPosition: 'center',
+                        maskPosition: 'center',
+                        WebkitMaskSize: 'contain',
+                        maskSize: 'contain',
+                    }}
+                />
+            );
+        }
+
         return (
             <img
                 src={source}
@@ -97,7 +145,6 @@ const IconGlyph: React.FC<IconGlyphProps> = ({
                     width: size,
                     height: size,
                     objectFit: 'contain',
-                    filter: tint ? `drop-shadow(0 0 0 ${tint})` : undefined,
                 }}
             />
         );

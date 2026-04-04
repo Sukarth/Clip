@@ -11,8 +11,9 @@ interface UseShortcutDraftArgs {
 export function useShortcutDraft({ settingsDraft, settings, setSettingsDraft }: UseShortcutDraftArgs) {
     const [shortcutModifiers, setShortcutModifiers] = React.useState<string[]>(() => {
         const shortcut = settingsDraft?.globalShortcut ?? settings.globalShortcut;
-        return shortcut
-            .split('+')
+        const parts = shortcut.split('+');
+        return parts
+            .slice(0, -1)
             .filter((k) => MODIFIER_OPTIONS.some((opt) => opt.value.toLowerCase() === k.toLowerCase()));
     });
 
@@ -27,12 +28,21 @@ export function useShortcutDraft({ settingsDraft, settings, setSettingsDraft }: 
     React.useEffect(() => {
         const shortcut = settingsDraft?.globalShortcut ?? settings.globalShortcut;
         const parts = shortcut.split('+');
-        setShortcutModifiers(
-            parts.slice(0, -1).filter((k) =>
-                MODIFIER_OPTIONS.some((opt) => opt.value.toLowerCase() === k.toLowerCase()),
-            ),
+        const newModifiers = parts.slice(0, -1).filter((k) =>
+            MODIFIER_OPTIONS.some((opt) => opt.value.toLowerCase() === k.toLowerCase()),
         );
-        setShortcutMainKey(parts[parts.length - 1] || '');
+        const newMainKey = parts[parts.length - 1] || '';
+
+        setShortcutModifiers((prev) => {
+            const modifiersMatch =
+                newModifiers.length === prev.length &&
+                newModifiers.every(
+                    (modifier, index) => modifier.toLowerCase() === (prev[index] || '').toLowerCase(),
+                );
+            return modifiersMatch ? prev : newModifiers;
+        });
+
+        setShortcutMainKey((prev) => (newMainKey.toLowerCase() === prev.toLowerCase() ? prev : newMainKey));
     }, [settingsDraft?.globalShortcut, settings.globalShortcut]);
 
     React.useEffect(() => {

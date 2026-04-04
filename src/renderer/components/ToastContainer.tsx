@@ -35,6 +35,16 @@ const Toast: React.FC<{
         <div
             className={`toast-message ${message.isFadingOut ? 'removing' : ''}`}
             onClick={() => onDismiss(message.id)}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+                    if (event.key === ' ' || event.key === 'Spacebar') {
+                        event.preventDefault();
+                    }
+                    onDismiss(message.id);
+                }
+            }}
+            role="button"
+            tabIndex={0}
             style={{
                 background: bgColor,
                 color: '#fff',
@@ -62,6 +72,8 @@ const ToastContainer: React.FC<ToastContainerProps> = ({
     onDismiss,
     onClearAll,
 }) => {
+    const activeToasts = React.useMemo(() => toasts.filter((toast) => !toast.isFadingOut), [toasts]);
+
     if (toasts.length === 0) return null;
 
     return (
@@ -77,9 +89,19 @@ const ToastContainer: React.FC<ToastContainerProps> = ({
                 zIndex: 9999,
             }}
         >
-            {toasts.length > 1 && (
+            {activeToasts.length > 1 && (
                 <div
                     onClick={onClearAll}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+                            if (event.key === ' ' || event.key === 'Spacebar') {
+                                event.preventDefault();
+                            }
+                            onClearAll();
+                        }
+                    }}
+                    role="button"
+                    tabIndex={0}
                     style={{
                         fontSize: 12,
                         color: '#ccc',

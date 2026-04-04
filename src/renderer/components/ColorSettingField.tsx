@@ -125,6 +125,7 @@ const ColorSettingField: React.FC<ColorSettingFieldProps> = ({ label, value, onC
                 <input
                     className="settings-input"
                     type="text"
+                    aria-label={`${label} value`}
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
                     style={{

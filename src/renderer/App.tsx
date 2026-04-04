@@ -8,7 +8,7 @@ import { log, isDev } from '../logger';
 import {
     DEFAULT_SETTINGS,
 } from './app-constants';
-import type { BackupEntry, ClipboardItem, Settings } from './app-types';
+import type { BackupEntry, Settings } from './app-types';
 import AppDialogs from './components/AppDialogs';
 import AppInlineStyles from './components/AppInlineStyles';
 import ClipboardList from './components/ClipboardList';
@@ -19,6 +19,7 @@ import SettingsDataSection from './components/SettingsDataSection';
 import SettingsGeneralSection from './components/SettingsGeneralSection';
 import SettingsModalFooter from './components/SettingsModalFooter';
 import SettingsThemeSection from './components/SettingsThemeSection';
+import { useClipboardManager } from './hooks/useClipboardManager';
 import { useShortcutDraft } from './hooks/useShortcutDraft';
 import { useThemeConfigManager } from './hooks/useThemeConfigManager';
 import { useToastManager } from './hooks/useToastManager';
@@ -29,10 +30,22 @@ import {
 } from '../theme-config';
 
 const App: React.FC = () => {
-    const [items, setItems] = useState<ClipboardItem[]>([]);
     const [settings, setSettings] = useState<Settings>(() => {
         const saved = localStorage.getItem('clip-settings');
-        return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+        if (!saved) {
+            return DEFAULT_SETTINGS;
+        }
+
+        try {
+            const parsed = JSON.parse(saved);
+            if (parsed && typeof parsed === 'object') {
+                return { ...DEFAULT_SETTINGS, ...parsed };
+            }
+        } catch {
+            localStorage.removeItem('clip-settings');
+        }
+
+        return DEFAULT_SETTINGS;
     });
     const { toasts, showToast, dismissToast, clearAllToasts } = useToastManager();
 
@@ -99,20 +112,21 @@ const App: React.FC = () => {
     const [isWindowFocused, setIsWindowFocused] = useState(document.hasFocus()); // Track window focus state
     const [listForceKey, setListForceKey] = useState(0); // Force virtualizer remount on visibility changes
     const [isAnimatingList, setIsAnimatingList] = useState(true); // Track if list should animate
-    const [hasLoadedInitially, setHasLoadedInitially] = useState(false); // Track if we've loaded items at least once
-    const [isInitialLoading, setIsInitialLoading] = React.useState(true); // Track only the very first load
-
-    // High-performance persistent cache system
-    const [itemsCache, setItemsCache] = useState<ClipboardItem[]>([]);
-    const [isCacheLoaded, setIsCacheLoaded] = useState(false);
-    const [lastCacheUpdate, setLastCacheUpdate] = useState(0);
-    const cacheValidDuration = 30000; // 30 seconds cache validity
 
     // Restore settings modal state and draft from localStorage
     const [showSettings, setShowSettings] = useState(() => localStorage.getItem('clip-showSettings') === 'true');
     const [settingsDraft, setSettingsDraft] = useState<Settings | null>(() => {
         const draft = localStorage.getItem('clip-settingsDraft');
-        return draft ? JSON.parse(draft) : null;
+        if (!draft) {
+            return null;
+        }
+
+        try {
+            return JSON.parse(draft);
+        } catch {
+            localStorage.removeItem('clip-settingsDraft');
+            return null;
+        }
     });
 
     const persistSettings = useCallback((nextSettings: Settings, persistDraft = false) => {
@@ -160,6 +174,36 @@ const App: React.FC = () => {
     const [isRestartDialogClosing, setIsRestartDialogClosing] = useState(false);
     const [isUnsavedChangesDialogClosing, setIsUnsavedChangesDialogClosing] = useState(false);
 
+    const handleWindowWillShow = useCallback(() => {
+        setIsWindowFocused(true);
+        setIsAnimatingList(true);
+        setListForceKey((k) => k + 1);
+    }, []);
+
+    const {
+        items,
+        hasLoadedInitially,
+        isInitialLoading,
+        itemsCache,
+        lastCacheUpdate,
+        useCacheIfValid,
+        requestClipboardHistory,
+        deleteTarget,
+        isDeleteDialogClosing,
+        handleClearAll,
+        handlePaste,
+        handleTogglePin,
+        handleDeleteItem,
+        confirmDelete,
+        handleDeleteDialogClose,
+    } = useClipboardManager({
+        settings,
+        showToast,
+        logger: log,
+        onWindowWillShow: handleWindowWillShow,
+        onAfterClearAll: () => setDangerAction(null),
+    });
+
     const {
         shortcutModifiers,
         setShortcutModifiers,
@@ -176,9 +220,9 @@ const App: React.FC = () => {
     // Handle system theme changes
     const handleSystemThemeChange = () => {
         // Force re-render when system theme changes (when using 'system' theme setting)
-        // if (settings.theme === 'system') {
-        setSettings({ ...settings });
-        // }
+        if (settings.theme === 'system') {
+            setSettings({ ...settings });
+        }
     };
 
     // --- Backup restore dropdown state ---
@@ -232,7 +276,7 @@ const App: React.FC = () => {
         } catch (error) {
             showToast('error', `Failed to reload settings from disk: ${error instanceof Error ? error.message : String(error)}`);
         }
-    }, [editorThemeProfile, persistSettings, settings, themeConfig, themeEditorConfig]);
+    }, [editorThemeProfile, persistSettings, settings, showToast, themeConfig, themeEditorConfig]);
 
     const copyTextToClipboard = useCallback(async (value: string, label: string) => {
         try {
@@ -251,7 +295,7 @@ const App: React.FC = () => {
                 showToast('error', `Failed to copy ${label.toLowerCase()}: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
-    }, []);
+    }, [showToast]);
 
     useEffect(() => {
         const onMouseMove = (event: MouseEvent) => {
@@ -450,9 +494,6 @@ const App: React.FC = () => {
         }
     }, [settingsDraft]);
 
-    // Delete clipboard item
-    const [deleteTarget, setDeleteTarget] = useState<ClipboardItem | null>(null);
-    const [isDeleteDialogClosing, setIsDeleteDialogClosing] = useState(false);
     // Add state for restart confirmation dialog
     const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
@@ -506,11 +547,7 @@ const App: React.FC = () => {
                         setIsDangerDialogClosing(false);
                     }, 300);
                 } else if (deleteTarget) {
-                    setIsDeleteDialogClosing(true);
-                    setTimeout(() => {
-                        setDeleteTarget(null);
-                        setIsDeleteDialogClosing(false);
-                    }, 300);
+                    handleDeleteDialogClose();
                 } else if (showThemeProfileDeleteConfirm) {
                     setIsThemeProfileDeleteDialogClosing(true);
                     setTimeout(() => {
@@ -542,7 +579,7 @@ const App: React.FC = () => {
         };
         window.addEventListener('keydown', escHandler);
         return () => window.removeEventListener('keydown', escHandler);
-    }, [showMaxItemsWarning, isMaxItemsWarningClosing, dangerAction, isDangerDialogClosing, showThemeProfileDeleteConfirm, isThemeProfileDeleteDialogClosing, showThemeProfileResetConfirm, isThemeProfileResetDialogClosing, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, restartReason, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges, backupDeleteAction, isBackupDeleteDialogClosing]);
+    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges, backupDeleteAction, handleDeleteDialogClose]);
 
     // Force refresh when Ctrl+Shift+V is pressed (global shortcut)
     // This effect is now primarily for development/debugging if needed,
@@ -560,18 +597,6 @@ const App: React.FC = () => {
     //     return () => window.removeEventListener('keydown', handleShortcut);
     // }, []);
 
-    // Listen for 'force-refresh' event from main process and request clipboard history
-    useEffect(() => {
-        if (!window.electronAPI?.onForceRefresh) return;
-        const handler = () => {
-            window.electronAPI?.requestClipboardHistory?.();
-        };
-        const dispose = window.electronAPI.onForceRefresh(handler);
-        return () => {
-            if (typeof dispose === 'function') dispose();
-        };
-    }, []);
-
     // Click-away to close clipboard window (when hide is selected)
     useEffect(() => {
         if (settings.windowHideBehavior !== 'hide') return;
@@ -586,83 +611,6 @@ const App: React.FC = () => {
         return () => document.removeEventListener('mousedown', handleClick);
     }, [settings.windowHideBehavior, showSettings]);
 
-    // Smart cache system for instant display when window shows
-    const useCacheIfValid = useCallback(() => {
-        const now = Date.now();
-        const cacheAge = now - lastCacheUpdate;
-
-        if (isCacheLoaded && cacheAge < cacheValidDuration && itemsCache.length > 0) {
-            log.renderer(`Cache: Using valid cache (${cacheAge}ms old, ${itemsCache.length} items)`);
-            setItems(itemsCache);
-            setHasLoadedInitially(true);
-
-            // Force scrollbar detection after cache load
-            setTimeout(() => {
-                const el = listRef.current;
-                if (el) {
-                    const hasScroll = el.scrollHeight > el.clientHeight;
-                    log.renderer(`Scrollbar cache load check: scrollHeight=${el.scrollHeight}, clientHeight=${el.clientHeight}, hasScroll=${hasScroll}`);
-                    setHasScrollbar(hasScroll);
-                }
-            }, 50); // Slightly longer delay to ensure DOM is updated
-
-            return true;
-        }
-        return false;
-    }, [isCacheLoaded, lastCacheUpdate, cacheValidDuration, itemsCache]);
-
-    // Enhanced clipboard history handler with persistent cache
-    useEffect(() => {
-        let isMounted = true;
-
-        const handleHistory = (history: any[]) => {
-            if (isMounted) {
-                const processedItems = history.map((item: any) => ({ ...item, id: String(item.id) }));
-
-                // Update cache immediately
-                setItemsCache(processedItems);
-                setLastCacheUpdate(Date.now());
-                setIsCacheLoaded(true);
-
-                // Update display items
-                setItems(processedItems);
-                setHasLoadedInitially(true);
-
-                // Only set isInitialLoading to false after the very first load
-                setIsInitialLoading(false);
-
-                log.renderer(`Cache: Updated cache with ${processedItems.length} items`);
-            }
-        };
-
-        const dispose = window.electronAPI?.onClipboardHistory?.(handleHistory);
-
-        // Show welcome message on startup
-        setTimeout(() => {
-            showToast('info', 'Welcome to Clip! Your clipboard history is ready.');
-        }, 1000);
-
-        return () => {
-            isMounted = false;
-            if (typeof dispose === 'function') dispose();
-        };
-    }, []);
-
-    // Listen for new clipboard items and intelligently refresh cache
-    useEffect(() => {
-        const handler = () => {
-            // Invalidate cache since we have new clipboard data
-            setLastCacheUpdate(0); // Force cache refresh on next request
-
-            // Request updated history
-            window.electronAPI?.requestClipboardHistory?.();
-        };
-        const dispose = window.electronAPI?.onClipboardItem?.(handler);
-        return () => {
-            if (typeof dispose === 'function') dispose();
-        };
-    }, []);
-
     // Send backup settings to main process when settings change
     useEffect(() => {
         window.electronAPI?.setBackupSettings?.({
@@ -671,18 +619,6 @@ const App: React.FC = () => {
             maxBackups: settings.maxBackups,
         });
     }, [settings.enableBackups, settings.backupInterval, settings.maxBackups]);
-
-    // Clear all clipboard items (send IPC to main, rely on main for update)
-    const handleClearAll = () => {
-        // Invalidate cache since we're clearing all data
-        setLastCacheUpdate(0);
-        setItemsCache([]);
-        setIsCacheLoaded(false);
-
-        window.electronAPI?.clearClipboardHistory?.();
-        setDangerAction(null);
-        showToast('success', 'Clipboard history cleared successfully');
-    };
 
     // Send windowHideBehavior and showInTaskbar settings to main process
     useEffect(() => {
@@ -707,58 +643,7 @@ const App: React.FC = () => {
         }
     }, [settings.globalShortcut]);
 
-    // Paste clipboard item on click
-    const handlePaste = (item: ClipboardItem) => {
-        log.renderer('handlePaste called for item', item);
-        // @ts-ignore
-        window.electronAPI?.pasteClipboardItem(item);
-    };
-
-    // Pin/unpin a clipboard item
-    function handleTogglePin(item: ClipboardItem) {
-        // Invalidate cache since we're modifying data
-        setLastCacheUpdate(0);
-
-        // If item.id is a string, try to parse as number for DB
-        const dbId = typeof item.id === 'number' ? item.id : parseInt(item.id, 10);
-        if (!isNaN(dbId)) {
-            window.electronAPI?.toggleItemPinned?.(dbId, !item.pinned);
-            // Do not update local state; main will send updated history
-        }
-    }
-
-    function handleDeleteItem(item: ClipboardItem) {
-        if (settings.deleteConfirm) {
-            setDeleteTarget(item);
-            setIsDeleteDialogClosing(false);
-        } else {
-            confirmDelete(item);
-        }
-    }
-
-    function confirmDelete(item: ClipboardItem) {
-        // Invalidate cache since we're modifying data
-        setLastCacheUpdate(0);
-
-        // Send delete request to main; main will reply with updated history
-        // @ts-ignore
-        window.electronAPI?.deleteClipboardItem?.(typeof item.id === 'number' ? item.id : parseInt(item.id, 10));
-        // Close delete dialog after fade-out
-        setIsDeleteDialogClosing(true);
-        setTimeout(() => {
-            setIsDeleteDialogClosing(false);
-            setDeleteTarget(null);
-        }, 300); // match fade-out duration
-    }
-
-    // Handle fade-out for delete dialog
-    const handleDeleteDialogClose = () => {
-        setIsDeleteDialogClosing(true);
-        setTimeout(() => {
-            setDeleteTarget(null);
-            setIsDeleteDialogClosing(false);
-        }, 300); // match fade-out duration
-    }    // Export/import settings logic
+    // Export/import settings logic
     const handleExportSettings = () => {
         const data = JSON.stringify(settings, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
@@ -899,13 +784,13 @@ const App: React.FC = () => {
                 if (!useCacheIfValid()) {
                     // Cache miss or invalid - fetch fresh data
                     setTimeout(() => {
-                        window.electronAPI?.requestClipboardHistory?.();
+                        requestClipboardHistory();
                     }, 50); // Reduced delay since cache wasn't available
                 }
 
                 // Always request fresh data in background (but don't block UI)
                 setTimeout(() => {
-                    window.electronAPI?.requestClipboardHistory?.();
+                    requestClipboardHistory();
                 }, 200);
             }
         };
@@ -924,13 +809,13 @@ const App: React.FC = () => {
                 if (!useCacheIfValid()) {
                     // Cache miss or invalid - fetch fresh data
                     setTimeout(() => {
-                        window.electronAPI?.requestClipboardHistory?.();
+                        requestClipboardHistory();
                     }, 50); // Reduced delay since cache wasn't available
                 }
 
                 // Always request fresh data in background
                 setTimeout(() => {
-                    window.electronAPI?.requestClipboardHistory?.();
+                    requestClipboardHistory();
                 }, 200);
             } else if (document.visibilityState === 'hidden') {
                 setIsWindowFocused(false);
@@ -951,7 +836,7 @@ const App: React.FC = () => {
             // Try cache first, then fetch if needed
             if (!useCacheIfValid()) {
                 setTimeout(() => {
-                    window.electronAPI?.requestClipboardHistory?.();
+                    requestClipboardHistory();
                 }, 50);
             }
         } else if (document.visibilityState === 'hidden' || !document.hasFocus()) {
@@ -966,21 +851,7 @@ const App: React.FC = () => {
             window.removeEventListener('blur', handleBlur);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [isWindowFocused, useCacheIfValid]); // Add useCacheIfValid dependency
-
-    useEffect(() => {
-        if (!window.electronAPI?.onWindowWillShow) return;
-        const handleWillShow = () => {
-            setIsWindowFocused(true);
-            setIsAnimatingList(true);
-            setListForceKey(k => k + 1);
-            window.electronAPI?.requestClipboardHistory?.();
-        };
-        const dispose = window.electronAPI.onWindowWillShow(handleWillShow);
-        return () => {
-            if (typeof dispose === 'function') dispose();
-        };
-    }, []);
+    }, [isWindowFocused, requestClipboardHistory, useCacheIfValid]);
 
     useEffect(() => {
         const saveSettingsBeforeQuit = () => {
@@ -1029,11 +900,19 @@ const App: React.FC = () => {
         }, 300);
     };
 
-    const handleUnsavedSave = () => {
+    const handleUnsavedSave = async () => {
+        const actionType = showUnsavedChangesConfirm;
+
         if (settingsDraft) {
             setSettings(settingsDraft);
+
+            try {
+                await Promise.resolve(persistSettings(settingsDraft));
+            } catch (error) {
+                showToast('error', `Failed to save settings: ${error instanceof Error ? error.message : String(error)}`);
+                return;
+            }
         }
-        const actionType = showUnsavedChangesConfirm;
 
         setIsUnsavedChangesDialogClosing(true);
         setTimeout(() => {
@@ -1160,7 +1039,8 @@ const App: React.FC = () => {
         try {
             const backupPath = await window.electronAPI?.createBackup?.();
             if (backupPath) {
-                const filename = backupPath.split('\\').pop() || 'backup';
+                const lastSlash = Math.max(backupPath.lastIndexOf('/'), backupPath.lastIndexOf('\\'));
+                const filename = (lastSlash >= 0 ? backupPath.slice(lastSlash + 1) : backupPath) || 'backup';
                 showToast('success', `Backup created: ${filename}`);
                 setBackupCreated(true);
             } else {
@@ -1378,18 +1258,18 @@ const App: React.FC = () => {
                         }}>
                             <div style={{
                                 padding: '20px 24px',
-                                borderBottom: '1px solid rgba(255,255,255,0.12)',
+                                borderBottom: `1px solid ${themeColors.border}`,
                                 flexShrink: 0,
-                                background: 'rgba(255,255,255,0.02)'
+                                background: themeColors.panelBackground,
                             }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span id='settings-title' style={{ fontWeight: 600, fontSize: 20, color: '#fff' }}>Settings</span>
+                                    <span id='settings-title' style={{ fontWeight: 600, fontSize: 20, color: themeColors.textPrimary }}>Settings</span>
                                     <button
                                         style={{
-                                            background: 'rgba(255,255,255,0.08)',
-                                            border: '1px solid rgba(255,255,255,0.12)',
+                                            background: themeColors.inputBackground,
+                                            border: `1px solid ${themeColors.border}`,
                                             borderRadius: 6,
-                                            color: '#fff',
+                                            color: themeColors.textPrimary,
                                             padding: '6px 8px',
                                             cursor: 'pointer',
                                             fontSize: 16,
@@ -1397,8 +1277,8 @@ const App: React.FC = () => {
                                             transition: 'background 0.2s'
                                         }}
                                         onClick={cancelSettings}
-                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
-                                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+                                        onMouseEnter={e => e.currentTarget.style.background = themeColors.itemHoverBackground}
+                                        onMouseLeave={e => e.currentTarget.style.background = themeColors.inputBackground}
                                         title="Close settings"
                                     >
                                         ✕

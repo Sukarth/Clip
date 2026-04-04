@@ -98,6 +98,8 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
     }, [showToast]);
 
     const switchThemeProfile = React.useCallback(async (profileKey: string) => {
+        const previousEditorConfig = themeEditorConfig;
+
         try {
             const key = normalizeThemeProfileKey(profileKey);
             setThemeEditorConfig((prev) => ({ ...prev, activeProfile: key }));
@@ -108,9 +110,10 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
                 setThemeEditorConfig(sanitized);
             }
         } catch (error) {
+            setThemeEditorConfig(previousEditorConfig);
             showToast('error', `Failed to switch profile: ${error instanceof Error ? error.message : String(error)}`);
         }
-    }, [showToast]);
+    }, [showToast, themeEditorConfig]);
 
     const createThemeProfileFromInput = React.useCallback(async () => {
         const name = newThemeProfileName.trim();
@@ -150,7 +153,6 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
             const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
             const defaultProfile = createDefaultThemeConfig().profiles.default;
             const nextConfig = sanitizeThemeConfig({
-                ...themeConfig,
                 ...themeEditorConfig,
                 activeProfile: profileKey,
                 profiles: {
@@ -162,21 +164,19 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
                 },
             });
 
-            setThemeConfig(nextConfig);
-            setThemeEditorConfig(nextConfig);
-
             const saved = await window.electronAPI?.saveThemeConfig?.(nextConfig);
-            if (saved) {
-                const sanitized = sanitizeThemeConfig(saved);
-                setThemeConfig(sanitized);
-                setThemeEditorConfig(sanitized);
+            if (!saved) {
+                throw new Error('Theme config save did not return a result.');
             }
 
+            const sanitized = sanitizeThemeConfig(saved);
+            setThemeConfig(sanitized);
+            setThemeEditorConfig(sanitized);
             showToast('success', 'Theme profile reset to default.');
         } catch (error) {
             showToast('error', `Failed to reset profile theme: ${error instanceof Error ? error.message : String(error)}`);
         }
-    }, [editorThemeProfile, themeConfig, themeEditorConfig, showToast]);
+    }, [editorThemeProfile, showToast, themeEditorConfig]);
 
     const reloadThemeFromDisk = React.useCallback(async () => {
         try {

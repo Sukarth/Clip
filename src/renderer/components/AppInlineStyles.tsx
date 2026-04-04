@@ -73,8 +73,8 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 .theme-light .clip-root {
                     background: ${themeColors.appBackground};
                     color: ${themeColors.textPrimary};
-                    backdrop-filter: blur(10px);
-                    -webkit-backdrop-filter: blur(10px);
+                    backdrop-filter: blur(${themeSurface.backdropBlur}px);
+                    -webkit-backdrop-filter: blur(${themeSurface.backdropBlur}px);
                 }
 
                 .theme-light .clip-item {
@@ -161,8 +161,9 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 }
 
                 .theme-light button.clip-settings-save-btn:hover {
-                    background: ${settings.accentColor}dd !important;
-                    box-shadow: 0 2px 8px rgba(70, 130, 180, 0.3) !important;
+                    background: ${settings.accentColor} !important;
+                    background: color-mix(in srgb, ${settings.accentColor} 85%, transparent) !important;
+                    box-shadow: 0 2px 8px color-mix(in srgb, ${settings.accentColor} 30%, transparent) !important;
                 }
 
                 .theme-light h2 {

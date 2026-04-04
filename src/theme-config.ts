@@ -61,6 +61,7 @@ export interface ThemeConfig {
 }
 
 export const DEFAULT_THEME_PROFILE_KEY = 'default';
+const THEME_SCHEMA_ID = 'https://clip.local/schemas/clip-theme.schema.json';
 
 const DEFAULT_THEME_PROFILE: ThemeProfile = {
     name: 'Default',
@@ -232,8 +233,17 @@ export function sanitizeThemeConfig(input: unknown): ThemeConfig {
     const sourceProfiles = (source.profiles && typeof source.profiles === 'object' ? source.profiles : {}) as Record<string, unknown>;
 
     const nextProfiles: Record<string, ThemeProfile> = {};
+    const rawKeysByNormalizedKey: Record<string, string> = {};
     for (const [rawKey, profile] of Object.entries(sourceProfiles)) {
         const key = normalizeThemeProfileKey(rawKey);
+        if (nextProfiles[key]) {
+            console.warn(
+                `[theme-config] Duplicate theme profile key after normalization: "${rawKey}" conflicts with "${rawKeysByNormalizedKey[key]}". Keeping the first entry for key "${key}".`,
+            );
+            continue;
+        }
+
+        rawKeysByNormalizedKey[key] = rawKey;
         nextProfiles[key] = sanitizeThemeProfile(profile);
     }
 
@@ -344,7 +354,7 @@ export function getThemeSchema() {
 
     return {
         $schema: 'https://json-schema.org/draft/2020-12/schema',
-        $id: 'https://clip.local/schemas/clip-theme.schema.json',
+        $id: THEME_SCHEMA_ID,
         title: 'Clip theme config',
         description: 'Theme profile configuration for Clip.',
         type: 'object',
@@ -354,7 +364,7 @@ export function getThemeSchema() {
             $schema: {
                 type: 'string',
                 description: 'Schema location used by IDEs for IntelliSense.',
-                default: 'https://json-schema.org/draft/2020-12/schema',
+                default: THEME_SCHEMA_ID,
             },
             version: {
                 type: 'integer',

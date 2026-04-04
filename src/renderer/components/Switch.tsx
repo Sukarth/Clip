@@ -12,53 +12,62 @@ const Switch: React.FC<SwitchProps> = ({
     onChange,
     disabled,
     accentColor = '#2ecc40',
-}) => (
-    <span
-        style={{
-            display: 'inline-block',
-            width: 38,
-            height: 22,
-            borderRadius: 22,
-            background: checked ? accentColor : '#444',
-            position: 'relative',
-            transition: 'background 0.2s',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            opacity: disabled ? 0.5 : 1,
-            verticalAlign: 'middle',
-        }}
-        onClick={() => !disabled && onChange(!checked)}
-        onKeyDown={(event) => {
-            if (disabled) {
-                return;
-            }
-            if (
-                event.key === 'Enter' ||
-                event.key === ' ' ||
-                event.key === 'Spacebar'
-            ) {
-                event.preventDefault();
-                onChange(!checked);
-            }
-        }}
-        tabIndex={disabled ? -1 : 0}
-        role="switch"
-        aria-checked={checked}
-        aria-disabled={disabled}
-    >
+}) => {
+    const [isFocused, setIsFocused] = React.useState(false);
+
+    return (
         <span
             style={{
-                position: 'absolute',
-                left: checked ? 18 : 2,
-                top: 2,
-                width: 18,
-                height: 18,
-                borderRadius: '50%',
-                background: '#fff',
-                boxShadow: '0 1px 4px #0002',
-                transition: 'left 0.2s ease, background 0.2s ease',
+                display: 'inline-block',
+                width: 38,
+                height: 22,
+                borderRadius: 22,
+                background: checked ? accentColor : '#444',
+                position: 'relative',
+                transition: 'background 0.2s, box-shadow 0.2s',
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                opacity: disabled ? 0.5 : 1,
+                verticalAlign: 'middle',
+                boxShadow: isFocused && !disabled
+                    ? `0 0 0 3px color-mix(in srgb, ${accentColor} 45%, transparent)`
+                    : undefined,
             }}
-        />
-    </span>
-);
+            onClick={() => !disabled && onChange(!checked)}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            onKeyDown={(event) => {
+                if (disabled) {
+                    return;
+                }
+                if (
+                    event.key === 'Enter' ||
+                    event.key === ' ' ||
+                    event.key === 'Spacebar'
+                ) {
+                    event.preventDefault();
+                    onChange(!checked);
+                }
+            }}
+            tabIndex={disabled ? -1 : 0}
+            role="switch"
+            aria-checked={checked}
+            aria-disabled={disabled}
+        >
+            <span
+                style={{
+                    position: 'absolute',
+                    left: checked ? 18 : 2,
+                    top: 2,
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    background: '#fff',
+                    boxShadow: '0 1px 4px #0002',
+                    transition: 'left 0.2s ease, background 0.2s ease',
+                }}
+            />
+        </span>
+    );
+};
 
 export default React.memo(Switch);

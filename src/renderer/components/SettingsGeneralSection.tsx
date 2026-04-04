@@ -57,6 +57,7 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
 }) => {
     const accentColor = settingsDraft?.accentColor ?? settings.accentColor;
     const currentMaxItems = settingsDraft?.maxItems ?? settings.maxItems;
+    const shortcutInfoPanelId = 'windows-shortcut-info-panel';
 
     const applyMaxItemsValue = () => {
         if (maxItemsInputValue === null) {
@@ -260,7 +261,7 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
                                             onChange={(e) => {
                                                 setShortcutModifiers((mods) =>
                                                     e.target.checked
-                                                        ? [...mods, opt.value]
+                                                        ? (mods.includes(opt.value) ? mods : [...mods, opt.value])
                                                         : mods.filter((m) => m !== opt.value),
                                                 );
                                             }}
@@ -326,24 +327,32 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
                                 }}
                             >
                                 ⚠️ Not all shortcuts with Windows key are supported.
-                                <span
+                                <button
+                                    type="button"
                                     style={{
                                         color: '#888',
                                         cursor: 'pointer',
                                         textDecoration: 'underline',
                                         marginLeft: 4,
+                                        background: 'transparent',
+                                        border: 'none',
+                                        padding: 0,
+                                        fontSize: 'inherit',
                                     }}
+                                    aria-expanded={showShortcutInfo}
+                                    aria-controls={shortcutInfoPanelId}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         setShowShortcutInfo((v) => !v);
                                     }}
                                 >
                                     {showShortcutInfo ? 'Hide info' : 'More info'}
-                                </span>
+                                </button>
                             </div>
                         )}
                         {shortcutModifiers.includes('Windows') && showShortcutInfo && (
                             <div
+                                id={shortcutInfoPanelId}
                                 style={{
                                     padding: 12,
                                     background: 'rgba(255,255,255,0.03)',
@@ -381,7 +390,17 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
                             max={WINDOW_SIZE_LIMITS.width.max}
                             value={settingsDraft?.windowWidth ?? settings.windowWidth}
                             onChange={(e) =>
-                                setSettingsDraft((s) => (s ? { ...s, windowWidth: clampWindowWidth(e.target.value) } : null))
+                                setSettingsDraft((s) => {
+                                    const base = s ?? settings;
+                                    const parsed = Number(e.target.value);
+                                    return {
+                                        ...base,
+                                        windowWidth: Number.isFinite(parsed) ? parsed : base.windowWidth,
+                                    };
+                                })
+                            }
+                            onBlur={(e) =>
+                                setSettingsDraft((s) => ({ ...(s ?? settings), windowWidth: clampWindowWidth(e.target.value) }))
                             }
                             style={{
                                 borderRadius: 8,
@@ -403,9 +422,17 @@ const SettingsGeneralSection: React.FC<SettingsGeneralSectionProps> = ({
                             max={WINDOW_SIZE_LIMITS.height.max}
                             value={settingsDraft?.windowHeight ?? settings.windowHeight}
                             onChange={(e) =>
-                                setSettingsDraft((s) =>
-                                    s ? { ...s, windowHeight: clampWindowHeight(e.target.value) } : null,
-                                )
+                                setSettingsDraft((s) => {
+                                    const base = s ?? settings;
+                                    const parsed = Number(e.target.value);
+                                    return {
+                                        ...base,
+                                        windowHeight: Number.isFinite(parsed) ? parsed : base.windowHeight,
+                                    };
+                                })
+                            }
+                            onBlur={(e) =>
+                                setSettingsDraft((s) => ({ ...(s ?? settings), windowHeight: clampWindowHeight(e.target.value) }))
                             }
                             style={{
                                 borderRadius: 8,

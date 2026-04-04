@@ -2,7 +2,8 @@ import * as React from 'react';
 import { BACKUP_INTERVALS, sectionHeaderStyle, subHeaderStyle } from '../app-constants';
 import type { BackupEntry, Settings } from '../app-types';
 import Switch from './Switch';
-import { getRelativeTime } from '../theme-utils';
+import BackupActionsPanel from './backups/BackupActionsPanel';
+import BackupListPanel from './backups/BackupListPanel';
 
 interface SettingsBackupsSectionProps {
     settingsDraft: Settings | null;
@@ -45,12 +46,19 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
     setBackupToDelete,
     setBackupDeleteAction,
 }) => {
-    const [isRestoring, setIsRestoring] = React.useState(false);
-
     return (
         <>
             <div>
-                <h2 style={{ ...sectionHeaderStyle, color: '#e1e1e1', fontSize: 16, fontWeight: 600, marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.12)' }}>
+                <h2
+                    style={{
+                        ...sectionHeaderStyle,
+                        color: '#e1e1e1',
+                        fontSize: 16,
+                        fontWeight: 600,
+                        marginBottom: 16,
+                        borderBottom: '1px solid rgba(255,255,255,0.12)',
+                    }}
+                >
                     Backups
                 </h2>
                 <label
@@ -68,7 +76,9 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                         marginBottom: 16,
                     }}
                 >
-                    <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Enable automatic database backups</span>
+                    <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>
+                        Enable automatic database backups
+                    </span>
                     <Switch
                         checked={settingsDraft?.enableBackups ?? settings.enableBackups}
                         onChange={(v) => setSettingsDraft((s) => (s ? { ...s, enableBackups: v } : null))}
@@ -104,7 +114,9 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                                 outline: 'none',
                             }}
                             disabled={!(settingsDraft?.enableBackups ?? settings.enableBackups)}
-                            onFocus={(e) => (e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor)}
+                            onFocus={(e) =>
+                                (e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor)
+                            }
                             onBlur={(e) => (e.target.style.borderColor = 'rgba(255,255,255,0.12)')}
                         >
                             {BACKUP_INTERVALS.map((opt) => (
@@ -138,75 +150,29 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                                 outline: 'none',
                             }}
                             disabled={!(settingsDraft?.enableBackups ?? settings.enableBackups)}
-                            onFocus={(e) => (e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor)}
+                            onFocus={(e) =>
+                                (e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor)
+                            }
                             onBlur={(e) => (e.target.style.borderColor = 'rgba(255,255,255,0.12)')}
                         />
                     </label>
                 </div>
-                <button
-                    className="settings-button"
-                    style={{
-                        background: isBackingUp ? `${settingsDraft?.accentColor ?? settings.accentColor}44` : '#23252a',
-                        border: isBackingUp
-                            ? `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}`
-                            : '1px solid #444',
-                        marginBottom: 15,
-                        borderRadius: 8,
-                        width: '100%',
-                        color: '#fff',
-                        padding: '7px 18px',
-                        cursor: isBackingUp ? 'wait' : 'pointer',
-                        fontWeight: 600,
-                        fontSize: 15,
-                        transition: 'all 0.2s',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 8,
-                        opacity: isBackingUp ? 0.9 : 1,
-                    }}
-                    disabled={isBackingUp}
-                    onClick={async () => {
-                        try {
-                            setIsBackingUp(true);
-                            const backupPath = await window.electronAPI?.createBackup?.();
-                            const newList = (await window.electronAPI?.listBackups?.()) || [];
-                            setBackupList(newList);
-                            setSelectedBackup('');
 
-                            if (backupPath) {
-                                const filename = backupPath.split(/[\\/]/).pop() || 'backup';
-                                showToast('success', `Backup created successfully: ${filename}`);
-                            } else {
-                                showToast('error', 'Could not create backup');
-                            }
-                        } catch (error) {
-                            log.error('Backup error', error instanceof Error ? error.message : String(error));
-                            showToast('error', `Backup failed: ${error instanceof Error ? error.message : String(error)}`);
-                        } finally {
-                            setIsBackingUp(false);
-                        }
-                    }}
-                >
-                    {isBackingUp ? (
-                        <>
-                            <span
-                                style={{
-                                    display: 'inline-block',
-                                    width: '16px',
-                                    height: '16px',
-                                    borderRadius: '50%',
-                                    border: '2px solid rgba(255,255,255,0.3)',
-                                    borderTopColor: '#fff',
-                                    animation: 'spin 1s linear infinite',
-                                }}
-                            ></span>
-                            Creating...
-                        </>
-                    ) : (
-                        'Create Backup Now'
-                    )}
-                </button>
+                <BackupActionsPanel
+                    settingsDraft={settingsDraft}
+                    settings={settings}
+                    isBackingUp={isBackingUp}
+                    setIsBackingUp={setIsBackingUp}
+                    setBackupList={setBackupList}
+                    setSelectedBackup={setSelectedBackup}
+                    showToast={showToast}
+                    log={log}
+                    selectedBackup={selectedBackup}
+                    selectedBackups={selectedBackups}
+                    setSelectedBackups={setSelectedBackups}
+                    showBackupManagement={showBackupManagement}
+                    setBackupDeleteAction={setBackupDeleteAction}
+                />
             </div>
 
             <div>
@@ -255,338 +221,18 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
-                    {backupList.length === 0 ? (
-                        <div
-                            className="settings-display-box"
-                            style={{
-                                padding: 16,
-                                background: 'rgba(255,255,255,0.03)',
-                                borderRadius: 8,
-                                border: '1px solid rgba(255,255,255,0.08)',
-                                textAlign: 'center',
-                                color: '#888',
-                                fontSize: 14,
-                            }}
-                        >
-                            No backups found. Create a backup first.
-                        </div>
-                    ) : (
-                        <>
-                            <div
-                                style={{
-                                    fontSize: 13,
-                                    color: '#aaa',
-                                    marginBottom: 8,
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                }}
-                            >
-                                <span>
-                                    Found {backupList.length} backup{backupList.length !== 1 ? 's' : ''}
-                                </span>
-                                {showBackupManagement && (
-                                    <div style={{ display: 'flex', gap: 8 }}>
-                                        <button
-                                            style={{
-                                                background: 'rgba(255,255,255,0.05)',
-                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                borderRadius: 4,
-                                                color: '#ccc',
-                                                padding: '4px 8px',
-                                                cursor: 'pointer',
-                                                fontSize: 11,
-                                                transition: 'all 0.2s',
-                                            }}
-                                            onClick={() => setSelectedBackups(new Set(backupList.map((b) => b.file)))}
-                                        >
-                                            Select All
-                                        </button>
-                                        <button
-                                            style={{
-                                                background: 'rgba(255,255,255,0.05)',
-                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                borderRadius: 4,
-                                                color: '#ccc',
-                                                padding: '4px 8px',
-                                                cursor: 'pointer',
-                                                fontSize: 11,
-                                                transition: 'all 0.2s',
-                                            }}
-                                            onClick={() => setSelectedBackups(new Set())}
-                                        >
-                                            Clear All
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div
-                                className="settings-display-box"
-                                style={{
-                                    maxHeight: 200,
-                                    overflowY: 'auto',
-                                    border: '1px solid rgba(255,255,255,0.12)',
-                                    borderRadius: 8,
-                                    background: 'rgba(255,255,255,0.03)',
-                                    scrollbarWidth: 'thin',
-                                    scrollbarColor: '#444 transparent',
-                                }}
-                            >
-                                {backupList.map((backup, index) => {
-                                    const date = new Date(backup.time);
-                                    const isValidDate = !isNaN(date.getTime());
-                                    const isSelected = selectedBackup === backup.file;
-                                    const isChecked = selectedBackups.has(backup.file);
-                                    const formattedDate = isValidDate ? date.toLocaleDateString() : '—';
-                                    const formattedTime = isValidDate ? date.toLocaleTimeString() : '';
-                                    const relativeTime = isValidDate ? getRelativeTime(backup.time) : '';
-
-                                    return (
-                                        <div
-                                            key={backup.file}
-                                            style={{
-                                                padding: '12px 16px',
-                                                borderBottom:
-                                                    index < backupList.length - 1
-                                                        ? '1px solid rgba(255,255,255,0.06)'
-                                                        : 'none',
-                                                background: isSelected
-                                                    ? (settingsDraft?.accentColor ?? settings.accentColor) + '22'
-                                                    : isChecked
-                                                        ? 'rgba(255,255,255,0.08)'
-                                                        : 'transparent',
-                                                borderLeft: isSelected
-                                                    ? `3px solid ${settingsDraft?.accentColor ?? settings.accentColor}`
-                                                    : '3px solid transparent',
-                                                transition: 'all 0.2s ease',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 12,
-                                            }}
-                                        >
-                                            {showBackupManagement && (
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isChecked}
-                                                    onChange={(e) => {
-                                                        const newSelected = new Set(selectedBackups);
-                                                        if (e.target.checked) {
-                                                            newSelected.add(backup.file);
-                                                        } else {
-                                                            newSelected.delete(backup.file);
-                                                        }
-                                                        setSelectedBackups(newSelected);
-                                                    }}
-                                                    style={{
-                                                        accentColor: settingsDraft?.accentColor ?? settings.accentColor,
-                                                        width: 16,
-                                                        height: 16,
-                                                        cursor: 'pointer',
-                                                    }}
-                                                />
-                                            )}
-
-                                            <div
-                                                tabIndex={0}
-                                                role="button"
-                                                aria-pressed={isSelected}
-                                                style={{
-                                                    flex: 1,
-                                                    cursor: 'pointer',
-                                                    display: 'flex',
-                                                    flexDirection: 'column',
-                                                    gap: 4,
-                                                }}
-                                            onClick={() => setSelectedBackup(isSelected ? '' : backup.file)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                    e.preventDefault();
-                                                    setSelectedBackup(isSelected ? '' : backup.file);
-                                                }
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                if (!isSelected && !isChecked) {
-                                                    const parent = e.currentTarget.parentElement;
-                                                    if (parent) {
-                                                        parent.style.background = 'rgba(255,255,255,0.05)';
-                                                    }
-                                                }
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                if (!isSelected && !isChecked) {
-                                                    const parent = e.currentTarget.parentElement;
-                                                    if (parent) {
-                                                        parent.style.background = 'transparent';
-                                                    }
-                                                }
-                                            }}
-                                        >
-                                                <div
-                                                    style={{
-                                                        display: 'flex',
-                                                        justifyContent: 'space-between',
-                                                        alignItems: 'flex-start',
-                                                    }}
-                                                >
-                                                    <div
-                                                        style={{
-                                                            fontWeight: 500,
-                                                            fontSize: 14,
-                                                            color: isSelected ? '#fff' : '#ccc',
-                                                        }}
-                                                    >
-                                                        {formattedDate} at {formattedTime}
-                                                    </div>
-                                                    {isSelected && (
-                                                        <div
-                                                            style={{
-                                                                fontSize: 12,
-                                                                color: settingsDraft?.accentColor ?? settings.accentColor,
-                                                                fontWeight: 600,
-                                                            }}
-                                                        >
-                                                            SELECTED
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div style={{ fontSize: 12, color: '#888', fontStyle: 'italic' }}>
-                                                    {relativeTime}
-                                                </div>
-                                                <div
-                                                    style={{
-                                                        fontSize: 11,
-                                                        color: '#666',
-                                                        fontFamily: 'monospace',
-                                                        marginTop: 2,
-                                                    }}
-                                                >
-                                                    {backup.file}
-                                                </div>
-                                            </div>
-
-                                            <button
-                                                style={{
-                                                    background: 'none',
-                                                    border: 'none',
-                                                    color: '#ff4136',
-                                                    cursor: 'pointer',
-                                                    padding: '4px 8px',
-                                                    borderRadius: 4,
-                                                    fontSize: 18,
-                                                    lineHeight: 1,
-                                                    transition: 'background 0.2s',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    minWidth: 32,
-                                                    height: 32,
-                                                }}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setBackupToDelete(backup.file);
-                                                    setBackupDeleteAction('single');
-                                                }}
-                                                onMouseEnter={(e) =>
-                                                    (e.currentTarget.style.background = 'rgba(255,65,54,0.15)')
-                                                }
-                                                onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                                                title="Delete this backup"
-                                            >
-                                                🗑️
-                                            </button>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-
-                            <div style={{ display: 'flex', gap: 12 }}>
-                                <button
-                                    className="settings-button"
-                                    style={{
-                                        background: selectedBackup
-                                            ? settingsDraft?.accentColor ?? settings.accentColor
-                                            : '#23252a',
-                                        border: selectedBackup
-                                            ? `1px solid ${settingsDraft?.accentColor ?? settings.accentColor}`
-                                            : '1px solid #444',
-                                        flex: 1,
-                                        borderRadius: 8,
-                                        color: selectedBackup ? '#000' : '#fff',
-                                        padding: '12px 18px',
-                                        cursor: selectedBackup && !isRestoring ? 'pointer' : 'not-allowed',
-                                        fontWeight: 600,
-                                        fontSize: 15,
-                                        transition: 'all 0.2s',
-                                        opacity: selectedBackup && !isRestoring ? 1 : 0.5,
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: 8,
-                                    }}
-                                    disabled={!selectedBackup || isRestoring}
-                                    onClick={async () => {
-                                        if (!selectedBackup || isRestoring) {
-                                            return;
-                                        }
-
-                                        setIsRestoring(true);
-                                        try {
-                                            const success = await window.electronAPI?.restoreBackup?.(selectedBackup);
-
-                                            if (success) {
-                                                showToast('success', 'Backup restored successfully!');
-                                                setSelectedBackup('');
-                                                const newList = (await window.electronAPI?.listBackups?.()) || [];
-                                                setBackupList(newList);
-                                            } else {
-                                                showToast('error', 'Failed to restore backup.');
-                                            }
-                                        } catch (error) {
-                                            log.error('Restore error', error instanceof Error ? error.message : String(error));
-                                            showToast(
-                                                'error',
-                                                `Restore failed: ${error instanceof Error ? error.message : String(error)}`,
-                                            );
-                                        } finally {
-                                            setIsRestoring(false);
-                                        }
-                                    }}
-                                >
-                                    {isRestoring
-                                        ? 'Restoring...'
-                                        : selectedBackup
-                                            ? '↻ Restore Selected'
-                                            : 'Select backup to restore'}
-                                </button>
-
-                                {showBackupManagement && selectedBackups.size > 0 && (
-                                    <button
-                                        className="settings-button"
-                                        style={{
-                                            background: '#ff4136',
-                                            border: '1px solid #ff4136',
-                                            borderRadius: 8,
-                                            color: '#fff',
-                                            padding: '12px 18px',
-                                            cursor: 'pointer',
-                                            fontWeight: 600,
-                                            fontSize: 15,
-                                            transition: 'all 0.2s',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 8,
-                                            minWidth: 140,
-                                        }}
-                                        onClick={() => setBackupDeleteAction('multiple')}
-                                    >
-                                        🗑️ Delete {selectedBackups.size}
-                                    </button>
-                                )}
-                            </div>
-                        </>
-                    )}
+                    <BackupListPanel
+                        settingsDraft={settingsDraft}
+                        settings={settings}
+                        backupList={backupList}
+                        showBackupManagement={showBackupManagement}
+                        selectedBackups={selectedBackups}
+                        setSelectedBackups={setSelectedBackups}
+                        selectedBackup={selectedBackup}
+                        setSelectedBackup={setSelectedBackup}
+                        setBackupToDelete={setBackupToDelete}
+                        setBackupDeleteAction={setBackupDeleteAction}
+                    />
                 </div>
             </div>
         </>

@@ -12,6 +12,12 @@ const behaviorLabelStyle: React.CSSProperties = {
     marginBottom: 20,
 };
 
+function colorWithAlpha(color: string, alpha: number) {
+    const normalizedAlpha = Math.min(1, Math.max(0, alpha));
+    const percentage = Math.round(normalizedAlpha * 100);
+    return `color-mix(in srgb, ${color} ${percentage}%, transparent)`;
+}
+
 interface SettingsBehaviorSectionProps {
     settingsDraft: Settings | null;
     settings: Settings;
@@ -62,7 +68,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     Show notifications for new clips
                     <Switch
                         checked={settingsDraft?.showNotifications ?? settings.showNotifications}
-                        onChange={(v) => setSettingsDraft((s) => (s ? { ...s, showNotifications: v } : null))}
+                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), showNotifications: v }))}
                         accentColor={accentColor}
                     />
                 </label>
@@ -71,7 +77,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     Start with system
                     <Switch
                         checked={settingsDraft?.startWithSystem ?? settings.startWithSystem}
-                        onChange={(v) => setSettingsDraft((s) => (s ? { ...s, startWithSystem: v } : null))}
+                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), startWithSystem: v }))}
                         accentColor={accentColor}
                     />
                 </label>
@@ -80,7 +86,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     Store images in clipboard history
                     <Switch
                         checked={settingsDraft?.storeImagesInClipboard ?? settings.storeImagesInClipboard}
-                        onChange={(v) => setSettingsDraft((s) => (s ? { ...s, storeImagesInClipboard: v } : null))}
+                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), storeImagesInClipboard: v }))}
                         accentColor={accentColor}
                     />
                 </label>
@@ -89,7 +95,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     Allow pinning favorite items
                     <Switch
                         checked={settingsDraft?.pinFavoriteItems ?? settings.pinFavoriteItems}
-                        onChange={(v) => setSettingsDraft((s) => (s ? { ...s, pinFavoriteItems: v } : null))}
+                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), pinFavoriteItems: v }))}
                         accentColor={accentColor}
                     />
                 </label>
@@ -98,7 +104,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     Ask before deleting items
                     <Switch
                         checked={settingsDraft?.deleteConfirm ?? settings.deleteConfirm}
-                        onChange={(v) => setSettingsDraft((s) => (s ? { ...s, deleteConfirm: v } : null))}
+                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), deleteConfirm: v }))}
                         accentColor={accentColor}
                     />
                 </label>
@@ -166,7 +172,7 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     padding: 18,
                     border: `2px solid ${themeColors.danger}`,
                     borderRadius: 12,
-                    background: `${themeColors.danger}14`,
+                    background: colorWithAlpha(themeColors.danger, 0.08),
                     color: themeColors.danger,
                     display: 'flex',
                     flexDirection: 'column',

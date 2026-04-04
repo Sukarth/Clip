@@ -6,11 +6,11 @@
 
 **A fast, modern, and lightweight clipboard manager for Windows**
 
-[![Version](https://img.shields.io/badge/version-1.1.0--beta-blue.svg)](https://github.com/Sukarth/Clip/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/Sukarth/Clip/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/Sukarth/Clip/releases)
 
-[Download Beta](https://github.com/Sukarth/Clip/releases/latest) • [Report Bug](https://github.com/Sukarth/Clip/issues) • [Request Feature](https://github.com/Sukarth/Clip/issues)
+[Download Latest](https://github.com/Sukarth/Clip/releases/latest) • [Report Bug](https://github.com/Sukarth/Clip/issues) • [Request Feature](https://github.com/Sukarth/Clip/issues)
 
 </div>
 
@@ -33,7 +33,7 @@ Clip is a powerful, modern clipboard manager for Windows built with Electron, Re
 
 ## 📥 Download & Installation
 
-### 🎯 Beta Release Available Now!
+### 🎯 Latest Release Available Now!
 
 **[Get it here...](https://github.com/Sukarth/Clip/releases/latest)**
 
@@ -150,7 +150,7 @@ Clip offers extensive customization options accessible through the settings pane
 
 ## 🤝 Contributing
 
-We welcome contributions! This is a beta release and we're actively looking for:
+We welcome contributions! We're actively looking for:
 
 - 🐛 **Bug Reports** - Help us identify and fix issues
 - 💡 **Feature Requests** - Suggest new features and improvements

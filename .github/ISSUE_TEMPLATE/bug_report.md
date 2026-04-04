@@ -29,7 +29,7 @@ If applicable, add screenshots to help explain your problem.
 ## 💻 System Information
 - **OS**: [e.g. Windows 10, Windows 11]
 - **OS Build**: [e.g. 19044.1234]
-- **Clip Version**: [e.g. 1.0.1]
+- **Clip Version**: [e.g. 1.1.0]
 - **Installation Type**: [Installer / Portable]
 
 ## 📋 Additional Context
@@ -48,4 +48,4 @@ Add any other context about the problem here.
 
 ---
 
-**Note**: This is a beta release. Thank you for helping us improve Clip!
+Thank you for helping us improve Clip!

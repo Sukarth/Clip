@@ -50,6 +50,13 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
     handleDeleteItem,
 }) => {
     const scrollbarPadding = hasScrollbar ? 8 : 0;
+    const isLightTheme = settings.theme === 'light';
+    const skeletonCardBackground = isLightTheme ? 'rgba(15,23,42,0.05)' : 'rgba(255,255,255,0.02)';
+    const skeletonBarBackground = isLightTheme ? 'rgba(15,23,42,0.1)' : 'rgba(255,255,255,0.06)';
+    const skeletonShimmer = isLightTheme
+        ? 'linear-gradient(90deg, transparent, rgba(15,23,42,0.12), transparent)'
+        : 'linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)';
+    const skeletonMetaBackground = isLightTheme ? 'rgba(15,23,42,0.08)' : 'rgba(255,255,255,0.04)';
 
     React.useEffect(() => {
         logger.renderer(`Scrollbar: Applying paddingRight: ${scrollbarPadding} (hasScrollbar: ${hasScrollbar})`);
@@ -80,7 +87,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                             key={`skeleton-${i}`}
                             className={`clip-item-skeleton ${isAnimatingList ? 'clip-item-animate' : ''}`}
                             style={{
-                                background: 'rgba(255,255,255,0.02)',
+                                background: skeletonCardBackground,
                                 borderRadius: 12,
                                 margin: 0,
                                 padding: '2.5% 3%',
@@ -95,7 +102,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                 style={{
                                     flex: 1,
                                     height: 16,
-                                    background: 'rgba(255,255,255,0.06)',
+                                    background: skeletonBarBackground,
                                     borderRadius: 4,
                                     position: 'relative',
                                     overflow: 'hidden',
@@ -108,8 +115,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                         left: '-100%',
                                         width: '100%',
                                         height: '100%',
-                                        background:
-                                            'linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)',
+                                        background: skeletonShimmer,
                                         animation: 'skeleton-shimmer 2s infinite',
                                     }}
                                 />
@@ -118,7 +124,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                 style={{
                                     width: 60,
                                     height: 12,
-                                    background: 'rgba(255,255,255,0.04)',
+                                    background: skeletonMetaBackground,
                                     borderRadius: 4,
                                 }}
                             />
@@ -175,19 +181,19 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                     boxSizing: 'border-box',
                                 }}
                             >
-                            <div
-                                className={`clip-item clip-item-${item.type} ${isTemporary ? 'clip-item-temporary' : ''} ${isAnimatingList ? 'clip-item-animate' : ''}`}
-                                tabIndex={0}
-                                role="button"
-                                aria-label={`Clipboard item: ${item.type === 'image' ? 'Image' : `${item.content.slice(0, 50)}${item.content.length > 50 ? '...' : ''}`}`}
-                                onClick={() => handlePaste(item)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault();
-                                        handlePaste(item);
-                                    }
-                                }}
-                                style={{
+                                <div
+                                    className={`clip-item clip-item-${item.type} ${isTemporary ? 'clip-item-temporary' : ''} ${isAnimatingList ? 'clip-item-animate' : ''}`}
+                                    tabIndex={0}
+                                    role="button"
+                                    aria-label={`Clipboard item: ${item.type === 'image' ? 'Image' : `${item.content.slice(0, 50)}${item.content.length > 50 ? '...' : ''}`}`}
+                                    onClick={() => handlePaste(item)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            handlePaste(item);
+                                        }
+                                    }}
+                                    style={{
                                         background: itemBackground,
                                         borderRadius: 12,
                                         margin: 0,
@@ -210,7 +216,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                         <img
                                             className="clip-item-image"
                                             src={item.content}
-                                            alt="clip"
+                                            alt={`Clipboard image: ${item.timestamp ? new Date(item.timestamp).toLocaleString() : 'saved'}${isTemporary ? ' (temporary)' : ''}`}
                                             style={{
                                                 width: '13%',
                                                 minWidth: 36,

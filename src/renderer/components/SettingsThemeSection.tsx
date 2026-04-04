@@ -220,7 +220,9 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                                 value={settingsDraft?.theme ?? settings.theme}
                                 onChange={(e) =>
                                     setSettingsDraft((s) =>
-                                        s ? { ...s, theme: e.target.value as Settings['theme'] } : null,
+                                        s
+                                            ? { ...s, theme: e.target.value as Settings['theme'] }
+                                            : { ...settings, theme: e.target.value as Settings['theme'] },
                                     )
                                 }
                                 style={{
@@ -254,7 +256,7 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                                             accent: nextValue,
                                         },
                                     }));
-                                    setSettingsDraft((s) => (s ? { ...s, accentColor: nextValue } : null));
+                                    setSettingsDraft((s) => (s ? { ...s, accentColor: nextValue } : { ...settings, accentColor: nextValue }));
                                 }}
                             />
                         </div>

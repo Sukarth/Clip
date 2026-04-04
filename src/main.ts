@@ -64,6 +64,7 @@ let cacheTimestamp = 0;
 const CACHE_DURATION = 3000; // 3 seconds cache
 let isHistoryLoading = false;
 let pendingHistoryRequests: Array<(data: any[]) => void> = [];
+let clipboardPollTimer: NodeJS.Timeout | null = null;
 type ClipboardHistoryItem = {
     id: string;
     type: 'text' | 'image';
@@ -200,7 +201,7 @@ function setTemporaryClipboardItem(item: ClipboardHistoryItem | null) {
     invalidateHistoryCache();
 }
 
-function ahkShortcutString(shortcut: string) {
+function ahkShortcutString(shortcut: string): string | null {
     const toAhkMainKey = (mainKey: string) => {
         const key = mainKey.trim();
         const lower = key.toLowerCase();
@@ -246,7 +247,15 @@ function ahkShortcutString(shortcut: string) {
         .map((t) => t.trim())
         .filter(Boolean);
 
+    if (tokens.length === 0) {
+        return null;
+    }
+
     const mainKeyToken = tokens[tokens.length - 1] ?? '';
+    if (!mainKeyToken) {
+        return null;
+    }
+
     const modifierTokens = tokens.slice(0, -1);
 
     const modifierSymbols: string[] = [];
@@ -264,11 +273,19 @@ function ahkShortcutString(shortcut: string) {
     }
 
     const mainKey = toAhkMainKey(mainKeyToken);
+    if (!mainKey) {
+        return null;
+    }
+
     return modifierSymbols.join('') + mainKey;
 }
 
-function generateAhkScript(shortcut: string) {
+function generateAhkScript(shortcut: string): string | null {
     const ahkHotkey = ahkShortcutString(shortcut);
+    if (!ahkHotkey) {
+        return null;
+    }
+
     return `#NoTrayIcon
 #SingleInstance Force
 
@@ -375,7 +392,13 @@ function startAhkProcess(shortcut: string) {
 
         // Write temp AHK script to portable-aware data directory
         const tempScriptPath = path.join(getAppDataPath(), 'clip_win_keybinds.ahk');
-        fs.writeFileSync(tempScriptPath, generateAhkScript(shortcut), 'utf8');
+        const script = generateAhkScript(shortcut);
+        if (!script) {
+            console.error(`[main] Invalid shortcut for AHK script generation: ${shortcut}`);
+            return;
+        }
+
+        fs.writeFileSync(tempScriptPath, script, 'utf8');
         lastAhkScriptPath = tempScriptPath;
         console.log(`[main] Generated AHK script at ${tempScriptPath}`);
 
@@ -1086,6 +1109,40 @@ function loadStartupSettings() {
 
 let Database: any = null;
 let db: any;
+const SQLITE_MAGIC_HEADER = Buffer.from('SQLite format 3\u0000', 'utf8');
+
+function isSqliteBuffer(value: Buffer) {
+    if (!Buffer.isBuffer(value)) {
+        return false;
+    }
+
+    if (value.length < SQLITE_MAGIC_HEADER.length) {
+        return false;
+    }
+
+    return value.subarray(0, SQLITE_MAGIC_HEADER.length).equals(SQLITE_MAGIC_HEADER);
+}
+
+function ensureDatabaseSchema(database: any) {
+    database.exec(`CREATE TABLE IF NOT EXISTS history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        content BLOB NOT NULL,
+        timestamp INTEGER NOT NULL
+    )`);
+    const columns = database.prepare("PRAGMA table_info(history)").all();
+    const hasPinned = columns.some((col: any) => col.name === 'pinned');
+    if (!hasPinned) {
+        database.exec('ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0');
+    }
+
+    database.exec(`CREATE TABLE IF NOT EXISTS app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+    )`);
+}
+
 function initDatabase() {
     if (!Database) {
         Database = require('better-sqlite3');
@@ -1093,24 +1150,7 @@ function initDatabase() {
     const dbPath = getDatabasePath();
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
-    db.exec(`CREATE TABLE IF NOT EXISTS history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT NOT NULL,
-        content BLOB NOT NULL,
-        timestamp INTEGER NOT NULL
-    )`);
-    const columns = db.prepare("PRAGMA table_info(history)").all();
-    const hasPinned = columns.some((col: any) => col.name === 'pinned');
-    if (!hasPinned) {
-        db.exec('ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0');
-    }
-
-    db.exec(`CREATE TABLE IF NOT EXISTS app_state (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-    )`);
-
+    ensureDatabaseSchema(db);
 }
 
 // Insert clipboard item into DB
@@ -1411,7 +1451,11 @@ function pollClipboard() {
     // Preload initial clipboard history in cache
     getClipboardHistoryAsync();
 
-    setInterval(() => {
+    if (clipboardPollTimer) {
+        clearInterval(clipboardPollTimer);
+    }
+
+    clipboardPollTimer = setInterval(() => {
         const text = clipboard.readText();
         const image = clipboard.readImage();
         let imageDataUrl = '';
@@ -1627,25 +1671,7 @@ function restoreBackup(backupFile: string) {
     console.log('[main] Reinitializing database connection');
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
-
-    // Ensure the restored database has the correct schema
-    db.exec(`CREATE TABLE IF NOT EXISTS history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT NOT NULL,
-        content BLOB NOT NULL,
-        timestamp INTEGER NOT NULL
-    )`);
-    const columns = db.prepare("PRAGMA table_info(history)").all();
-    const hasPinned = columns.some((col: any) => col.name === 'pinned');
-    if (!hasPinned) {
-        db.exec('ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0');
-    }
-
-    db.exec(`CREATE TABLE IF NOT EXISTS app_state (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-    )`);
+    ensureDatabaseSchema(db);
 
     // Verify the restore worked by counting records
     const count = db.prepare('SELECT COUNT(*) as count FROM history').get() as { count: number };
@@ -1726,39 +1752,36 @@ ipcMain.handle('export-db', () => {
     return fs.readFileSync(dbPath);
 });
 ipcMain.handle('import-db', async (event, buffer) => {
+    const dbPath = getDatabasePath();
+    const backupPath = `${dbPath}.bak`;
+    const incoming = Buffer.from(buffer);
+
+    if (!isSqliteBuffer(incoming)) {
+        console.error('[main] import-db rejected: incoming file is not a valid SQLite database');
+        return false;
+    }
+
+    let backupCreated = false;
+
     try {
-        const dbPath = getDatabasePath();
+        if (fs.existsSync(dbPath)) {
+            fs.copyFileSync(dbPath, backupPath);
+            backupCreated = true;
+        }
 
         // Close the current database connection
         if (db) {
             db.close();
+            db = null;
         }
 
         // Write the imported database file
-        fs.writeFileSync(dbPath, Buffer.from(buffer));
+        fs.writeFileSync(dbPath, incoming);
 
         // Reinitialize the database connection with the imported data
         db = new Database(dbPath);
         db.pragma('journal_mode = WAL');
-
-        // Ensure the imported database has the correct schema
-        db.exec(`CREATE TABLE IF NOT EXISTS history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT NOT NULL,
-            content BLOB NOT NULL,
-            timestamp INTEGER NOT NULL
-        )`);
-        const columns = db.prepare("PRAGMA table_info(history)").all();
-        const hasPinned = columns.some((col: any) => col.name === 'pinned');
-        if (!hasPinned) {
-            db.exec('ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0');
-        }
-
-        db.exec(`CREATE TABLE IF NOT EXISTS app_state (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at INTEGER NOT NULL
-        )`);
+        ensureDatabaseSchema(db);
 
         // Small delay to ensure database operations are complete
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -1775,6 +1798,19 @@ ipcMain.handle('import-db', async (event, buffer) => {
         return true;
     } catch (error) {
         console.error('[main] Error during database import:', error);
+
+        try {
+            if (backupCreated && fs.existsSync(backupPath)) {
+                fs.copyFileSync(backupPath, dbPath);
+                db = new Database(dbPath);
+                db.pragma('journal_mode = WAL');
+                ensureDatabaseSchema(db);
+                console.log('[main] Database restored from backup after import failure');
+            }
+        } catch (restoreError) {
+            console.error('[main] Failed to restore database backup after import failure:', restoreError);
+        }
+
         return false;
     }
 });
@@ -2413,6 +2449,10 @@ app.whenReady().then(() => {
             mainWindow.webContents.send('save-settings-before-quit');
         }
         setTimeout(() => {
+            if (clipboardPollTimer) {
+                clearInterval(clipboardPollTimer);
+                clipboardPollTimer = null;
+            }
             try { globalShortcut.unregisterAll(); } catch { }
             try { if (tray) { tray.destroy(); tray = null; } } catch { }
             stopAhk();
@@ -2429,6 +2469,10 @@ app.whenReady().then(() => {
             mainWindow.webContents.send('save-settings-before-quit');
         }
         setTimeout(() => {
+            if (clipboardPollTimer) {
+                clearInterval(clipboardPollTimer);
+                clipboardPollTimer = null;
+            }
             try { globalShortcut.unregisterAll(); } catch { }
             try { if (tray) { tray.destroy(); tray = null; } } catch { }
             stopAhk();
@@ -2467,5 +2511,9 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+    if (clipboardPollTimer) {
+        clearInterval(clipboardPollTimer);
+        clipboardPollTimer = null;
+    }
     stopAhk(); // Ensure AHK process is terminated when quitting the app
 });

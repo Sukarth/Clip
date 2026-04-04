@@ -13,7 +13,7 @@
     "url": "https://github.com/Sukarth/Clip/issues"
   },
   "engines": {
-    "node": ">=20.19.0 || >=22.12.0"
+    "node": ">=20.19.0"
   },
   "main": "dist/main/main.js",
   "scripts": {
