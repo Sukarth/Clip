@@ -18,6 +18,7 @@ interface ClipboardListProps {
     themeColors: {
         itemBackground: string;
         itemHoverBackground: string;
+        border: string;
         textPrimary: string;
         textMuted: string;
     };
@@ -57,10 +58,90 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
         ? 'linear-gradient(90deg, transparent, rgba(15,23,42,0.12), transparent)'
         : 'linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)';
     const skeletonMetaBackground = isLightTheme ? 'rgba(15,23,42,0.08)' : 'rgba(255,255,255,0.04)';
+    const listRightPadding = hasScrollbar ? 7 : 0;
 
     React.useEffect(() => {
         logger.renderer(`Scrollbar: Applying paddingRight: ${scrollbarPadding} (hasScrollbar: ${hasScrollbar})`);
     }, [hasScrollbar, scrollbarPadding, logger]);
+
+    const lastFocusedKeyRef = React.useRef(-1);
+
+    React.useEffect(() => {
+        if (!isInitialLoading && filteredItems.length > 0) {
+            if (lastFocusedKeyRef.current !== listForceKey) {
+                lastFocusedKeyRef.current = listForceKey;
+                const timer = setTimeout(() => {
+                    const firstItem = listRef.current?.querySelector('[data-index="0"] .clip-item') as HTMLElement;
+                    if (firstItem) {
+                        firstItem.focus();
+                    }
+                }, 50);
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [listForceKey, isInitialLoading, filteredItems.length, listRef]);
+
+    React.useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                const active = document.activeElement as HTMLElement | null;
+
+                // If focus is in settings or another modal, do not interfere.
+                if (document.querySelector('.clip-settings-page') || document.querySelector('.clip-dialog-backdrop')) {
+                    return;
+                }
+
+                if (!active || (!active.classList.contains('clip-item') && active.tagName !== 'INPUT' && active.tagName !== 'BODY')) {
+                    return;
+                }
+
+                if ((active.tagName === 'INPUT' || active.tagName === 'BODY' || !active.classList.contains('clip-item'))) {
+                    if (e.key === 'ArrowDown' && filteredItems.length > 0) {
+                        e.preventDefault();
+                        rowVirtualizer.scrollToIndex(0, { align: 'start' });
+                        setTimeout(() => {
+                            const firstEl = listRef.current?.querySelector('[data-index="0"] .clip-item') as HTMLElement;
+                            if (firstEl) firstEl.focus();
+                        }, 50);
+                    }
+                    return;
+                }
+
+                e.preventDefault();
+
+                const container = active.closest('[data-index]');
+                if (!container) return;
+
+                const currentIndex = parseInt(container.getAttribute('data-index') || '0', 10);
+
+                if (e.key === 'ArrowDown') {
+                    if (currentIndex < filteredItems.length - 1) {
+                        const nextIndex = currentIndex + 1;
+                        rowVirtualizer.scrollToIndex(nextIndex, { align: 'start' });
+                        setTimeout(() => {
+                            const nextEl = listRef.current?.querySelector(`[data-index="${nextIndex}"] .clip-item`) as HTMLElement;
+                            if (nextEl) nextEl.focus();
+                        }, 50);
+                    }
+                } else if (e.key === 'ArrowUp') {
+                    if (currentIndex > 0) {
+                        const prevIndex = currentIndex - 1;
+                        rowVirtualizer.scrollToIndex(prevIndex, { align: 'end' });
+                        setTimeout(() => {
+                            const prevEl = listRef.current?.querySelector(`[data-index="${prevIndex}"] .clip-item`) as HTMLElement;
+                            if (prevEl) prevEl.focus();
+                        }, 50);
+                    } else if (currentIndex === 0) {
+                        const searchInput = document.querySelector('input[type="text"]') as HTMLElement;
+                        if (searchInput) searchInput.focus();
+                    }
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [filteredItems.length, rowVirtualizer, listRef]);
 
     return (
         <div
@@ -77,7 +158,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                 flex: 1,
                 scrollbarWidth: 'thin',
                 scrollbarColor: settings.theme === 'light' ? '#ccc #f0f0f0' : '#444 #23252a',
-                paddingRight: scrollbarPadding,
+                paddingRight: listRightPadding,
             }}
         >
             {isInitialLoading && (
@@ -178,6 +259,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                     right: 0,
                                     transform: `translateY(${virtualRow.start}px)`,
                                     paddingBottom: '10px',
+                                    paddingRight: 2,
                                     boxSizing: 'border-box',
                                 }}
                             >
@@ -206,7 +288,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                         cursor: 'pointer',
                                         gap: 10,
                                         boxSizing: 'border-box',
-                                        border: isTemporary ? '1px dashed rgba(255, 183, 0, 0.6)' : '1px solid transparent',
+                                        border: isTemporary ? '1px dashed rgba(255, 183, 0, 0.6)' : `1px solid ${themeColors.border}`,
                                         opacity: isTemporary ? 0.98 : 1,
                                     }}
                                     onMouseEnter={(e) => (e.currentTarget.style.background = itemHoverBackground)}

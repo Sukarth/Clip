@@ -150,6 +150,7 @@ const App: React.FC = () => {
         getWindowSizeValidationError,
     ]);
     const inputRef = useRef<HTMLInputElement>(null); // Ref for search input
+    const settingsModalRef = useRef<HTMLDivElement>(null);
 
     // Track if there are unsaved changes in settings
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -1084,6 +1085,67 @@ const App: React.FC = () => {
         }
     };
 
+    useEffect(() => {
+        if (!showSettings || isSettingsDialogClosing) {
+            return;
+        }
+
+        const modalElement = settingsModalRef.current;
+        if (!modalElement) {
+            return;
+        }
+
+        const previousFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+        const focusFirstElement = () => {
+            const focusableElements = Array.from(modalElement.querySelectorAll<HTMLElement>(focusableSelector))
+                .filter((element) => !element.hasAttribute('aria-hidden') && element.offsetParent !== null);
+            (focusableElements[0] ?? modalElement).focus();
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Tab') {
+                return;
+            }
+
+            const focusableElements = Array.from(modalElement.querySelectorAll<HTMLElement>(focusableSelector))
+                .filter((element) => !element.hasAttribute('aria-hidden') && element.offsetParent !== null);
+
+            if (focusableElements.length === 0) {
+                event.preventDefault();
+                modalElement.focus();
+                return;
+            }
+
+            const firstFocusableElement = focusableElements[0];
+            const lastFocusableElement = focusableElements[focusableElements.length - 1];
+            const activeElement = document.activeElement as HTMLElement | null;
+
+            if (event.shiftKey) {
+                if (!activeElement || !modalElement.contains(activeElement) || activeElement === firstFocusableElement) {
+                    event.preventDefault();
+                    lastFocusableElement.focus();
+                }
+                return;
+            }
+
+            if (!activeElement || !modalElement.contains(activeElement) || activeElement === lastFocusableElement) {
+                event.preventDefault();
+                firstFocusableElement.focus();
+            }
+        };
+
+        const timer = window.setTimeout(focusFirstElement, 0);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            window.clearTimeout(timer);
+            document.removeEventListener('keydown', handleKeyDown);
+            previousFocusedElement?.focus();
+        };
+    }, [isSettingsDialogClosing, showSettings]);
+
     // UI: Add settings page/modal
     return (
         <ThemeProvider
@@ -1242,7 +1304,7 @@ const App: React.FC = () => {
                             setIsSettingsDialogClosing(false);
                         }
                     }}>
-                        <div className={`clip-settings-page ${isSettingsDialogClosing ? 'fade-out' : 'fade-in'}`} style={{
+                        <div ref={settingsModalRef} className={`clip-settings-page ${isSettingsDialogClosing ? 'fade-out' : 'fade-in'}`} tabIndex={-1} style={{
                             background: themeColors.panelBackground,
                             borderRadius: `${effectiveBorderRadius}px`,
                             width: `${settings.windowWidth}px`,

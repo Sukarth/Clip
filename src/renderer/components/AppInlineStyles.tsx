@@ -369,7 +369,7 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 /* Clipboard list scrollbar styling */
                 .clip-list {
                     overflow-y: auto;
-                    scrollbar-gutter: stable;
+                    scrollbar-gutter: auto;
                     scrollbar-width: thin;
                     scrollbar-color: #444 #23252a;
                 }
@@ -405,6 +405,17 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 }
                 .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar-thumb:hover {
                     background: ${settings.accentColor};
+                }
+
+                *:focus-visible {
+                    outline: none !important;
+                    box-shadow: inset 0 0 0 2px ${themeColors.accent} !important;
+                }
+
+                .clip-item:focus,
+                .clip-item:focus-visible {
+                    outline: none !important;
+                    box-shadow: inset 0 0 0 2px ${themeColors.accent} !important;
                 }
             `,
         [effectiveBorderRadius, settings, themeColors, themeSurface, themeTypography],
