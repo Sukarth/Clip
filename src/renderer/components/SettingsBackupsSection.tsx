@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { BACKUP_INTERVALS, sectionHeaderStyle, subHeaderStyle } from '../app-constants';
+import { BACKUP_INTERVALS } from '../app-constants';
 import type { BackupEntry, Settings } from '../app-types';
 import Switch from './Switch';
-import BackupActionsPanel from './backups/BackupActionsPanel';
-import BackupListPanel from './backups/BackupListPanel';
+import PrototypeSelect from './PrototypeSelect';
+import { getRelativeTime } from '../theme-utils';
 
 interface SettingsBackupsSectionProps {
     settingsDraft: Settings | null;
@@ -41,201 +41,153 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
     setShowBackupManagement,
     backupList,
     selectedBackups,
-    setSelectedBackups,
     selectedBackup,
     setBackupToDelete,
     setBackupDeleteAction,
 }) => {
+    const current = settingsDraft ?? settings;
+    const update = React.useCallback((patch: Partial<Settings>) => {
+        setSettingsDraft((prev) => ({ ...(prev ?? settings), ...patch }));
+    }, [setSettingsDraft, settings]);
+
+    const simpleBtnRef = React.useRef<HTMLButtonElement>(null);
+    const advancedBtnRef = React.useRef<HTMLButtonElement>(null);
+    const [indicatorStyle, setIndicatorStyle] = React.useState<{ width: number; translateX: number }>({ width: 58, translateX: 0 });
+
+    React.useEffect(() => {
+        const btn = showBackupManagement ? advancedBtnRef.current : simpleBtnRef.current;
+        const container = btn?.parentElement;
+        if (btn && container) {
+            const btnRect = btn.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            setIndicatorStyle({
+                width: btnRect.width,
+                translateX: btnRect.left - containerRect.left - 3,
+            });
+        }
+    }, [showBackupManagement]);
+
+    const createBackup = React.useCallback(async () => {
+        try {
+            setIsBackingUp(true);
+            const backupPath = await window.electronAPI?.createBackup?.();
+            const list = (await window.electronAPI?.listBackups?.()) || [];
+            setBackupList(list);
+            setSelectedBackup('');
+            if (backupPath) {
+                showToast('success', `Backup created: ${backupPath.split(/[\\/]/).pop()}`);
+            }
+        } catch (error) {
+            log.error('Backup error', error instanceof Error ? error.message : String(error));
+            showToast('error', 'Backup failed');
+        } finally {
+            setIsBackingUp(false);
+        }
+    }, [log, setBackupList, setIsBackingUp, setSelectedBackup, showToast]);
+
     return (
-        <>
-            <div>
-                <h2
-                    style={{
-                        ...sectionHeaderStyle,
-                        color: '#e1e1e1',
-                        fontSize: 16,
-                        fontWeight: 600,
-                        marginBottom: 16,
-                        borderBottom: '1px solid rgba(255,255,255,0.12)',
-                    }}
-                >
-                    Backups
-                </h2>
-                <label
-                    className="settings-container"
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        padding: '12px 16px',
-                        background: 'rgba(255,255,255,0.03)',
-                        borderRadius: 8,
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        marginBottom: 16,
-                    }}
-                >
-                    <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>
-                        Enable automatic database backups
-                    </span>
-                    <Switch
-                        checked={settingsDraft?.enableBackups ?? settings.enableBackups}
-                        onChange={(v) => setSettingsDraft((s) => (s ? { ...s, enableBackups: v } : null))}
-                        accentColor={settingsDraft?.accentColor ?? settings.accentColor}
-                    />
-                </label>
-                <div
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        gap: 12,
-                        opacity: settingsDraft?.enableBackups ?? settings.enableBackups ? 1 : 0.5,
-                        transition: 'opacity 0.2s',
-                        marginBottom: 16,
-                    }}
-                >
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-                        <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Backup interval</span>
-                        <select
-                            className="settings-select"
-                            value={settingsDraft?.backupInterval ?? settings.backupInterval}
-                            onChange={(e) =>
-                                setSettingsDraft((s) => (s ? { ...s, backupInterval: Number(e.target.value) } : null))
-                            }
-                            style={{
-                                borderRadius: 8,
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                background: 'rgba(255,255,255,0.05)',
-                                color: '#fff',
-                                padding: '10px 12px',
-                                fontSize: 14,
-                                transition: 'border-color 0.2s, background 0.2s',
-                                outline: 'none',
-                            }}
-                            disabled={!(settingsDraft?.enableBackups ?? settings.enableBackups)}
-                            onFocus={(e) =>
-                                (e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor)
-                            }
-                            onBlur={(e) => (e.target.style.borderColor = 'rgba(255,255,255,0.12)')}
-                        >
-                            {BACKUP_INTERVALS.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: 8, width: 100 }}>
-                        <span style={{ fontSize: 14, color: '#ccc', fontWeight: 500 }}>Max backups</span>
-                        <input
-                            className="settings-input"
-                            type="number"
-                            min={1}
-                            max={50}
-                            value={settingsDraft?.maxBackups ?? settings.maxBackups}
-                            onChange={(e) => {
-                                const parsed = Number(e.target.value);
-                                const clamped = Math.max(1, Math.min(50, isNaN(parsed) ? 1 : parsed));
-                                setSettingsDraft((s) => (s ? { ...s, maxBackups: clamped } : null));
-                            }}
-                            style={{
-                                borderRadius: 8,
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                background: 'rgba(255,255,255,0.05)',
-                                color: '#fff',
-                                padding: '10px 12px',
-                                fontSize: 14,
-                                transition: 'border-color 0.2s, background 0.2s',
-                                outline: 'none',
-                            }}
-                            disabled={!(settingsDraft?.enableBackups ?? settings.enableBackups)}
-                            onFocus={(e) =>
-                                (e.target.style.borderColor = settingsDraft?.accentColor ?? settings.accentColor)
-                            }
-                            onBlur={(e) => (e.target.style.borderColor = 'rgba(255,255,255,0.12)')}
-                        />
-                    </label>
+        <div className="space-y-3 py-3">
+            <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                    <span className="material-symbols-outlined text-primary text-sm">schedule</span>
+                    <span className="text-xs font-semibold text-primary uppercase tracking-wider">Automatic Backups</span>
                 </div>
 
-                <BackupActionsPanel
-                    settingsDraft={settingsDraft}
-                    settings={settings}
-                    isBackingUp={isBackingUp}
-                    setIsBackingUp={setIsBackingUp}
-                    setBackupList={setBackupList}
-                    setSelectedBackup={setSelectedBackup}
-                    showToast={showToast}
-                    log={log}
-                    selectedBackup={selectedBackup}
-                    selectedBackups={selectedBackups}
-                    setSelectedBackups={setSelectedBackups}
-                    showBackupManagement={showBackupManagement}
-                    setBackupDeleteAction={setBackupDeleteAction}
-                />
+                <div className="flex items-center justify-between py-2">
+                    <div>
+                        <h3 className="font-medium text-on-surface text-sm">Enable Backups</h3>
+                        <p className="text-[11px] text-on-surface-variant">Auto backup clipboard database</p>
+                    </div>
+                    <Switch checked={current.enableBackups} onChange={(value) => update({ enableBackups: value })} accentColor="#abccff" />
+                </div>
+
+                <div className="space-y-2 py-2">
+                    <h3 className="font-medium text-on-surface text-sm">Backup Interval</h3>
+                    <PrototypeSelect
+                        value={current.backupInterval}
+                        onChange={(value) => update({ backupInterval: Number(value) })}
+                        options={BACKUP_INTERVALS.map((option) => ({ value: option.value, label: option.label.replace(/^(\d)/, 'Every $1').replace(/^1 hour$/, 'Every hour').replace(/^1 day$/, 'Every day') }))}
+                    />
+                </div>
+
+                <div className="space-y-2 py-2">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h3 className="font-medium text-on-surface text-sm">Max Backups to Keep</h3>
+                            <p className="text-[11px] text-on-surface-variant">Older backups are auto-deleted</p>
+                        </div>
+                        <div className="number-input-wrapper" style={{ width: 'fit-content' }}>
+                            <button type="button" onClick={() => update({ maxBackups: Math.max(1, current.maxBackups - 1) })}>
+                                <span className="material-symbols-outlined text-sm">remove</span>
+                            </button>
+                            <input type="number" value={current.maxBackups} min={1} max={50} onChange={(e) => update({ maxBackups: Math.max(1, Math.min(50, Number(e.target.value))) })} />
+                            <button type="button" onClick={() => update({ maxBackups: Math.min(50, current.maxBackups + 1) })}>
+                                <span className="material-symbols-outlined text-sm">add</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                    <h3 style={{ ...subHeaderStyle, margin: 0 }}>Backup Management</h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <button
-                            className="settings-button"
-                            style={{
-                                background: 'rgba(255,255,255,0.08)',
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                borderRadius: 6,
-                                color: '#fff',
-                                padding: '6px 12px',
-                                cursor: 'pointer',
-                                fontSize: 12,
-                                fontWeight: 500,
-                                transition: 'background 0.2s',
-                            }}
-                            onClick={refreshBackupList}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                        >
-                            Refresh
+            <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-primary text-sm">save</span>
+                        <span className="text-xs font-semibold text-primary uppercase tracking-wider">Actions</span>
+                    </div>
+                </div>
+                <button className="w-full py-2.5 px-4 bg-gradient-to-r from-primary-container to-primary text-on-primary rounded-lg font-semibold text-sm hover:brightness-110 transition-all active:scale-[0.98] flex items-center justify-center gap-2 border-0" type="button" onClick={() => { void createBackup(); }}>
+                    <span className="material-symbols-outlined text-base">backup</span>
+                    <span>{isBackingUp ? 'Creating...' : 'Create Backup Now'}</span>
+                </button>
+            </div>
+
+            <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-primary text-sm">folder</span>
+                        <span className="text-xs font-semibold text-primary uppercase tracking-wider">Backups</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <button className="text-on-surface-variant hover:text-primary transition-colors bg-transparent border-0" type="button" onClick={refreshBackupList} style={{ marginTop: 5 }}>
+                            <span className="material-symbols-outlined text-base" style={{ fontSize: '1.4rem' }}>refresh</span>
                         </button>
-                        <button
-                            className="settings-button"
-                            style={{
-                                background: 'rgba(255,255,255,0.08)',
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                borderRadius: 6,
-                                color: '#fff',
-                                padding: '6px 12px',
-                                cursor: 'pointer',
-                                fontSize: 12,
-                                fontWeight: 500,
-                                transition: 'background 0.2s',
-                            }}
-                            onClick={() => setShowBackupManagement(!showBackupManagement)}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                        >
-                            {showBackupManagement ? 'Simple View' : 'Advanced'}
-                        </button>
+                        <div className="view-toggle-container" id="viewToggle">
+                            <div className="view-toggle-indicator" id="viewToggleIndicator" style={{ width: indicatorStyle.width, transform: `translateX(${indicatorStyle.translateX}px)` }}></div>
+                            <button ref={simpleBtnRef} className={`view-toggle-btn ${!showBackupManagement ? 'active' : ''}`} id="simpleViewBtn" type="button" onClick={() => setShowBackupManagement(false)}>Simple</button>
+                            <button ref={advancedBtnRef} className={`view-toggle-btn ${showBackupManagement ? 'active' : ''}`} id="advancedViewBtn" type="button" onClick={() => setShowBackupManagement(true)}>Advanced</button>
+                        </div>
                     </div>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
-                    <BackupListPanel
-                        settingsDraft={settingsDraft}
-                        settings={settings}
-                        backupList={backupList}
-                        showBackupManagement={showBackupManagement}
-                        selectedBackups={selectedBackups}
-                        setSelectedBackups={setSelectedBackups}
-                        selectedBackup={selectedBackup}
-                        setSelectedBackup={setSelectedBackup}
-                        setBackupToDelete={setBackupToDelete}
-                        setBackupDeleteAction={setBackupDeleteAction}
-                    />
+                <div className="space-y-2" id="backupsList">
+                    {backupList.length === 0 ? (
+                        <div className="flex items-center justify-center p-3 bg-surface-container-high rounded-lg">
+                            <p className="text-xs text-on-surface-variant">No backups found. Create a backup first.</p>
+                        </div>
+                    ) : backupList.map((backup) => {
+                        const selected = selectedBackup === backup.file;
+                        return (
+                            <div key={backup.file} className="flex items-center justify-between p-3 bg-surface-container-high rounded-lg" style={{ outline: selected ? '1px solid #abccff' : 'none' }}>
+                                <button className="flex items-center gap-3 bg-transparent border-0 w-full text-left" type="button" onClick={() => setSelectedBackup(selected ? '' : backup.file)}>
+                                    <span className="material-symbols-outlined text-success text-base">check_circle</span>
+                                    <div>
+                                        <p className="text-xs font-medium text-on-surface">{backup.file}</p>
+                                        <p className="text-[10px] text-on-surface-variant">{getRelativeTime(backup.time)}</p>
+                                    </div>
+                                </button>
+                                <button className="text-on-surface-variant hover:text-error transition-colors bg-transparent border-0" type="button" onClick={() => {
+                                    setBackupToDelete(backup.file);
+                                    setBackupDeleteAction('single');
+                                }}>
+                                    <span className="material-symbols-outlined text-base">delete</span>
+                                </button>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
-        </>
+        </div>
     );
 };
 

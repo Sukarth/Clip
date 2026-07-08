@@ -17,7 +17,6 @@ import SettingsBehaviorSection from './components/SettingsBehaviorSection';
 import SettingsBackupsSection from './components/SettingsBackupsSection';
 import SettingsDataSection from './components/SettingsDataSection';
 import SettingsGeneralSection from './components/SettingsGeneralSection';
-import SettingsModalFooter from './components/SettingsModalFooter';
 import SettingsThemeSection from './components/SettingsThemeSection';
 import { useClipboardManager } from './hooks/useClipboardManager';
 import { useShortcutDraft } from './hooks/useShortcutDraft';
@@ -28,6 +27,21 @@ import {
     normalizeThemeProfileKey,
     sanitizeThemeConfig,
 } from '../theme-config';
+
+type SettingsSectionKey = 'General' | 'Behavior' | 'Backups' | 'Data' | 'Theme' | 'Profile' | 'About';
+
+const PRIMARY_SETTINGS_SECTIONS: Array<{
+    key: Exclude<SettingsSectionKey, 'About'>;
+    label: string;
+    icon: string;
+}> = [
+    { key: 'General', label: 'General', icon: 'settings' },
+    { key: 'Behavior', label: 'Behavior', icon: 'gesture' },
+    { key: 'Backups', label: 'Backups', icon: 'backup' },
+    { key: 'Data', label: 'Data', icon: 'database' },
+    { key: 'Theme', label: 'Theme', icon: 'palette' },
+    { key: 'Profile', label: 'Profile', icon: 'person' },
+];
 
 const App: React.FC = () => {
     const [settings, setSettings] = useState<Settings>(() => {
@@ -115,7 +129,7 @@ const App: React.FC = () => {
 
     // Restore settings modal state and draft from localStorage
     const [showSettings, setShowSettings] = useState(() => localStorage.getItem('clip-showSettings') === 'true');
-    const [settingsDraft, setSettingsDraft] = useState<Settings | null>(() => {
+    const [settingsDraft, setSettingsDraftState] = useState<Settings | null>(() => {
         const draft = localStorage.getItem('clip-settingsDraft');
         if (!draft) {
             return null;
@@ -137,6 +151,27 @@ const App: React.FC = () => {
         window.electronAPI?.saveSettingsToFile?.(nextSettings);
     }, []);
 
+    const setSettingsDraft = useCallback((value: React.SetStateAction<Settings | null>) => {
+        setSettingsDraftState((prev) => {
+            const next = typeof value === 'function'
+                ? (value as (prevState: Settings | null) => Settings | null)(prev)
+                : value;
+
+            if (!next) {
+                return next;
+            }
+
+            const current = settingsRef.current;
+            if (JSON.stringify(next) !== JSON.stringify(current)) {
+                isInternalSettingsSyncRef.current = true;
+                setSettings(next);
+                persistSettings(next, true);
+            }
+
+            return next;
+        });
+    }, [persistSettings]);
+
     const windowSizeError = React.useMemo(() => {
         return getWindowSizeValidationError(
             settingsDraft?.windowWidth ?? settings.windowWidth,
@@ -151,9 +186,13 @@ const App: React.FC = () => {
     ]);
     const inputRef = useRef<HTMLInputElement>(null); // Ref for search input
     const settingsModalRef = useRef<HTMLDivElement>(null);
+    const settingsRef = useRef(settings);
+    const isInternalSettingsSyncRef = useRef(false);
 
     // Track if there are unsaved changes in settings
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionKey>('General');
+    const [settingsNavigationStack, setSettingsNavigationStack] = useState<SettingsSectionKey[]>([]);
 
     const [showThemeProfileResetConfirm, setShowThemeProfileResetConfirm] = useState(false);
     const [isThemeProfileResetDialogClosing, setIsThemeProfileResetDialogClosing] = useState(false);
@@ -338,7 +377,15 @@ const App: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        settingsRef.current = settings;
+    }, [settings]);
+
+    useEffect(() => {
         setHasUnsavedChanges(prev => {
+            if (isInternalSettingsSyncRef.current) {
+                isInternalSettingsSyncRef.current = false;
+                return false;
+            }
             const settingsDifferent = !!(settingsDraft && settings) && JSON.stringify(settingsDraft) !== JSON.stringify(settings);
             const themeDifferent = JSON.stringify(themeEditorConfig) !== JSON.stringify(themeConfig);
             const next = settingsDifferent || themeDifferent;
@@ -562,16 +609,12 @@ const App: React.FC = () => {
                         setIsThemeProfileResetDialogClosing(false);
                     }, 300);
                 } else if (showSettings) {
-                    if (hasUnsavedChanges) {
-                        setShowUnsavedChangesConfirm('cancel');
-                    } else {
-                        setIsSettingsDialogClosing(true);
-                        setTimeout(() => {
-                            setShowSettings(false);
-                            setSettingsDraft(null);
-                            setIsSettingsDialogClosing(false);
-                        }, 300);
-                    }
+                    setIsSettingsDialogClosing(true);
+                    setTimeout(() => {
+                        setShowSettings(false);
+                        setSettingsDraftState(null);
+                        setIsSettingsDialogClosing(false);
+                    }, 300);
                 } else {
                     // @ts-ignore
                     window.electronAPI?.hideWindow();
@@ -580,7 +623,7 @@ const App: React.FC = () => {
         };
         window.addEventListener('keydown', escHandler);
         return () => window.removeEventListener('keydown', escHandler);
-    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, hasUnsavedChanges, backupDeleteAction, handleDeleteDialogClose]);
+    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, backupDeleteAction, handleDeleteDialogClose]);
 
     // Force refresh when Ctrl+Shift+V is pressed (global shortcut)
     // This effect is now primarily for development/debugging if needed,
@@ -637,13 +680,6 @@ const App: React.FC = () => {
         window.electronAPI?.setStartWithSystem?.(settings.startWithSystem);
     }, [settings.startWithSystem]);
 
-    // Send updated shortcut to main process
-    useEffect(() => {
-        if (window.electronAPI?.setGlobalShortcut) {
-            window.electronAPI.setGlobalShortcut(settings.globalShortcut);
-        }
-    }, [settings.globalShortcut]);
-
     // Export/import settings logic
     const handleExportSettings = () => {
         const data = JSON.stringify(settings, null, 2);
@@ -667,7 +703,8 @@ const App: React.FC = () => {
                 try {
                     const imported = JSON.parse(ev.target.result);
                     if (imported && typeof imported === 'object') {
-                        setSettingsDraft(s => ({ ...s, ...imported }));
+                        const nextSettings = { ...settingsRef.current, ...imported } as Settings;
+                        setSettingsDraft(nextSettings);
                         showToast('success', 'Settings imported successfully');
                     } else {
                         showToast('error', 'Invalid settings file format');
@@ -681,94 +718,62 @@ const App: React.FC = () => {
         input.click();
     };    // Settings modal logic
     const openSettings = () => {
-        setSettingsDraft(settings);
+        setSettingsDraftState(settings);
         setThemeEditorConfig(themeConfig);
+        setActiveSettingsSection('General');
+        setSettingsNavigationStack([]);
         setShowSettings(true);
         setIsSettingsDialogClosing(false);
-    };
-
-    const saveSettings = () => {
-        if (windowSizeError) {
-            showToast('error', windowSizeError);
-            return;
-        }
-
-        const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
-        const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
-        const draftAccentColor = settingsDraft?.accentColor ?? settings.accentColor;
-        const draftBorderRadius = settingsDraft?.borderRadius ?? settings.borderRadius;
-        const draftTransparency = settingsDraft?.transparency ?? settings.transparency;
-
-        const mergedThemeConfig = sanitizeThemeConfig({
-            ...themeConfig,
-            ...themeEditorConfig,
-            activeProfile: profileKey,
-            profiles: {
-                ...themeEditorConfig.profiles,
-                [profileKey]: {
-                    ...currentProfile,
-                    colors: {
-                        ...currentProfile.colors,
-                        accent: draftAccentColor,
-                    },
-                    surface: {
-                        ...currentProfile.surface,
-                        borderRadius: draftBorderRadius,
-                        transparency: draftTransparency,
-                    },
-                },
-            },
-        });
-
-        if (settingsDraft) {
-            setSettings(settingsDraft);
-
-            // Show toast notification for settings saved
-            showToast('success', 'Settings saved successfully');
-            persistSettings(settingsDraft);
-        }
-
-        setThemeConfig(mergedThemeConfig);
-        setThemeEditorConfig(mergedThemeConfig);
-        void window.electronAPI?.saveThemeConfig?.(mergedThemeConfig);
-
-        setIsSettingsDialogClosing(true);
-        setTimeout(() => {
-            setShowSettings(false); setSettingsDraft(null);
-            setIsSettingsDialogClosing(false);
-        }, 300);
-    };
-
-    const cancelSettings = () => {
-        if (hasUnsavedChanges) {
-            setShowUnsavedChangesConfirm('cancel');
-        } else {
-            closeSettingsWithoutSaving();
-        }
     };
 
     const closeSettingsWithoutSaving = () => {
         setIsSettingsDialogClosing(true);
         setTimeout(() => {
             setShowSettings(false);
-            setSettingsDraft(null);
+            setSettingsDraftState(null);
             setThemeEditorConfig(themeConfig);
+            setActiveSettingsSection('General');
+            setSettingsNavigationStack([]);
             setIsSettingsDialogClosing(false);
         }, 300);
-    }; const resetSettings = () => {
+    };
+
+    const handleSettingsBackOrClose = () => {
+        setSettingsNavigationStack((stack) => {
+            if (stack.length === 0) {
+                closeSettingsWithoutSaving();
+                return stack;
+            }
+
+            const nextStack = stack.slice(0, -1);
+            const previousSection = stack[stack.length - 1];
+            setActiveSettingsSection(previousSection);
+            return nextStack;
+        });
+    };
+
+    const navigateToSettingsSection = (section: SettingsSectionKey) => {
+        setSettingsNavigationStack([]);
+        setActiveSettingsSection(section);
+    };
+
+    const pushSettingsSection = (section: SettingsSectionKey) => {
+        setSettingsNavigationStack((stack) => [...stack, activeSettingsSection]);
+        setActiveSettingsSection(section);
+    };
+
+    const resetSettings = () => {
         setDangerAction(null);
         setSettings(DEFAULT_SETTINGS);
-        // Update settings draft to reflect the default values
-        setSettingsDraft(DEFAULT_SETTINGS);
-
         persistSettings(DEFAULT_SETTINGS);
+        setSettingsDraftState(DEFAULT_SETTINGS);
 
         showToast('success', 'Settings reset to default values');
         // Close the settings window after successful reset
         setIsSettingsDialogClosing(true);
         setTimeout(() => {
             setShowSettings(false);
-            setSettingsDraft(null);
+            setSettingsDraftState(null);
             setIsSettingsDialogClosing(false);
         }, 300);
     };
@@ -902,29 +907,11 @@ const App: React.FC = () => {
     };
 
     const handleUnsavedSave = async () => {
-        const actionType = showUnsavedChangesConfirm;
-
-        if (settingsDraft) {
-            setSettings(settingsDraft);
-
-            try {
-                await Promise.resolve(persistSettings(settingsDraft));
-            } catch (error) {
-                showToast('error', `Failed to save settings: ${error instanceof Error ? error.message : String(error)}`);
-                return;
-            }
-        }
-
         setIsUnsavedChangesDialogClosing(true);
         setTimeout(() => {
             setShowUnsavedChangesConfirm(null);
             setIsUnsavedChangesDialogClosing(false);
-
-            if (actionType === 'quit') {
-                window.electronAPI?.quitApp?.();
-            } else {
-                closeSettingsWithoutSaving();
-            }
+            closeSettingsWithoutSaving();
         }, 300);
     };
 
@@ -1078,10 +1065,256 @@ const App: React.FC = () => {
     };
 
     const handleQuitFromSettings = () => {
-        if (hasUnsavedChanges) {
-            setShowUnsavedChangesConfirm('quit');
-        } else {
-            window.electronAPI?.quitApp?.();
+        window.electronAPI?.quitApp?.();
+    };
+
+    const pinnedItemsCount = React.useMemo(() => items.filter((item) => item.pinned).length, [items]);
+    const imageItemsCount = React.useMemo(() => items.filter((item) => item.type === 'image').length, [items]);
+    const oldestItemAgeLabel = React.useMemo(() => {
+        if (items.length === 0) {
+            return '0d';
+        }
+
+        const oldest = items.reduce((min, item) => Math.min(min, item.timestamp), items[0].timestamp);
+        const days = Math.max(0, Math.floor((Date.now() - oldest) / (1000 * 60 * 60 * 24)));
+        return `${days}d`;
+    }, [items]);
+
+    const estimatedStorageLabel = React.useMemo(() => {
+        const totalLength = items.reduce((sum, item) => sum + item.content.length, 0);
+        const kilobytes = totalLength / 1024;
+        return kilobytes >= 1024 ? `${(kilobytes / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(kilobytes))} KB`;
+    }, [items]);
+
+    const renderSettingsSection = () => {
+        switch (activeSettingsSection) {
+            case 'General':
+                return (
+                    <SettingsGeneralSection
+                        settingsDraft={settingsDraft}
+                        settings={settings}
+                        setSettingsDraft={setSettingsDraft}
+                        setSettings={setSettings}
+                        persistSettings={persistSettings}
+                        maxItemsInputValue={maxItemsInputValue}
+                        setMaxItemsInputValue={setMaxItemsInputValue}
+                        hasMaxItemsChanges={hasMaxItemsChanges}
+                        setHasMaxItemsChanges={setHasMaxItemsChanges}
+                        setPendingMaxItems={setPendingMaxItems}
+                        setBackupCreated={setBackupCreated}
+                        setShowMaxItemsWarning={setShowMaxItemsWarning}
+                        itemsLength={items.length}
+                        shortcutModifiers={shortcutModifiers}
+                        setShortcutModifiers={setShortcutModifiers}
+                        shortcutMainKey={shortcutMainKey}
+                        setShortcutMainKey={setShortcutMainKey}
+                        showShortcutInfo={showShortcutInfo}
+                        setShowShortcutInfo={setShowShortcutInfo}
+                        clampWindowWidth={clampWindowWidth}
+                        clampWindowHeight={clampWindowHeight}
+                        windowSizeError={windowSizeError}
+                        showToast={showToast}
+                        onNavigateToAbout={() => pushSettingsSection('About')}
+                    />
+                );
+            case 'Behavior':
+                return (
+                    <SettingsBehaviorSection
+                        settingsDraft={settingsDraft}
+                        settings={settings}
+                        setSettingsDraft={setSettingsDraft}
+                        themeColors={themeColors}
+                    />
+                );
+            case 'Backups':
+                return (
+                    <SettingsBackupsSection
+                        settingsDraft={settingsDraft}
+                        settings={settings}
+                        setSettingsDraft={setSettingsDraft}
+                        isBackingUp={isBackingUp}
+                        setIsBackingUp={setIsBackingUp}
+                        setBackupList={setBackupList}
+                        setSelectedBackup={setSelectedBackup}
+                        showToast={showToast}
+                        log={log}
+                        refreshBackupList={refreshBackupList}
+                        showBackupManagement={showBackupManagement}
+                        setShowBackupManagement={setShowBackupManagement}
+                        backupList={backupList}
+                        selectedBackups={selectedBackups}
+                        setSelectedBackups={setSelectedBackups}
+                        selectedBackup={selectedBackup}
+                        setBackupToDelete={setBackupToDelete}
+                        setBackupDeleteAction={setBackupDeleteAction}
+                    />
+                );
+            case 'Data':
+                return (
+                    <SettingsDataSection
+                        handleExportSettings={handleExportSettings}
+                        handleImportSettings={handleImportSettings}
+                        settingsPaths={settingsPaths}
+                        copyTextToClipboard={copyTextToClipboard}
+                        openSettingsConfigInSystem={openSettingsConfigInSystem}
+                        reloadSettingsFromDisk={reloadSettingsFromDisk}
+                        setDangerAction={setDangerAction}
+                        showToast={showToast}
+                        logger={log}
+                    />
+                );
+            case 'Theme':
+                return (
+                    <SettingsThemeSection
+                        activeThemeProfileKey={activeThemeProfileKey}
+                        switchThemeProfile={switchThemeProfile}
+                        themeEditorConfig={themeEditorConfig}
+                        newThemeProfileName={newThemeProfileName}
+                        setNewThemeProfileName={setNewThemeProfileName}
+                        createThemeProfileFromInput={createThemeProfileFromInput}
+                        setShowThemeProfileDeleteConfirm={setShowThemeProfileDeleteConfirm}
+                        setIsThemeProfileDeleteDialogClosing={setIsThemeProfileDeleteDialogClosing}
+                        setShowThemeProfileResetConfirm={setShowThemeProfileResetConfirm}
+                        setIsThemeProfileResetDialogClosing={setIsThemeProfileResetDialogClosing}
+                        themeColors={themeColors}
+                        reloadThemeFromDisk={reloadThemeFromDisk}
+                        editorThemeProfile={editorThemeProfile}
+                        settingsDraft={settingsDraft}
+                        settings={settings}
+                        setSettingsDraft={setSettingsDraft}
+                        updateEditorActiveProfile={updateEditorActiveProfile}
+                        isThemeSaving={isThemeSaving}
+                        saveThemeEditorConfig={saveThemeEditorConfig}
+                        openThemeConfigInSystem={openThemeConfigInSystem}
+                        exportThemeJson={exportThemeJson}
+                        themePaths={themePaths}
+                        copyTextToClipboard={copyTextToClipboard}
+                        themeSchema={themeSchema}
+                    />
+                );
+            case 'Profile':
+                return (
+                    <div className="space-y-3 py-3">
+                        <div className="bg-surface-container-low p-5 rounded-xl flex flex-col items-center text-center">
+                            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center mb-3">
+                                <span className="material-symbols-outlined text-on-primary text-4xl">person</span>
+                            </div>
+                            <h2 className="text-lg font-bold text-on-surface">User</h2>
+                            <p className="text-xs text-on-surface-variant">Local Profile</p>
+                        </div>
+
+                        <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="material-symbols-outlined text-primary text-sm">sync</span>
+                                <span className="text-xs font-semibold text-primary uppercase tracking-wider">Sync</span>
+                            </div>
+
+                            <div className="flex items-center justify-between py-2">
+                                <div>
+                                    <h3 className="font-medium text-on-surface text-sm">Cloud Sync</h3>
+                                    <p className="text-[11px] text-on-surface-variant">Sync clipboard across devices</p>
+                                </div>
+                                <label className="toggle-switch">
+                                    <input type="checkbox" />
+                                    <span className="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div className="p-3 bg-surface-container-high rounded-lg">
+                                <p className="text-xs text-on-surface-variant text-center">Sign in to enable cloud sync</p>
+                                <button className="w-full mt-2 py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold hover:brightness-110 transition-all border-0">
+                                    Sign In
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="material-symbols-outlined text-primary text-sm">analytics</span>
+                                <span className="text-xs font-semibold text-primary uppercase tracking-wider">Statistics</span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="p-3 bg-surface-container-high rounded-lg text-center">
+                                    <p className="text-2xl font-bold text-primary">{items.length}</p>
+                                    <p className="text-[10px] text-on-surface-variant">Total Clips</p>
+                                </div>
+                                <div className="p-3 bg-surface-container-high rounded-lg text-center">
+                                    <p className="text-2xl font-bold text-primary">{pinnedItemsCount}</p>
+                                    <p className="text-[10px] text-on-surface-variant">Pinned</p>
+                                </div>
+                                <div className="p-3 bg-surface-container-high rounded-lg text-center">
+                                    <p className="text-2xl font-bold text-primary">{estimatedStorageLabel.replace(' MB', '').replace(' KB', '')}</p>
+                                    <p className="text-[10px] text-on-surface-variant">{estimatedStorageLabel.includes('MB') ? 'MB Used' : 'KB Used'}</p>
+                                </div>
+                                <div className="p-3 bg-surface-container-high rounded-lg text-center">
+                                    <p className="text-2xl font-bold text-primary">{oldestItemAgeLabel}</p>
+                                    <p className="text-[10px] text-on-surface-variant">Oldest Clip</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            case 'About':
+                return (
+                    <div className="space-y-3 py-3">
+                        <div className="bg-surface-container-low p-5 rounded-xl flex flex-col items-center text-center">
+                            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center mb-3" style={{ boxShadow: '0 10px 24px rgba(171, 204, 255, 0.2)' }}>
+                                <span className="material-symbols-outlined text-on-primary text-4xl" style={{ fontVariationSettings: "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24" }}>content_paste</span>
+                            </div>
+                            <h2 className="text-xl font-bold text-on-surface">Clip</h2>
+                            <p className="text-sm text-primary font-medium">Version 1.1.0</p>
+                            <p className="text-xs text-on-surface-variant mt-1">Build 2026.04.05</p>
+                        </div>
+
+                        <div className="bg-surface-container-low p-4 rounded-xl space-y-2">
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.open('https://github.com/Sukarth/Clip/releases', '_blank')}>
+                                <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-on-surface-variant">description</span>
+                                    <span className="text-sm text-on-surface">Release Notes</span>
+                                </div>
+                                <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
+                            </button>
+
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button">
+                                <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-on-surface-variant">gavel</span>
+                                    <span className="text-sm text-on-surface">Licenses</span>
+                                </div>
+                                <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
+                            </button>
+
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button">
+                                <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-on-surface-variant">privacy_tip</span>
+                                    <span className="text-sm text-on-surface">Privacy Policy</span>
+                                </div>
+                                <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
+                            </button>
+
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.open('https://github.com/Sukarth/Clip', '_blank')}>
+                                <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-on-surface-variant">code</span>
+                                    <span className="text-sm text-on-surface">GitHub Repository</span>
+                                </div>
+                                <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">open_in_new</span>
+                            </button>
+                        </div>
+
+                        <div className="bg-surface-container-low p-4 rounded-xl">
+                            <div className="flex items-center gap-2 mb-3">
+                                <span className="material-symbols-outlined text-primary text-sm">favorite</span>
+                                <span className="text-xs font-semibold text-primary uppercase tracking-wider">Credits</span>
+                            </div>
+                            <p className="text-xs text-on-surface-variant leading-relaxed">
+                                Made with love. Built using Electron, React, and TypeScript.
+                                Icons by Material Design Icons.
+                            </p>
+                        </div>
+                    </div>
+                );
+            default:
+                return null;
         }
     };
 
@@ -1300,155 +1533,57 @@ const App: React.FC = () => {
                     }} onAnimationEnd={() => {
                         if (isSettingsDialogClosing) {
                             setShowSettings(false);
-                            setSettingsDraft(null);
+                            setSettingsDraftState(null);
                             setIsSettingsDialogClosing(false);
                         }
                     }}>
-                        <div ref={settingsModalRef} className={`clip-settings-page ${isSettingsDialogClosing ? 'fade-out' : 'fade-in'}`} tabIndex={-1} style={{
-                            background: themeColors.panelBackground,
-                            borderRadius: `${effectiveBorderRadius}px`,
-                            width: `${settings.windowWidth}px`,
-                            height: `${settings.windowHeight}px`,
-                            padding: 0,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            position: 'relative',
-                            overflow: 'hidden',
-                            transition: 'border-radius 0.3s, background 0.3s',
-                            // boxShadow: '0 20px 60px rgba(0,0,0,0.3), 0 8px 32px rgba(0,0,0,0.2)',
-                            border: `${themeSurface.panelBorderWidth}px solid ${themeColors.border}`
-                        }}>
-                            <div style={{
-                                padding: '20px 24px',
-                                borderBottom: `1px solid ${themeColors.border}`,
-                                flexShrink: 0,
-                                background: themeColors.panelBackground,
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span id='settings-title' style={{ fontWeight: 600, fontSize: 20, color: themeColors.textPrimary }}>Settings</span>
-                                    <button
-                                        style={{
-                                            background: themeColors.inputBackground,
-                                            border: `1px solid ${themeColors.border}`,
-                                            borderRadius: 6,
-                                            color: themeColors.textPrimary,
-                                            padding: '6px 8px',
-                                            cursor: 'pointer',
-                                            fontSize: 16,
-                                            lineHeight: 1,
-                                            transition: 'background 0.2s'
-                                        }}
-                                        onClick={cancelSettings}
-                                        onMouseEnter={e => e.currentTarget.style.background = themeColors.itemHoverBackground}
-                                        onMouseLeave={e => e.currentTarget.style.background = themeColors.inputBackground}
-                                        title="Close settings"
-                                    >
-                                        ✕
-                                    </button>
+                        <div
+                            ref={settingsModalRef}
+                            id="mainContainer"
+                            className={`app-container bg-surface flex flex-col clip-settings-page ${isSettingsDialogClosing ? 'fade-out' : 'fade-in'}`}
+                            tabIndex={-1}
+                            style={{
+                                width: `${settings.windowWidth}px`,
+                                height: `${settings.windowHeight}px`,
+                            }}
+                        >
+                            <header className="flex items-center justify-between px-5 py-3 bg-surface z-10" id="mainHeader">
+                                <h1 className="text-xl font-bold text-on-surface tracking-tight">
+                                    {settingsNavigationStack.length > 0 ? activeSettingsSection : 'Settings'}
+                                </h1>
+                                <button
+                                    className="close-btn w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-high transition-all active:scale-95"
+                                    onClick={handleSettingsBackOrClose}
+                                    title={settingsNavigationStack.length > 0 ? 'Back' : 'Close settings'}
+                                    type="button"
+                                >
+                                    <span className="material-symbols-outlined text-on-surface-variant text-xl">
+                                        {settingsNavigationStack.length > 0 ? 'arrow_back' : 'close'}
+                                    </span>
+                                </button>
+                            </header>
+                            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar clip-settings-scroll px-4 pb-20" id="contentArea">
+                                <div key={activeSettingsSection} id="content-container">
+                                    {renderSettingsSection()}
                                 </div>
                             </div>
-                            <div className="clip-settings-scroll" style={{
-                                flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 24, display: 'flex', flexDirection: 'column', gap: 24,
-                                scrollbarWidth: 'thin',
-                                scrollbarColor: settings.theme === 'light' ? '#ccc #f0f0f0' : '#444 #23252a',
-                            }}>
-                                <SettingsGeneralSection
-                                    settingsDraft={settingsDraft}
-                                    settings={settings}
-                                    setSettingsDraft={setSettingsDraft}
-                                    setSettings={setSettings}
-                                    persistSettings={persistSettings}
-                                    maxItemsInputValue={maxItemsInputValue}
-                                    setMaxItemsInputValue={setMaxItemsInputValue}
-                                    hasMaxItemsChanges={hasMaxItemsChanges}
-                                    setHasMaxItemsChanges={setHasMaxItemsChanges}
-                                    setPendingMaxItems={setPendingMaxItems}
-                                    setBackupCreated={setBackupCreated}
-                                    setShowMaxItemsWarning={setShowMaxItemsWarning}
-                                    itemsLength={items.length}
-                                    shortcutModifiers={shortcutModifiers}
-                                    setShortcutModifiers={setShortcutModifiers}
-                                    shortcutMainKey={shortcutMainKey}
-                                    setShortcutMainKey={setShortcutMainKey}
-                                    showShortcutInfo={showShortcutInfo}
-                                    setShowShortcutInfo={setShowShortcutInfo}
-                                    clampWindowWidth={clampWindowWidth}
-                                    clampWindowHeight={clampWindowHeight}
-                                    windowSizeError={windowSizeError}
-                                    showToast={showToast}
-                                />
-                                <SettingsBackupsSection
-                                    settingsDraft={settingsDraft}
-                                    settings={settings}
-                                    setSettingsDraft={setSettingsDraft}
-                                    isBackingUp={isBackingUp}
-                                    setIsBackingUp={setIsBackingUp}
-                                    setBackupList={setBackupList}
-                                    setSelectedBackup={setSelectedBackup}
-                                    showToast={showToast}
-                                    log={log}
-                                    refreshBackupList={refreshBackupList}
-                                    showBackupManagement={showBackupManagement}
-                                    setShowBackupManagement={setShowBackupManagement}
-                                    backupList={backupList}
-                                    selectedBackups={selectedBackups}
-                                    setSelectedBackups={setSelectedBackups}
-                                    selectedBackup={selectedBackup}
-                                    setBackupToDelete={setBackupToDelete}
-                                    setBackupDeleteAction={setBackupDeleteAction}
-                                />
-                                <SettingsDataSection
-                                    handleExportSettings={handleExportSettings}
-                                    handleImportSettings={handleImportSettings}
-                                    showToast={showToast}
-                                    logger={log}
-                                />
-
-                                <SettingsThemeSection
-                                    activeThemeProfileKey={activeThemeProfileKey}
-                                    switchThemeProfile={switchThemeProfile}
-                                    themeEditorConfig={themeEditorConfig}
-                                    newThemeProfileName={newThemeProfileName}
-                                    setNewThemeProfileName={setNewThemeProfileName}
-                                    createThemeProfileFromInput={createThemeProfileFromInput}
-                                    setShowThemeProfileDeleteConfirm={setShowThemeProfileDeleteConfirm}
-                                    setIsThemeProfileDeleteDialogClosing={setIsThemeProfileDeleteDialogClosing}
-                                    setShowThemeProfileResetConfirm={setShowThemeProfileResetConfirm}
-                                    setIsThemeProfileResetDialogClosing={setIsThemeProfileResetDialogClosing}
-                                    themeColors={themeColors}
-                                    reloadThemeFromDisk={reloadThemeFromDisk}
-                                    editorThemeProfile={editorThemeProfile}
-                                    settingsDraft={settingsDraft}
-                                    settings={settings}
-                                    setSettingsDraft={setSettingsDraft}
-                                    updateEditorActiveProfile={updateEditorActiveProfile}
-                                    isThemeSaving={isThemeSaving}
-                                    saveThemeEditorConfig={saveThemeEditorConfig}
-                                    openThemeConfigInSystem={openThemeConfigInSystem}
-                                    exportThemeJson={exportThemeJson}
-                                    themePaths={themePaths}
-                                    copyTextToClipboard={copyTextToClipboard}
-                                    themeSchema={themeSchema}
-                                />
-                                <SettingsBehaviorSection
-                                    settingsDraft={settingsDraft}
-                                    settings={settings}
-                                    setSettingsDraft={setSettingsDraft}
-                                    settingsPaths={settingsPaths}
-                                    copyTextToClipboard={copyTextToClipboard}
-                                    openSettingsConfigInSystem={openSettingsConfigInSystem}
-                                    reloadSettingsFromDisk={reloadSettingsFromDisk}
-                                    setDangerAction={setDangerAction}
-                                    themeColors={themeColors}
-                                />
-                            </div>
-                            <SettingsModalFooter
-                                settingsDraft={settingsDraft}
-                                settings={settings}
-                                onQuitRequest={handleQuitFromSettings}
-                                onSave={saveSettings}
-                                onCancel={cancelSettings}
-                            />
+                            <nav className="absolute bottom-0 left-0 right-0 z-50 flex justify-around items-center px-2 py-2 bg-surface-container/90 backdrop-blur-xl rounded-t-xl border-t border-outline-variant/10">
+                                {PRIMARY_SETTINGS_SECTIONS.map((section) => {
+                                    const isActive = activeSettingsSection === section.key && settingsNavigationStack.length === 0;
+                                    return (
+                                    <button
+                                        key={section.key}
+                                        type="button"
+                                        className={`nav-btn flex flex-col items-center justify-center px-3 py-1.5 transition-all active:scale-95 ${isActive ? 'text-primary bg-primary-container/20 rounded-xl' : 'text-on-surface-variant hover:text-on-surface'}`}
+                                        data-section={section.key}
+                                        onClick={() => navigateToSettingsSection(section.key)}
+                                    >
+                                        <span className="material-symbols-outlined text-base" style={isActive ? { fontVariationSettings: "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24" } : undefined}>{section.icon}</span>
+                                        <span className="text-[9px] font-medium">{section.label}</span>
+                                    </button>
+                                    );
+                                })}
+                            </nav>
                         </div>
                     </div>
                 )}

@@ -45,7 +45,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('window-will-show', listener);
         return () => ipcRenderer.removeListener('window-will-show', listener);
     },
-    setGlobalShortcut: (shortcut) => ipcRenderer.send('set-global-shortcut', shortcut),
     quitApp: () => ipcRenderer.send('quit-app'),
     onSaveSettingsBeforeQuit: (callback) => {
         const listener = () => callback();

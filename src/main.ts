@@ -86,6 +86,7 @@ let currentAhkShortcut = '';
 let lastAhkScriptPath: string | null = null;
 let ahkProcessPid: number | null = null;
 let isAhkShuttingDown = false;
+let pendingAhkStartTimer: NodeJS.Timeout | null = null;
 
 function getAppIconPath(): string {
     if (app.isPackaged) {
@@ -367,8 +368,19 @@ function startAhkForShortcut(shortcut: string) {
     // Stop existing process if different shortcut
     if (currentAhkShortcut !== shortcut) {
         stopAhk();
-        // Wait a bit for cleanup
-        setTimeout(() => startAhkProcess(shortcut), 200);
+        // Wait a bit for cleanup. Track the timer so a newer shortcut change
+        // can cancel this pending start (prevents stale AHK launches).
+        if (pendingAhkStartTimer) {
+            clearTimeout(pendingAhkStartTimer);
+            pendingAhkStartTimer = null;
+        }
+        pendingAhkStartTimer = setTimeout(() => {
+            pendingAhkStartTimer = null;
+            // Only start if this shortcut is still the one we want.
+            if (currentAhkShortcut === shortcut && !isAhkShuttingDown) {
+                startAhkProcess(shortcut);
+            }
+        }, 200);
     } else {
         startAhkProcess(shortcut);
     }
@@ -499,6 +511,10 @@ async function stopAhk() {
     lastAhkScriptPath = null;
     currentAhkShortcut = '';
     isAhkShuttingDown = false;
+    if (pendingAhkStartTimer) {
+        clearTimeout(pendingAhkStartTimer);
+        pendingAhkStartTimer = null;
+    }
 
     console.log('[main] AHK cleanup completed');
 }
@@ -555,6 +571,14 @@ async function handleShortcutChange(shortcut: string) {
     }
 
     currentAhkShortcut = shortcut; // Update the current shortcut
+}
+
+// Serialize shortcut changes so rapid UI updates don't race.
+// Only the latest shortcut in the queue actually takes effect.
+let shortcutChangeChain: Promise<void> = Promise.resolve();
+
+function handleShortcutChangeQueued(shortcut: string) {
+    shortcutChangeChain = shortcutChangeChain.then(() => handleShortcutChange(shortcut));
 }
 
 // Helper to (re)register global shortcut
@@ -2017,9 +2041,7 @@ app.whenReady().then(() => {
     pollClipboard();
     updateGlobalShortcut();
     registerNativeMessageHandler();
-    handleShortcutChange(backendShortcut).catch(err => {
-        console.error('[main] Error handling initial shortcut setup:', err);
-    });
+    handleShortcutChangeQueued(backendShortcut);
 
     ipcMain.on('paste-clipboard-item', (_event, item) => {
         const preferredTargetHwnd = getPreferredPasteTargetHwnd();
@@ -2196,9 +2218,7 @@ app.whenReady().then(() => {
         if (!fromFile) {
             const fallback = createDefaultSettingsDocument();
             applySettingsRuntime(fallback);
-            handleShortcutChange(backendShortcut).catch((error) => {
-                console.error('[main] Failed to refresh shortcut after settings reload:', error);
-            });
+            handleShortcutChangeQueued(backendShortcut);
             return fallback;
         }
 
@@ -2207,9 +2227,7 @@ app.whenReady().then(() => {
             maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(fromFile.maxItems))));
             invalidateHistoryCache();
         }
-        handleShortcutChange(backendShortcut).catch((error) => {
-            console.error('[main] Failed to refresh shortcut after settings reload:', error);
-        });
+        handleShortcutChangeQueued(backendShortcut);
         return fromFile;
     });
 
@@ -2429,12 +2447,6 @@ app.whenReady().then(() => {
         }
     });
 
-    ipcMain.on('set-global-shortcut', (_event, shortcut) => {
-        handleShortcutChange(sanitizeShortcut(shortcut)).catch(err => {
-            console.error('[main] Error handling shortcut change:', err);
-        });
-    });
-
     ipcMain.on('set-win-v-override', (_event, enabled) => {
         winVOverrideEnabled = !!enabled;
         updateGlobalShortcut();
@@ -2494,9 +2506,7 @@ app.whenReady().then(() => {
                 ...(settings || {}),
             };
             fs.writeFileSync(getSettingsPath(), JSON.stringify(nextSettings, null, 2), 'utf8');
-            handleShortcutChange(backendShortcut).catch((error) => {
-                console.error('[main] Failed to refresh shortcut after settings save:', error);
-            });
+            handleShortcutChangeQueued(backendShortcut);
         } catch (error) {
             console.error('[main] Failed to save settings to file:', error);
         }

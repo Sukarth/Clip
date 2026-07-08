@@ -85,7 +85,7 @@ const DEFAULT_THEME_PROFILE: ThemeProfile = {
         scrollbarTrack: '#23252a',
     },
     typography: {
-        fontFamily: 'Segoe UI, Arial, sans-serif',
+        fontFamily: 'Lexend, sans-serif',
         monoFontFamily: 'Consolas, Monaco, monospace',
         baseFontSize: 15,
         titleFontSize: 18,

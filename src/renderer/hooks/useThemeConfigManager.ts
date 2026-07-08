@@ -20,6 +20,8 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
     const [settingsPaths, setSettingsPaths] = React.useState<{ configPath: string; schemaPath: string } | null>(null);
     const [newThemeProfileName, setNewThemeProfileName] = React.useState('');
     const [isThemeSaving, setIsThemeSaving] = React.useState(false);
+    const hasHydratedRef = React.useRef(false);
+    const autosaveTimeoutRef = React.useRef<number | null>(null);
 
     const activeThemeProfile = React.useMemo(() => getActiveThemeProfile(themeConfig), [themeConfig]);
     const activeThemeProfileKey = React.useMemo(() => {
@@ -246,6 +248,46 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
             if (typeof dispose === 'function') dispose();
         };
     }, [loadThemeFromMain]);
+
+    React.useEffect(() => {
+        if (!hasHydratedRef.current) {
+            hasHydratedRef.current = true;
+            return;
+        }
+
+        if (JSON.stringify(themeEditorConfig) === JSON.stringify(themeConfig)) {
+            return;
+        }
+
+        if (autosaveTimeoutRef.current !== null) {
+            window.clearTimeout(autosaveTimeoutRef.current);
+        }
+
+        autosaveTimeoutRef.current = window.setTimeout(async () => {
+            try {
+                setIsThemeSaving(true);
+                const saved = await window.electronAPI?.saveThemeConfig?.(themeEditorConfig);
+                if (!saved) {
+                    throw new Error('Theme config save did not return a result.');
+                }
+
+                const sanitized = sanitizeThemeConfig(saved);
+                setThemeConfig(sanitized);
+                setThemeEditorConfig(sanitized);
+            } catch (error) {
+                showToast('error', `Failed to autosave theme config: ${error instanceof Error ? error.message : String(error)}`);
+            } finally {
+                setIsThemeSaving(false);
+            }
+        }, 220);
+
+        return () => {
+            if (autosaveTimeoutRef.current !== null) {
+                window.clearTimeout(autosaveTimeoutRef.current);
+                autosaveTimeoutRef.current = null;
+            }
+        };
+    }, [themeConfig, themeEditorConfig, showToast]);
 
     return {
         themeConfig,

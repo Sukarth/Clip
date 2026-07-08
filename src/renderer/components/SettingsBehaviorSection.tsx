@@ -1,32 +1,11 @@
 import * as React from 'react';
-import { sectionHeaderStyle } from '../app-constants';
 import type { Settings } from '../app-types';
 import Switch from './Switch';
-
-const behaviorLabelStyle: React.CSSProperties = {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 20,
-};
-
-function colorWithAlpha(color: string, alpha: number) {
-    const normalizedAlpha = Math.min(1, Math.max(0, alpha));
-    const percentage = Math.round(normalizedAlpha * 100);
-    return `color-mix(in srgb, ${color} ${percentage}%, transparent)`;
-}
 
 interface SettingsBehaviorSectionProps {
     settingsDraft: Settings | null;
     settings: Settings;
     setSettingsDraft: React.Dispatch<React.SetStateAction<Settings | null>>;
-    settingsPaths: { configPath: string; schemaPath: string } | null;
-    copyTextToClipboard: (value: string, label: string) => void | Promise<void>;
-    openSettingsConfigInSystem: () => void | Promise<void>;
-    reloadSettingsFromDisk: () => void | Promise<void>;
-    setDangerAction: React.Dispatch<React.SetStateAction<null | 'clear' | 'reset'>>;
     themeColors: {
         border: string;
         panelBackground: string;
@@ -41,188 +20,67 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
     settingsDraft,
     settings,
     setSettingsDraft,
-    settingsPaths,
-    copyTextToClipboard,
-    openSettingsConfigInSystem,
-    reloadSettingsFromDisk,
-    setDangerAction,
-    themeColors,
 }) => {
-    const accentColor = settingsDraft?.accentColor ?? settings.accentColor;
-    const actionButtonStyle: React.CSSProperties = {
-        background: themeColors.panelBackground,
-        border: `1px solid ${themeColors.border}`,
-        borderRadius: 8,
-        color: themeColors.textPrimary,
-        padding: '9px 12px',
-        cursor: 'pointer',
-        fontWeight: 600,
-    };
+    const current = settingsDraft ?? settings;
+    const update = React.useCallback((patch: Partial<Settings>) => {
+        setSettingsDraft((prev) => ({ ...(prev ?? settings), ...patch }));
+    }, [setSettingsDraft, settings]);
 
     return (
-        <>
-            <div>
-                <h2 style={sectionHeaderStyle}>Behavior Settings</h2>
-
-                <label style={behaviorLabelStyle}>
-                    Show notifications for new clips
-                    <Switch
-                        checked={settingsDraft?.showNotifications ?? settings.showNotifications}
-                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), showNotifications: v }))}
-                        accentColor={accentColor}
-                    />
-                </label>
-
-                <label style={behaviorLabelStyle}>
-                    Start with system
-                    <Switch
-                        checked={settingsDraft?.startWithSystem ?? settings.startWithSystem}
-                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), startWithSystem: v }))}
-                        accentColor={accentColor}
-                    />
-                </label>
-
-                <label style={behaviorLabelStyle}>
-                    Store images in clipboard history
-                    <Switch
-                        checked={settingsDraft?.storeImagesInClipboard ?? settings.storeImagesInClipboard}
-                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), storeImagesInClipboard: v }))}
-                        accentColor={accentColor}
-                    />
-                </label>
-
-                <label style={behaviorLabelStyle}>
-                    Allow pinning favorite items
-                    <Switch
-                        checked={settingsDraft?.pinFavoriteItems ?? settings.pinFavoriteItems}
-                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), pinFavoriteItems: v }))}
-                        accentColor={accentColor}
-                    />
-                </label>
-
-                <label style={behaviorLabelStyle}>
-                    Ask before deleting items
-                    <Switch
-                        checked={settingsDraft?.deleteConfirm ?? settings.deleteConfirm}
-                        onChange={(v) => setSettingsDraft((s) => ({ ...(s ?? settings), deleteConfirm: v }))}
-                        accentColor={accentColor}
-                    />
-                </label>
-            </div>
-
-            <div
-                style={{
-                    marginTop: 10,
-                    padding: 14,
-                    border: `1px solid ${themeColors.border}`,
-                    borderRadius: 12,
-                    background: themeColors.panelBackground,
-                }}
-            >
-                <div style={{ fontSize: 13, color: themeColors.textSecondary, lineHeight: 1.5, marginBottom: 12 }}>
-                    Settings file path:{' '}
-                    <code
-                        style={{ color: themeColors.textPrimary, cursor: 'pointer', textDecoration: 'underline' }}
-                        title="click to copy"
-                        onClick={() => {
-                            if (!settingsPaths?.configPath) return;
-                            void copyTextToClipboard(settingsPaths.configPath, 'Settings file path');
-                        }}
-                    >
-                        {settingsPaths?.configPath || 'AppData/clip-settings.json'}
-                    </code>
-                    <br />
-                    Settings schema path:{' '}
-                    <code
-                        style={{ color: themeColors.textPrimary, cursor: 'pointer', textDecoration: 'underline' }}
-                        title="click to copy"
-                        onClick={() => {
-                            if (!settingsPaths?.schemaPath) return;
-                            void copyTextToClipboard(settingsPaths.schemaPath, 'Settings schema path');
-                        }}
-                    >
-                        {settingsPaths?.schemaPath || 'AppData/clip-settings.schema.json'}
-                    </code>
+        <div className="space-y-3 py-3">
+            <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                    <span className="material-symbols-outlined text-primary text-sm">notifications</span>
+                    <span className="text-xs font-semibold text-primary uppercase tracking-wider">Notifications</span>
                 </div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button
-                        className="settings-button"
-                        style={actionButtonStyle}
-                        onClick={() => {
-                            void openSettingsConfigInSystem();
-                        }}
-                    >
-                        Open Settings JSON
-                    </button>
-                    <button
-                        className="settings-button"
-                        style={actionButtonStyle}
-                        onClick={() => {
-                            void reloadSettingsFromDisk();
-                        }}
-                    >
-                        Reload Settings From Disk
-                    </button>
+
+                <div className="flex items-center justify-between py-2">
+                    <div>
+                        <h3 className="font-medium text-on-surface text-sm">Show Notifications</h3>
+                        <p className="text-[11px] text-on-surface-variant">Notify on new clipboard items</p>
+                    </div>
+                    <Switch checked={current.showNotifications} onChange={(value) => update({ showNotifications: value })} accentColor="#abccff" />
                 </div>
             </div>
 
-            <div
-                style={{
-                    marginTop: 32,
-                    padding: 18,
-                    border: `2px solid ${themeColors.danger}`,
-                    borderRadius: 12,
-                    background: colorWithAlpha(themeColors.danger, 0.08),
-                    color: themeColors.danger,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 16,
-                }}
-            >
-                <h2 id="danger-area" style={{ fontSize: 18, fontWeight: 700, color: themeColors.danger, margin: 0, marginBottom: 8 }}>
-                    Danger Area
-                </h2>
-                <div style={{ fontSize: 15, color: themeColors.danger, marginBottom: 8 }}>
-                    These actions are irreversible. Please proceed with caution.
+            <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                    <span className="material-symbols-outlined text-primary text-sm">content_copy</span>
+                    <span className="text-xs font-semibold text-primary uppercase tracking-wider">Clipboard Behavior</span>
                 </div>
-                <button
-                    style={{
-                        background: themeColors.danger,
-                        border: `1px solid ${themeColors.danger}`,
-                        borderRadius: 8,
-                        color: '#fff',
-                        padding: '8px 18px',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: 15,
-                    }}
-                    onClick={() => setDangerAction('clear')}
-                >
-                    Clear All Clipboard History
-                </button>
-                <div style={{ fontSize: 13, color: themeColors.danger, marginBottom: 8, marginTop: -8 }}>
-                    This will permanently delete all clipboard items.
+
+                <div className="flex items-center justify-between py-2">
+                    <div>
+                        <h3 className="font-medium text-on-surface text-sm">Store Images</h3>
+                        <p className="text-[11px] text-on-surface-variant">Save copied images to history</p>
+                    </div>
+                    <Switch checked={current.storeImagesInClipboard} onChange={(value) => update({ storeImagesInClipboard: value })} accentColor="#abccff" />
                 </div>
-                <button
-                    style={{
-                        background: themeColors.warning,
-                        border: `1px solid ${themeColors.warning}`,
-                        borderRadius: 8,
-                        color: '#222',
-                        padding: '8px 18px',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: 15,
-                    }}
-                    onClick={() => setDangerAction('reset')}
-                >
-                    Reset Settings to Default
-                </button>
-                <div id="reset-settings-warning" style={{ fontSize: 13, color: themeColors.warning, marginTop: -8 }}>
-                    This will reset all settings to their original defaults.
+
+                <div className="flex items-center justify-between py-2">
+                    <div>
+                        <h3 className="font-medium text-on-surface text-sm">Pin Favorite Items</h3>
+                        <p className="text-[11px] text-on-surface-variant">Allow pinning frequently used items</p>
+                    </div>
+                    <Switch checked={current.pinFavoriteItems} onChange={(value) => update({ pinFavoriteItems: value })} accentColor="#abccff" />
                 </div>
             </div>
-        </>
+
+            <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                    <span className="material-symbols-outlined text-primary text-sm">help</span>
+                    <span className="text-xs font-semibold text-primary uppercase tracking-wider">Confirmations</span>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                    <div>
+                        <h3 className="font-medium text-on-surface text-sm">Delete Confirmation</h3>
+                        <p className="text-[11px] text-on-surface-variant">Ask before deleting items</p>
+                    </div>
+                    <Switch checked={current.deleteConfirm} onChange={(value) => update({ deleteConfirm: value })} accentColor="#abccff" />
+                </div>
+            </div>
+        </div>
     );
 };
 
