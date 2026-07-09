@@ -114,3 +114,5 @@ $RECYCLE.BIN/
 
 # Package lock files (keep package-lock.json but ignore yarn.lock if using npm)
 yarn.lock
+# Claude Code local tooling/worktrees
+.claude/

@@ -2,6 +2,13 @@
 type ThemeConfig = import('../theme-config').ThemeConfig;
 type ThemeSchema = Record<string, unknown>;
 
+interface AuthState {
+    loggedIn: boolean;
+    email: string | null;
+    isPro: boolean;
+    plan: 'free' | 'pro' | null;
+}
+
 interface ElectronAPI {
     dragWindow: (cursorX: number, cursorY: number, offsetX?: number, offsetY?: number) => void;
     hideWindow: () => void;
@@ -49,6 +56,12 @@ interface ElectronAPI {
     deleteThemeProfile: (profileKey: string) => Promise<ThemeConfig>;
     setActiveThemeProfile: (profileKey: string) => Promise<ThemeConfig>;
     onThemeConfigUpdated: (callback: (data: ThemeConfig) => void) => (() => void) | void;
+    auth: {
+        getState: () => Promise<AuthState>;
+        login: () => Promise<AuthState>;
+        logout: () => Promise<AuthState>;
+        onChanged: (callback: (state: AuthState) => void) => (() => void) | void;
+    };
     isDevelopment: () => boolean;
 }
 

@@ -73,6 +73,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('theme-config-updated', listener);
         return () => ipcRenderer.removeListener('theme-config-updated', listener);
     },
+    auth: {
+        getState: () => ipcRenderer.invoke('auth:get-state'),
+        login: () => ipcRenderer.invoke('auth:login'),
+        logout: () => ipcRenderer.invoke('auth:logout'),
+        onChanged: (callback) => {
+            const listener = (_event, state) => callback(state);
+            ipcRenderer.on('auth-changed', listener);
+            return () => ipcRenderer.removeListener('auth-changed', listener);
+        },
+    },
     isDevelopment: () => {
         // Check multiple indicators for development mode
         return !!(

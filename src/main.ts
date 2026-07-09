@@ -11,6 +11,8 @@ import {
     normalizeThemeProfileKey,
     sanitizeThemeConfig,
 } from './theme-config';
+import { initTokenStore } from './cloud/tokenStore';
+import * as cloudAuth from './cloud/auth';
 
 // --- Robust error logging for debugging startup crashes ---
 const logPath = path.join(
@@ -2013,6 +2015,16 @@ app.whenReady().then(() => {
     initializeThemeConfig();
     createMainWindow();
 
+    // Cloud auth: encrypted session storage + browser sign-in. Broadcast auth
+    // changes so the renderer's Profile tab stays in sync.
+    initTokenStore(getAppDataPath());
+    cloudAuth.initAuth(() => {
+        cloudAuth
+            .getAuthState(false)
+            .then((state) => mainWindow?.webContents.send('auth-changed', state))
+            .catch(() => { });
+    });
+
     // Handle startup behavior based on command line arguments and settings
     const isStartHidden = process.argv.includes('--start-hidden') || process.argv.includes('--hidden');
 
@@ -2042,6 +2054,14 @@ app.whenReady().then(() => {
     updateGlobalShortcut();
     registerNativeMessageHandler();
     handleShortcutChangeQueued(backendShortcut);
+
+    // --- Cloud auth IPC ---
+    ipcMain.handle('auth:get-state', () => cloudAuth.getAuthState(true));
+    ipcMain.handle('auth:login', () => cloudAuth.login());
+    ipcMain.handle('auth:logout', async () => {
+        await cloudAuth.logout();
+        return cloudAuth.getAuthState(false);
+    });
 
     ipcMain.on('paste-clipboard-item', (_event, item) => {
         const preferredTargetHwnd = getPreferredPasteTargetHwnd();
