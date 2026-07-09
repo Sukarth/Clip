@@ -214,6 +214,15 @@ const App: React.FC = () => {
     const [isRestartDialogClosing, setIsRestartDialogClosing] = useState(false);
     const [isUnsavedChangesDialogClosing, setIsUnsavedChangesDialogClosing] = useState(false);
 
+    // Cloud account state (browser sign-in via the loopback flow)
+    const [account, setAccount] = useState<AuthState>({ loggedIn: false, email: null, isPro: false, plan: null });
+    const [authBusy, setAuthBusy] = useState(false);
+    useEffect(() => {
+        window.electronAPI.auth.getState().then(setAccount).catch(() => { });
+        const unsub = window.electronAPI.auth.onChanged(setAccount);
+        return () => { if (typeof unsub === 'function') unsub(); };
+    }, []);
+
     const handleWindowWillShow = useCallback(() => {
         setIsWindowFocused(true);
         setIsAnimatingList(true);
@@ -1199,8 +1208,29 @@ const App: React.FC = () => {
                             <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center mb-3">
                                 <span className="material-symbols-outlined text-on-primary text-4xl">person</span>
                             </div>
-                            <h2 className="text-lg font-bold text-on-surface">User</h2>
-                            <p className="text-xs text-on-surface-variant">Local Profile</p>
+                            <h2 className="text-lg font-bold text-on-surface break-all">{account.loggedIn ? (account.email ?? 'Signed in') : 'User'}</h2>
+                            <p className="text-xs text-on-surface-variant">{account.loggedIn ? (account.isPro ? 'Clip Pro' : 'Free plan') : 'Local Profile'}</p>
+                            {account.loggedIn && (
+                                <button
+                                    type="button"
+                                    disabled={authBusy}
+                                    onClick={async () => {
+                                        setAuthBusy(true);
+                                        try {
+                                            const s = await window.electronAPI.auth.logout();
+                                            setAccount(s);
+                                            showToast('info', 'Signed out.');
+                                        } catch {
+                                            showToast('error', 'Sign-out failed.');
+                                        } finally {
+                                            setAuthBusy(false);
+                                        }
+                                    }}
+                                    className="mt-3 py-1.5 px-4 bg-surface-container-high text-on-surface rounded-lg text-xs font-semibold hover:brightness-110 transition-all border-0 disabled:opacity-60"
+                                >
+                                    {authBusy ? 'Working…' : 'Sign Out'}
+                                </button>
+                            )}
                         </div>
 
                         <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
@@ -1215,17 +1245,59 @@ const App: React.FC = () => {
                                     <p className="text-[11px] text-on-surface-variant">Sync clipboard across devices</p>
                                 </div>
                                 <label className="toggle-switch">
-                                    <input type="checkbox" />
+                                    <input
+                                        type="checkbox"
+                                        checked={false}
+                                        disabled={!(account.loggedIn && account.isPro)}
+                                        onChange={() => showToast('info', 'Encrypted cloud sync is rolling out in an upcoming update.')}
+                                    />
                                     <span className="toggle-slider"></span>
                                 </label>
                             </div>
 
-                            <div className="p-3 bg-surface-container-high rounded-lg">
-                                <p className="text-xs text-on-surface-variant text-center">Sign in to enable cloud sync</p>
-                                <button className="w-full mt-2 py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold hover:brightness-110 transition-all border-0">
-                                    Sign In
-                                </button>
-                            </div>
+                            {!account.loggedIn && (
+                                <div className="p-3 bg-surface-container-high rounded-lg">
+                                    <p className="text-xs text-on-surface-variant text-center">Sign in to enable cloud sync</p>
+                                    <button
+                                        type="button"
+                                        disabled={authBusy}
+                                        onClick={async () => {
+                                            setAuthBusy(true);
+                                            try {
+                                                const s = await window.electronAPI.auth.login();
+                                                setAccount(s);
+                                                showToast('success', `Signed in as ${s.email ?? 'your account'}.`);
+                                            } catch (e) {
+                                                showToast('error', e instanceof Error ? e.message : 'Sign-in failed.');
+                                            } finally {
+                                                setAuthBusy(false);
+                                            }
+                                        }}
+                                        className="w-full mt-2 py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold hover:brightness-110 transition-all border-0 disabled:opacity-60"
+                                    >
+                                        {authBusy ? 'Opening browser…' : 'Sign In'}
+                                    </button>
+                                </div>
+                            )}
+
+                            {account.loggedIn && !account.isPro && (
+                                <div className="p-3 bg-surface-container-high rounded-lg">
+                                    <p className="text-xs text-on-surface-variant text-center">Upgrade to Pro to sync across your devices.</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => window.open('https://getclip.vercel.app/pricing', '_blank')}
+                                        className="w-full mt-2 py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold hover:brightness-110 transition-all border-0"
+                                    >
+                                        Upgrade to Pro
+                                    </button>
+                                </div>
+                            )}
+
+                            {account.loggedIn && account.isPro && (
+                                <div className="p-3 bg-surface-container-high rounded-lg">
+                                    <p className="text-xs text-on-surface-variant text-center">You&apos;re on Pro. Encrypted cloud sync is rolling out in an upcoming update.</p>
+                                </div>
+                            )}
                         </div>
 
                         <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
