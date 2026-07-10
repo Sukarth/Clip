@@ -71,8 +71,18 @@ interface ElectronAPI {
         resetPassphrase: (passphrase: string) => Promise<SyncActionResult>;
         now: () => Promise<{ pushed: number; pulled: number; error?: string }>;
         lock: () => Promise<SyncStatusView>;
+        backupNow: () => Promise<{ ok: boolean; error?: string }>;
+        listBackups: () => Promise<CloudBackupView[]>;
+        restoreBackup: (id: string) => Promise<{ ok: boolean; error?: string }>;
     };
     isDevelopment: () => boolean;
+}
+
+interface CloudBackupView {
+    id: string;
+    deviceName: string | null;
+    sizeBytes: number;
+    createdAt: string;
 }
 
 interface SyncUsageView {

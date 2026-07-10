@@ -1746,12 +1746,27 @@ function createBackup() {
             backups.slice(clipMaxBackups).forEach(b => fs.unlinkSync(path.join(getBackupDir(), b.file)));
         }
 
+        // Best-effort encrypted cloud backup (non-blocking, guarded by sync state).
+        void maybeCloudBackup(backupPath);
         return backupPath;
     } catch (error) {
         console.error('[main] Error creating backup:', error);
         throw error;
     }
 }
+
+async function maybeCloudBackup(backupPath: string): Promise<void> {
+    try {
+        const st = cloudSync.getStatus();
+        if (!st.enabled || !st.unlocked) return;
+        const bytes = fs.readFileSync(backupPath);
+        const r = await cloudSync.pushBackup(bytes, os.hostname());
+        if (!r.ok && r.error && r.error !== 'locked') logError('cloud backup failed: ' + r.error);
+    } catch (e) {
+        logError('cloud backup error: ' + e);
+    }
+}
+
 function restoreBackup(backupFile: string) {
     const dbPath = getDatabasePath();
     const backupPath = resolveBackupPath(backupFile);
@@ -2190,6 +2205,37 @@ app.whenReady().then(() => {
     ipcMain.handle('sync:lock', () => {
         cloudSync.lock();
         return cloudSync.getStatus();
+    });
+    ipcMain.handle('sync:backup-now', async () => {
+        try {
+            if (db) db.pragma('wal_checkpoint(TRUNCATE)');
+            const bytes = fs.readFileSync(getDatabasePath());
+            return await cloudSync.pushBackup(bytes, os.hostname());
+        } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+    });
+    ipcMain.handle('sync:list-backups', () => cloudSync.listBackups());
+    ipcMain.handle('sync:restore-backup', async (_e, id: string) => {
+        try {
+            const bytes = await cloudSync.downloadBackup(id);
+            if (!bytes) return { ok: false, error: 'Could not download or decrypt the backup.' };
+            if (bytes.length < 16 || !bytes.subarray(0, 16).equals(SQLITE_MAGIC_HEADER)) {
+                return { ok: false, error: 'The backup file is not valid.' };
+            }
+            ensureBackupDir();
+            const name = `clip-backup-cloud-${Date.now()}.db`;
+            fs.writeFileSync(path.join(getBackupDir(), name), bytes);
+            restoreBackup(name);
+            try { fs.unlinkSync(path.join(getBackupDir(), name)); } catch { /* ignore */ }
+            invalidateHistoryCache();
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('clipboard-history', getClipboardHistory());
+            }
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
     });
 
     ipcMain.on('paste-clipboard-item', (_event, item) => {

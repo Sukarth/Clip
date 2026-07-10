@@ -43,6 +43,22 @@ export function encrypt(plaintext: string, key: Buffer): { nonce: Buffer; cipher
     return { nonce, ciphertext: Buffer.concat([enc, tag]) };
 }
 
+export function encryptBytes(data: Buffer, key: Buffer): { nonce: Buffer; ciphertext: Buffer } {
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', key, nonce);
+    const enc = Buffer.concat([cipher.update(data), cipher.final()]);
+    return { nonce, ciphertext: Buffer.concat([enc, cipher.getAuthTag()]) };
+}
+
+export function decryptBytes(ciphertext: Buffer, nonce: Buffer, key: Buffer): Buffer {
+    if (ciphertext.length < 16) throw new Error('Ciphertext too short.');
+    const tag = ciphertext.subarray(ciphertext.length - 16);
+    const body = ciphertext.subarray(0, ciphertext.length - 16);
+    const decipher = createDecipheriv('aes-256-gcm', key, nonce);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(body), decipher.final()]);
+}
+
 export function decrypt(ciphertext: Buffer, nonce: Buffer, key: Buffer): string {
     if (ciphertext.length < 16) throw new Error('Ciphertext too short.');
     const tag = ciphertext.subarray(ciphertext.length - 16);

@@ -276,6 +276,31 @@ const App: React.FC = () => {
         }
     };
 
+    // Cloud backups
+    const [cloudBackups, setCloudBackups] = useState<CloudBackupView[]>([]);
+    const [backupBusy, setBackupBusy] = useState(false);
+    const loadBackups = useCallback(async () => {
+        try { setCloudBackups(await window.electronAPI.sync.listBackups()); } catch { setCloudBackups([]); }
+    }, []);
+    useEffect(() => {
+        if (syncStatus?.enabled && syncStatus?.unlocked) void loadBackups();
+        else setCloudBackups([]);
+    }, [syncStatus?.enabled, syncStatus?.unlocked, loadBackups]);
+    const backupNow = async () => {
+        setBackupBusy(true);
+        const r = await window.electronAPI.sync.backupNow();
+        setBackupBusy(false);
+        if (r.ok) { showToast('success', 'Backed up to the cloud.'); void loadBackups(); }
+        else showToast('error', r.error ?? 'Backup failed.');
+    };
+    const restoreCloudBackup = async (id: string) => {
+        setBackupBusy(true);
+        const r = await window.electronAPI.sync.restoreBackup(id);
+        setBackupBusy(false);
+        if (r.ok) showToast('success', 'Restored from cloud backup. Restart Clip to be safe.');
+        else showToast('error', r.error ?? 'Restore failed.');
+    };
+
     const handleWindowWillShow = useCallback(() => {
         setIsWindowFocused(true);
         setIsAnimatingList(true);
@@ -1415,6 +1440,29 @@ const App: React.FC = () => {
                                                 >
                                                     Reset passphrase
                                                 </button>
+                                            </div>
+                                            {syncStatus.lastError && (
+                                                <p className="text-[10px] text-center" style={{ color: '#ffb4ad' }}>{syncStatus.lastError}</p>
+                                            )}
+                                            <div className="mt-1 pt-2 border-t border-white/5">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[11px] text-on-surface-variant">Cloud backups</span>
+                                                    <button type="button" onClick={() => void backupNow()} disabled={backupBusy} className="text-[11px] text-primary bg-transparent border-0 hover:underline disabled:opacity-60">
+                                                        {backupBusy ? 'Working…' : 'Back up now'}
+                                                    </button>
+                                                </div>
+                                                {cloudBackups.length === 0 ? (
+                                                    <p className="text-[10px] text-on-surface-variant mt-1">No cloud backups yet.</p>
+                                                ) : (
+                                                    <ul className="mt-1 space-y-1">
+                                                        {cloudBackups.map((b) => (
+                                                            <li key={b.id} className="flex items-center justify-between gap-2 text-[10px] text-on-surface-variant">
+                                                                <span className="truncate">{(b.deviceName || 'Device')} · {new Date(b.createdAt).toLocaleDateString()} · {(b.sizeBytes / 1024).toFixed(0)} KB</span>
+                                                                <button type="button" onClick={() => void restoreCloudBackup(b.id)} disabled={backupBusy} className="shrink-0 text-primary bg-transparent border-0 hover:underline disabled:opacity-60">Restore</button>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
                                             </div>
                                         </>
                                     )}

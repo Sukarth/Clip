@@ -121,6 +121,15 @@ async function api(path: string, init: RequestInit): Promise<Response | null> {
     });
 }
 
+/** Turn raw fetch/network failures into a friendly, offline-aware message. */
+function netMessage(e: unknown): string {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/fetch failed|network|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ETIMEDOUT|timeout|ERR_/i.test(m)) {
+        return 'You appear to be offline. Sync will retry automatically.';
+    }
+    return m;
+}
+
 // --- Passphrase / key material --------------------------------------------
 
 /** Unlock (or first-time set up) sync with a passphrase. */
@@ -435,7 +444,7 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; error
         if (pushed > 0 || pulled > 0) host.refreshUi();
         return { pushed, pulled };
     } catch (e) {
-        lastError = e instanceof Error ? e.message : String(e);
+        lastError = netMessage(e);
         return { pushed: 0, pulled: 0, error: lastError };
     } finally {
         syncing = false;
@@ -465,4 +474,65 @@ export async function fetchUsage(): Promise<{ bytesUsed: number; clipCount: numb
         clipCount: number;
         limits: { storageBytes: number; maxClips: number };
     };
+}
+
+// --- Encrypted cloud backups -----------------------------------------------
+
+const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
+
+export interface CloudBackup {
+    id: string;
+    deviceName: string | null;
+    sizeBytes: number;
+    createdAt: string;
+}
+
+/** Encrypt a full-DB backup and upload it. Requires an unlocked passphrase. */
+export async function pushBackup(dbBytes: Buffer, deviceName: string): Promise<{ ok: boolean; error?: string }> {
+    if (!key) return { ok: false, error: 'locked' };
+    try {
+        const { nonce, ciphertext } = box.encryptBytes(dbBytes, key);
+        if (ciphertext.length > MAX_BACKUP_BYTES) {
+            return { ok: false, error: 'Backup is larger than the 10 MB cloud limit.' };
+        }
+        const res = await api('/api/sync/backup', {
+            method: 'POST',
+            body: JSON.stringify({
+                deviceName,
+                nonce: nonce.toString('base64'),
+                ciphertext: ciphertext.toString('base64'),
+                sizeBytes: ciphertext.length,
+            }),
+        });
+        if (!res) return { ok: false, error: 'You need to be signed in.' };
+        if (!res.ok) {
+            return { ok: false, error: res.status === 413 ? 'Backup is too large for the cloud.' : `Backup failed (${res.status}).` };
+        }
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, error: netMessage(e) };
+    }
+}
+
+export async function listBackups(): Promise<CloudBackup[]> {
+    try {
+        const res = await api('/api/sync/backups', { method: 'GET' });
+        if (!res || !res.ok) return [];
+        return ((await res.json()) as { backups: CloudBackup[] }).backups ?? [];
+    } catch {
+        return [];
+    }
+}
+
+/** Download + decrypt one backup, returning the raw DB bytes (or null). */
+export async function downloadBackup(id: string): Promise<Buffer | null> {
+    if (!key) return null;
+    try {
+        const res = await api(`/api/sync/backup?id=${encodeURIComponent(id)}`, { method: 'GET' });
+        if (!res || !res.ok) return null;
+        const data = (await res.json()) as { nonce: string; ciphertext: string };
+        return box.decryptBytes(Buffer.from(data.ciphertext, 'base64'), Buffer.from(data.nonce, 'base64'), key);
+    } catch {
+        return null;
+    }
 }

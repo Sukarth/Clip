@@ -90,6 +90,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         resetPassphrase: (passphrase) => ipcRenderer.invoke('sync:reset-passphrase', passphrase),
         now: () => ipcRenderer.invoke('sync:now'),
         lock: () => ipcRenderer.invoke('sync:lock'),
+        backupNow: () => ipcRenderer.invoke('sync:backup-now'),
+        listBackups: () => ipcRenderer.invoke('sync:list-backups'),
+        restoreBackup: (id) => ipcRenderer.invoke('sync:restore-backup', id),
     },
     isDevelopment: () => {
         // Check multiple indicators for development mode
