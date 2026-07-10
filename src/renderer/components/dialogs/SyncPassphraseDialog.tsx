@@ -85,7 +85,7 @@ const SyncPassphraseDialog: React.FC<SyncPassphraseDialogProps> = ({
                 <div style={{ fontSize: 12.5, opacity: 0.82, lineHeight: 1.5, marginBottom: 14 }}>
                     {mode === 'reset'
                         ? 'This wipes your synced clips from the cloud and re-uploads this device’s clips under a new passphrase. Your local history is untouched.'
-                        : 'Your clips are encrypted with this passphrase before they leave your device. It is never sent to our servers and cannot be recovered — if you lose it, use “Forgot passphrase”.'}
+                        : 'Your clips are encrypted with this passphrase before they leave your device. It is never sent to our servers and cannot be recovered, so if you lose it, use "Forgot passphrase".'}
                 </div>
 
                 <label style={{ fontSize: 12, fontWeight: 600, opacity: 0.8 }}>
