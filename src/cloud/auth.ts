@@ -12,6 +12,8 @@ import {
 export interface AuthState {
     loggedIn: boolean;
     email: string | null;
+    name: string | null;
+    avatarUrl: string | null;
     isPro: boolean;
     plan: 'free' | 'pro' | null;
 }
@@ -19,10 +21,19 @@ export interface AuthState {
 let session: StoredSession | null = null;
 let cachedIsPro = false;
 let cachedPlan: 'free' | 'pro' | null = null;
+let cachedName: string | null = null;
+let cachedAvatar: string | null = null;
 let onChange: (() => void) | null = null;
 let activeServer: http.Server | null = null;
 
-const LOGGED_OUT: AuthState = { loggedIn: false, email: null, isPro: false, plan: null };
+const LOGGED_OUT: AuthState = {
+    loggedIn: false,
+    email: null,
+    name: null,
+    avatarUrl: null,
+    isPro: false,
+    plan: null,
+};
 
 export function initAuth(onChangeCb: () => void): void {
     onChange = onChangeCb;
@@ -111,12 +122,14 @@ async function fetchProfile(): Promise<void> {
     if (!token) {
         cachedIsPro = false;
         cachedPlan = null;
+        cachedName = null;
+        cachedAvatar = null;
         return;
     }
     try {
         // RLS returns only the caller's own row.
         const res = await fetch(
-            `${CLOUD.supabaseUrl}/rest/v1/profiles?select=is_pro,plan`,
+            `${CLOUD.supabaseUrl}/rest/v1/profiles?select=is_pro,plan,full_name,avatar_url`,
             {
                 headers: {
                     apikey: CLOUD.supabaseAnonKey,
@@ -125,10 +138,17 @@ async function fetchProfile(): Promise<void> {
             }
         );
         if (res.ok) {
-            const rows = (await res.json()) as Array<{ is_pro?: boolean; plan?: string }>;
+            const rows = (await res.json()) as Array<{
+                is_pro?: boolean;
+                plan?: string;
+                full_name?: string | null;
+                avatar_url?: string | null;
+            }>;
             const row = rows?.[0];
             cachedIsPro = Boolean(row?.is_pro);
             cachedPlan = (row?.plan as 'free' | 'pro') ?? 'free';
+            cachedName = row?.full_name ?? null;
+            cachedAvatar = row?.avatar_url ?? null;
         }
     } catch {
         /* keep last-known values */
@@ -138,7 +158,14 @@ async function fetchProfile(): Promise<void> {
 export async function getAuthState(refresh = true): Promise<AuthState> {
     if (!session) return LOGGED_OUT;
     if (refresh) await fetchProfile();
-    return { loggedIn: true, email: session.email, isPro: cachedIsPro, plan: cachedPlan };
+    return {
+        loggedIn: true,
+        email: session.email,
+        name: cachedName,
+        avatarUrl: cachedAvatar,
+        isPro: cachedIsPro,
+        plan: cachedPlan,
+    };
 }
 
 export async function logout(): Promise<void> {
@@ -146,6 +173,8 @@ export async function logout(): Promise<void> {
     session = null;
     cachedIsPro = false;
     cachedPlan = null;
+    cachedName = null;
+    cachedAvatar = null;
     clearSession();
     if (token) {
         try {
@@ -260,6 +289,8 @@ export function login(): Promise<AuthState> {
                             resolve({
                                 loggedIn: true,
                                 email: session?.email ?? email,
+                                name: cachedName,
+                                avatarUrl: cachedAvatar,
                                 isPro: cachedIsPro,
                                 plan: cachedPlan,
                             })

@@ -5,6 +5,8 @@ type ThemeSchema = Record<string, unknown>;
 interface AuthState {
     loggedIn: boolean;
     email: string | null;
+    name: string | null;
+    avatarUrl: string | null;
     isPro: boolean;
     plan: 'free' | 'pro' | null;
 }

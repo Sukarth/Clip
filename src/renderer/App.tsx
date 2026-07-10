@@ -215,7 +215,7 @@ const App: React.FC = () => {
     const [isUnsavedChangesDialogClosing, setIsUnsavedChangesDialogClosing] = useState(false);
 
     // Cloud account state (browser sign-in via the loopback flow)
-    const [account, setAccount] = useState<AuthState>({ loggedIn: false, email: null, isPro: false, plan: null });
+    const [account, setAccount] = useState<AuthState>({ loggedIn: false, email: null, name: null, avatarUrl: null, isPro: false, plan: null });
     const [authBusy, setAuthBusy] = useState(false);
     useEffect(() => {
         window.electronAPI.auth.getState().then(setAccount).catch(() => { });
@@ -1205,10 +1205,28 @@ const App: React.FC = () => {
                 return (
                     <div className="space-y-3 py-3">
                         <div className="bg-surface-container-low p-5 rounded-xl flex flex-col items-center text-center">
-                            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center mb-3">
-                                <span className="material-symbols-outlined text-on-primary text-4xl">person</span>
-                            </div>
-                            <h2 className="text-lg font-bold text-on-surface break-all">{account.loggedIn ? (account.email ?? 'Signed in') : 'User'}</h2>
+                            {account.loggedIn && account.avatarUrl ? (
+                                <img
+                                    src={account.avatarUrl}
+                                    alt=""
+                                    referrerPolicy="no-referrer"
+                                    className="w-20 h-20 rounded-full object-cover mb-3"
+                                />
+                            ) : (
+                                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center mb-3">
+                                    {account.loggedIn ? (
+                                        <span className="text-on-primary text-3xl font-bold">
+                                            {(account.name?.trim()?.[0] || account.email?.trim()?.[0] || '?').toUpperCase()}
+                                        </span>
+                                    ) : (
+                                        <span className="material-symbols-outlined text-on-primary text-4xl">person</span>
+                                    )}
+                                </div>
+                            )}
+                            <h2 className="text-lg font-bold text-on-surface break-all">{account.loggedIn ? (account.name || account.email || 'Signed in') : 'User'}</h2>
+                            {account.loggedIn && account.name && account.email && (
+                                <p className="text-[11px] text-on-surface-variant break-all">{account.email}</p>
+                            )}
                             <p className="text-xs text-on-surface-variant">{account.loggedIn ? (account.isPro ? 'Clip Pro' : 'Free plan') : 'Local Profile'}</p>
                             {account.loggedIn && (
                                 <button
