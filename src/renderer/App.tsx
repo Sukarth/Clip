@@ -11,6 +11,7 @@ import {
 import type { BackupEntry, Settings } from './app-types';
 import AppDialogs from './components/AppDialogs';
 import FirstRunDialog from './components/dialogs/FirstRunDialog';
+import SyncPassphraseDialog from './components/dialogs/SyncPassphraseDialog';
 import AppInlineStyles from './components/AppInlineStyles';
 import ClipboardList from './components/ClipboardList';
 import IconGlyph from './components/IconGlyph';
@@ -231,6 +232,49 @@ const App: React.FC = () => {
             if (!localStorage.getItem('clip.firstRunSeen')) setShowFirstRun(true);
         } catch { /* ignore */ }
     }, []);
+
+    // Cloud sync state
+    const [syncStatus, setSyncStatus] = useState<SyncStatusView | null>(null);
+    const [syncModal, setSyncModal] = useState<{ open: boolean; mode: 'enter' | 'reset'; busy: boolean; error: string | null }>({ open: false, mode: 'enter', busy: false, error: null });
+    const refreshSync = useCallback(async () => {
+        try { setSyncStatus(await window.electronAPI.sync.getStatus()); } catch { /* ignore */ }
+    }, []);
+    useEffect(() => {
+        if (account.loggedIn && account.isPro) void refreshSync();
+        else setSyncStatus(null);
+    }, [account.loggedIn, account.isPro, refreshSync]);
+
+    const openPassphrase = (mode: 'enter' | 'reset') => setSyncModal({ open: true, mode, busy: false, error: null });
+    const handleToggleSync = async (enable: boolean) => {
+        const st = await window.electronAPI.sync.setEnabled(enable);
+        setSyncStatus(st);
+        if (enable && !st.unlocked) openPassphrase('enter');
+        else void refreshSync();
+    };
+    const submitPassphrase = async (passphrase: string) => {
+        const isReset = syncModal.mode === 'reset';
+        setSyncModal((m) => ({ ...m, busy: true, error: null }));
+        const r = isReset
+            ? await window.electronAPI.sync.resetPassphrase(passphrase)
+            : await window.electronAPI.sync.setupPassphrase(passphrase);
+        if (r.ok) {
+            setSyncStatus(r.status);
+            setSyncModal({ open: false, mode: 'enter', busy: false, error: null });
+            showToast('success', isReset ? 'Passphrase reset. Re-uploading your clips…' : 'Cloud sync is on.');
+            setTimeout(() => void refreshSync(), 1800);
+        } else {
+            setSyncModal((m) => ({ ...m, busy: false, error: r.error ?? 'Something went wrong.' }));
+        }
+    };
+    const syncNow = async () => {
+        const r = await window.electronAPI.sync.now();
+        await refreshSync();
+        if (r.error && r.error !== 'disabled' && r.error !== 'locked' && r.error !== 'busy') {
+            showToast('error', `Sync issue: ${r.error}`);
+        } else if (!r.error) {
+            showToast('success', `Synced (${r.pushed} up, ${r.pulled} down).`);
+        }
+    };
 
     const handleWindowWillShow = useCallback(() => {
         setIsWindowFocused(true);
@@ -1274,9 +1318,9 @@ const App: React.FC = () => {
                                 <label className="toggle-switch">
                                     <input
                                         type="checkbox"
-                                        checked={false}
-                                        disabled={!(account.loggedIn && account.isPro)}
-                                        onChange={() => showToast('info', 'Encrypted cloud sync is rolling out in an upcoming update.')}
+                                        checked={!!syncStatus?.enabled}
+                                        disabled={!(account.loggedIn && account.isPro) || !!syncStatus?.syncing}
+                                        onChange={(e) => { void handleToggleSync(e.target.checked); }}
                                     />
                                     <span className="toggle-slider"></span>
                                 </label>
@@ -1321,8 +1365,59 @@ const App: React.FC = () => {
                             )}
 
                             {account.loggedIn && account.isPro && (
-                                <div className="p-3 bg-surface-container-high rounded-lg">
-                                    <p className="text-xs text-on-surface-variant text-center">You&apos;re on Pro. Encrypted cloud sync is rolling out in an upcoming update.</p>
+                                <div className="p-3 bg-surface-container-high rounded-lg space-y-2">
+                                    {!syncStatus?.enabled && (
+                                        <p className="text-xs text-on-surface-variant text-center">
+                                            Turn on to sync your clipboard across devices, encrypted end to end.
+                                        </p>
+                                    )}
+                                    {syncStatus?.enabled && !syncStatus?.unlocked && (
+                                        <>
+                                            <p className="text-xs text-on-surface-variant text-center">
+                                                Locked on this device. Enter your passphrase to sync.
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => openPassphrase('enter')}
+                                                className="w-full py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold border-0"
+                                            >
+                                                Unlock sync
+                                            </button>
+                                        </>
+                                    )}
+                                    {syncStatus?.enabled && syncStatus?.unlocked && (
+                                        <>
+                                            <div className="flex items-center justify-between text-[11px] text-on-surface-variant">
+                                                <span>
+                                                    {syncStatus.usage
+                                                        ? `${(syncStatus.usage.bytesUsed / 1048576).toFixed(1)} MB of ${(syncStatus.usage.limits.storageBytes / 1048576).toFixed(0)} MB`
+                                                        : 'Encrypted sync active'}
+                                                </span>
+                                                <span>
+                                                    {syncStatus.lastSync
+                                                        ? `Synced ${new Date(syncStatus.lastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                                                        : ''}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void syncNow()}
+                                                    disabled={!!syncStatus.syncing}
+                                                    className="flex-1 py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold border-0 disabled:opacity-60"
+                                                >
+                                                    {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openPassphrase('reset')}
+                                                    className="py-2 px-2 bg-transparent text-on-surface-variant text-xs border-0 hover:underline"
+                                                >
+                                                    Reset passphrase
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1782,6 +1877,18 @@ const App: React.FC = () => {
                             try { localStorage.setItem('clip.firstRunSeen', '1'); } catch { /* ignore */ }
                             setShowFirstRun(false);
                         }}
+                    />
+                )}
+
+                {syncModal.open && (
+                    <SyncPassphraseDialog
+                        settings={settings}
+                        mode={syncModal.mode}
+                        busy={syncModal.busy}
+                        error={syncModal.error}
+                        onSubmit={(pp) => void submitPassphrase(pp)}
+                        onForgot={() => setSyncModal({ open: true, mode: 'reset', busy: false, error: null })}
+                        onCancel={() => setSyncModal({ open: false, mode: 'enter', busy: false, error: null })}
                     />
                 )}
             </div>
