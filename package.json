@@ -37,6 +37,7 @@
     "@tanstack/react-virtual": "^3.13.22",
     "better-sqlite3": "^12.8.0",
     "fuse.js": "^7.1.0",
+    "hash-wasm": "^4.12.0",
     "node-addon-api": "^8.6.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

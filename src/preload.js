@@ -83,6 +83,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
             return () => ipcRenderer.removeListener('auth-changed', listener);
         },
     },
+    sync: {
+        getStatus: () => ipcRenderer.invoke('sync:get-status'),
+        setEnabled: (enabled) => ipcRenderer.invoke('sync:set-enabled', enabled),
+        setupPassphrase: (passphrase) => ipcRenderer.invoke('sync:setup-passphrase', passphrase),
+        resetPassphrase: (passphrase) => ipcRenderer.invoke('sync:reset-passphrase', passphrase),
+        now: () => ipcRenderer.invoke('sync:now'),
+        lock: () => ipcRenderer.invoke('sync:lock'),
+    },
     isDevelopment: () => {
         // Check multiple indicators for development mode
         return !!(

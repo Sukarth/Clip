@@ -64,7 +64,36 @@ interface ElectronAPI {
         logout: () => Promise<AuthState>;
         onChanged: (callback: (state: AuthState) => void) => (() => void) | void;
     };
+    sync: {
+        getStatus: () => Promise<SyncStatusView>;
+        setEnabled: (enabled: boolean) => Promise<SyncStatusView>;
+        setupPassphrase: (passphrase: string) => Promise<SyncActionResult>;
+        resetPassphrase: (passphrase: string) => Promise<SyncActionResult>;
+        now: () => Promise<{ pushed: number; pulled: number; error?: string }>;
+        lock: () => Promise<SyncStatusView>;
+    };
     isDevelopment: () => boolean;
+}
+
+interface SyncUsageView {
+    bytesUsed: number;
+    clipCount: number;
+    limits: { storageBytes: number; maxClips: number };
+}
+
+interface SyncStatusView {
+    enabled: boolean;
+    unlocked: boolean;
+    lastSync: number | null;
+    lastError: string | null;
+    syncing: boolean;
+    usage?: SyncUsageView | null;
+}
+
+interface SyncActionResult {
+    ok: boolean;
+    error?: string;
+    status: SyncStatusView;
 }
 
 interface Window {

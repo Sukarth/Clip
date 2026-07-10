@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification, screen, shell } from 'electron';
+import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification, screen, shell, safeStorage } from 'electron';
 import * as path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -13,6 +13,7 @@ import {
 } from './theme-config';
 import { initTokenStore } from './cloud/tokenStore';
 import * as cloudAuth from './cloud/auth';
+import * as cloudSync from './cloud/sync';
 
 // --- Robust error logging for debugging startup crashes ---
 const logPath = path.join(
@@ -1219,6 +1220,96 @@ function deleteClipboardItem(id: number) {
     invalidateHistoryCache();
 }
 
+// --- Cloud sync: DB helpers + OS-encrypted key cache -----------------------
+function ensureSyncMapTable() {
+    db.prepare(`CREATE TABLE IF NOT EXISTS sync_map (
+        client_id TEXT PRIMARY KEY,
+        content_hash TEXT NOT NULL,
+        type TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+    )`).run();
+    db.prepare('CREATE INDEX IF NOT EXISTS sync_map_hash ON sync_map (content_hash)').run();
+}
+
+function getAppState(key: string): string | null {
+    const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get(key) as { value?: string } | undefined;
+    return row?.value ?? null;
+}
+
+function setAppState(key: string, value: string): void {
+    db.prepare('INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+        .run(key, value, Date.now());
+}
+
+function getSyncKeyPath(): string {
+    return path.join(getAppDataPath(), 'clip-synckey.dat');
+}
+
+function saveSyncKey(keyB64: string | null): void {
+    const p = getSyncKeyPath();
+    try {
+        if (keyB64 === null) {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+            return;
+        }
+        if (!safeStorage.isEncryptionAvailable()) return;
+        fs.writeFileSync(p, safeStorage.encryptString(keyB64), { mode: 0o600 });
+    } catch (e) {
+        logError('saveSyncKey failed: ' + e);
+    }
+}
+
+function loadSyncKey(): string | null {
+    const p = getSyncKeyPath();
+    try {
+        if (!fs.existsSync(p) || !safeStorage.isEncryptionAvailable()) return null;
+        return safeStorage.decryptString(fs.readFileSync(p));
+    } catch {
+        return null;
+    }
+}
+
+function buildSyncHost(): cloudSync.SyncHost {
+    return {
+        getState: (k) => getAppState(k),
+        setState: (k, v) => setAppState(k, v),
+        readClips: () =>
+            (db.prepare('SELECT id, type, content, pinned FROM history').all() as Array<{ id: number; type: 'text' | 'image'; content: string; pinned: number }>)
+                .map((r) => ({ id: r.id, type: r.type, content: r.content, pinned: r.pinned ? 1 : 0 })),
+        findClipByContent: (type, content) => {
+            const r = db.prepare('SELECT id, pinned FROM history WHERE type = ? AND content = ? LIMIT 1').get(type, content) as { id: number; pinned: number } | undefined;
+            return r ? { id: r.id, pinned: r.pinned ? 1 : 0 } : null;
+        },
+        insertClip: (type, content, timestamp, pinned) => insertClipboardItem({ type, content, timestamp, pinned }),
+        deleteClip: (id) => { deleteClipboardItem(id); },
+        setPinned: (id, pinned) => { toggleItemPinned(id, pinned); },
+        readSyncMap: () =>
+            (db.prepare('SELECT client_id, content_hash, type, version, pinned, deleted, updated_at FROM sync_map').all() as Array<{ client_id: string; content_hash: string; type: string; version: number; pinned: number; deleted: number; updated_at: number }>)
+                .map((r) => ({ clientId: r.client_id, contentHash: r.content_hash, type: r.type, version: r.version, pinned: r.pinned, deleted: r.deleted, updatedAt: r.updated_at })),
+        upsertSyncMap: (row) => {
+            db.prepare('INSERT INTO sync_map (client_id, content_hash, type, version, pinned, deleted, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(client_id) DO UPDATE SET content_hash = excluded.content_hash, type = excluded.type, version = excluded.version, pinned = excluded.pinned, deleted = excluded.deleted, updated_at = excluded.updated_at')
+                .run(row.clientId, row.contentHash, row.type, row.version, row.pinned, row.deleted, row.updatedAt);
+        },
+        clearSyncMap: () => { db.prepare('DELETE FROM sync_map').run(); },
+        refreshUi: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('clipboard-history', getClipboardHistory());
+            }
+        },
+        onRemoteSignout: () => {
+            setAppState('sync_enabled', '0');
+            cloudSync.stopAutoSync();
+            cloudSync.lock();
+            void cloudAuth.logout();
+        },
+        saveKey: (b64) => saveSyncKey(b64),
+        loadKey: () => loadSyncKey(),
+    };
+}
+
 // Get clipboard history from DB (most recent first) with caching
 function getClipboardHistory() {
     const now = Date.now();
@@ -2024,6 +2115,9 @@ app.whenReady().then(() => {
             .then((state) => mainWindow?.webContents.send('auth-changed', state))
             .catch(() => { });
     });
+    ensureSyncMapTable();
+    cloudSync.initSync(buildSyncHost());
+    cloudSync.startAutoSync();
 
     // Handle startup behavior based on command line arguments and settings
     const isStartHidden = process.argv.includes('--start-hidden') || process.argv.includes('--hidden');
@@ -2057,10 +2151,45 @@ app.whenReady().then(() => {
 
     // --- Cloud auth IPC ---
     ipcMain.handle('auth:get-state', () => cloudAuth.getAuthState(true));
-    ipcMain.handle('auth:login', () => cloudAuth.login());
+    ipcMain.handle('auth:login', async () => {
+        const state = await cloudAuth.login();
+        cloudSync.startAutoSync();
+        return state;
+    });
     ipcMain.handle('auth:logout', async () => {
+        cloudSync.stopAutoSync();
+        cloudSync.lock();
         await cloudAuth.logout();
         return cloudAuth.getAuthState(false);
+    });
+
+    // --- Cloud sync IPC ---
+    ipcMain.handle('sync:get-status', async () => {
+        const status = cloudSync.getStatus();
+        let usage = null;
+        if (status.enabled && status.unlocked) {
+            usage = await cloudSync.fetchUsage().catch(() => null);
+        }
+        return { ...status, usage };
+    });
+    ipcMain.handle('sync:set-enabled', (_e, enabled: boolean) => {
+        setAppState('sync_enabled', enabled ? '1' : '0');
+        if (!enabled) cloudSync.lock();
+        return cloudSync.getStatus();
+    });
+    ipcMain.handle('sync:setup-passphrase', async (_e, passphrase: string) => {
+        const r = await cloudSync.setupPassphrase(passphrase);
+        if (r.ok) void cloudSync.syncNow();
+        return { ...r, status: cloudSync.getStatus() };
+    });
+    ipcMain.handle('sync:reset-passphrase', async (_e, passphrase: string) => {
+        const r = await cloudSync.resetPassphrase(passphrase);
+        return { ...r, status: cloudSync.getStatus() };
+    });
+    ipcMain.handle('sync:now', () => cloudSync.syncNow());
+    ipcMain.handle('sync:lock', () => {
+        cloudSync.lock();
+        return cloudSync.getStatus();
     });
 
     ipcMain.on('paste-clipboard-item', (_event, item) => {
