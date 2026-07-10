@@ -10,6 +10,7 @@ import {
 } from './app-constants';
 import type { BackupEntry, Settings } from './app-types';
 import AppDialogs from './components/AppDialogs';
+import FirstRunDialog from './components/dialogs/FirstRunDialog';
 import AppInlineStyles from './components/AppInlineStyles';
 import ClipboardList from './components/ClipboardList';
 import IconGlyph from './components/IconGlyph';
@@ -221,6 +222,14 @@ const App: React.FC = () => {
         window.electronAPI.auth.getState().then(setAccount).catch(() => { });
         const unsub = window.electronAPI.auth.onChanged(setAccount);
         return () => { if (typeof unsub === 'function') unsub(); };
+    }, []);
+
+    // One-time first-run welcome (sign in for sync / continue offline).
+    const [showFirstRun, setShowFirstRun] = useState(false);
+    useEffect(() => {
+        try {
+            if (!localStorage.getItem('clip.firstRunSeen')) setShowFirstRun(true);
+        } catch { /* ignore */ }
     }, []);
 
     const handleWindowWillShow = useCallback(() => {
@@ -1750,6 +1759,31 @@ const App: React.FC = () => {
                     onConfirmMaxItemsWarning={handleConfirmMaxItemsWarning}
                     onCancelMaxItemsWarning={closeMaxItemsWarningDialog}
                 />
+
+                {showFirstRun && !account.loggedIn && (
+                    <FirstRunDialog
+                        settings={settings}
+                        busy={authBusy}
+                        onSignIn={async () => {
+                            try { localStorage.setItem('clip.firstRunSeen', '1'); } catch { /* ignore */ }
+                            setAuthBusy(true);
+                            try {
+                                const s = await window.electronAPI.auth.login();
+                                setAccount(s);
+                                showToast('success', `Signed in as ${s.email ?? 'your account'}.`);
+                            } catch (e) {
+                                showToast('error', e instanceof Error ? e.message : 'Sign-in failed.');
+                            } finally {
+                                setAuthBusy(false);
+                                setShowFirstRun(false);
+                            }
+                        }}
+                        onContinueOffline={() => {
+                            try { localStorage.setItem('clip.firstRunSeen', '1'); } catch { /* ignore */ }
+                            setShowFirstRun(false);
+                        }}
+                    />
+                )}
             </div>
         </ThemeProvider>
     );
