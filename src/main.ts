@@ -1302,6 +1302,7 @@ function buildSyncHost(): cloudSync.SyncHost {
         onRemoteSignout: () => {
             setAppState('sync_enabled', '0');
             cloudSync.stopAutoSync();
+            cloudSync.stopDeviceHeartbeat();
             cloudSync.lock();
             void cloudAuth.logout();
         },
@@ -2055,6 +2056,13 @@ function showMainWindow(preferredTargetHwnd?: number | null) {
 
     ensureWindowBoundsVisible(mainWindow);
     mainWindow.webContents.send('window-will-show');
+    // On summon, promptly reflect account changes made elsewhere: detect a
+    // remote "sign out this device" (→ sign out locally) and pick up any
+    // profile / plan changes made on the website.
+    if (cloudAuth.isLoggedIn()) {
+        void cloudSync.registerDevice();
+        void cloudAuth.refreshProfile();
+    }
 
     // Show and focus the window immediately for smoother animation
     if (mainWindow.isMinimized()) mainWindow.restore();

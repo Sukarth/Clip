@@ -261,7 +261,7 @@ let deviceTimer: NodeJS.Timeout | null = null;
  * Keep the device record fresh (last-seen) and detect a remote sign-out, on a
  * slow timer that runs whenever the user is signed in — independent of sync.
  */
-export function startDeviceHeartbeat(intervalMs = 5 * 60 * 1000): void {
+export function startDeviceHeartbeat(intervalMs = 60 * 1000): void {
     stopDeviceHeartbeat();
     void registerDevice();
     deviceTimer = setInterval(() => {
