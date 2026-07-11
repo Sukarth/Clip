@@ -1584,7 +1584,7 @@ const App: React.FC = () => {
                                     <path d="M25 17.3l2.1 2.1 4.4-4.6" stroke="#06131f" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                             </div>
-                            <h2 className="text-xl font-bold text-on-surface">Clip</h2>
+                            <h2 className="text-xl font-bold text-on-surface" style={{ marginBottom: 0 }}>Clip</h2>
                             <p className="text-sm text-primary font-medium">Version 1.1.0</p>
                             <p className="text-xs text-on-surface-variant mt-1">Built by Sukarth Acharya</p>
                         </div>

@@ -129,6 +129,12 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 ? Math.min(1, Math.max(0.2, rawTransparency))
                 : 1;
             const appBg = withAlpha(safeColors.appBackground, effectiveTransparency);
+            // Panel border width was editable in the theme UI but never applied
+            // (same dead-value bug as transparency). Clamp to a sane range.
+            const rawBorderWidth = Number(themeSurface?.panelBorderWidth);
+            const panelBorderWidth = Number.isFinite(rawBorderWidth)
+                ? Math.min(10, Math.max(0, rawBorderWidth))
+                : 1;
             return `
                 /* Global CSS for clean interface */
                 body {
@@ -361,6 +367,7 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 .clip-root {
                     background: ${appBg};
                     border-radius: ${effectiveBorderRadius}px;
+                    border: ${panelBorderWidth}px solid ${safeColors.border};
                     padding: 3%;
                     height: ${safeWindowHeight}px;
                     width: ${safeWindowWidth}px;

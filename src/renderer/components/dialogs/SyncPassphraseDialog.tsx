@@ -74,7 +74,8 @@ const SyncPassphraseDialog: React.FC<SyncPassphraseDialogProps> = ({
                     borderRadius: 12,
                     padding: 24,
                     width: 360,
-                    maxWidth: '90vw',
+                    maxWidth: 'min(420px, 80vw)',
+                    boxSizing: 'border-box',
                     boxShadow: '0 8px 28px #0009',
                     border: `1px solid ${dark ? '#444' : '#ccc'}`,
                 }}
