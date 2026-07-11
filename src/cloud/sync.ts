@@ -29,7 +29,7 @@ export interface SyncMapRow {
     type: string;
     version: number;
     pinned: number;
-    deleted: number;
+    deleted: number; // 0 = live, 1 = tombstoned+synced, 2 = pending user deletion
     updatedAt: number;
 }
 
@@ -44,6 +44,11 @@ export interface SyncHost {
     readSyncMap(): SyncMapRow[];
     upsertSyncMap(row: SyncMapRow): void;
     clearSyncMap(): void;
+    // Mark a synced clip as a *pending* user deletion (deleted=2) so the next
+    // push tombstones it cloud-wide. Distinct from local cap-eviction, which
+    // must NOT propagate. markAllDeleted covers "clear history".
+    markDeletedByContent(type: string, contentHash: string): void;
+    markAllDeleted(): void;
     refreshUi(): void;
     onRemoteSignout(): void;
     saveKey(keyB64: string | null): void; // OS-encrypted at rest (safeStorage)
@@ -108,17 +113,29 @@ function hkey(type: string, content: string): string {
     return type + ':' + hashOf(type, content);
 }
 
-async function api(path: string, init: RequestInit): Promise<Response | null> {
+async function api(path: string, init: RequestInit, timeoutMs = 60000): Promise<Response | null> {
     const token = await getAccessToken();
     if (!token) return null;
-    return fetch(`${CLOUD.siteUrl}${path}`, {
-        ...init,
-        headers: {
-            authorization: `Bearer ${token}`,
-            'content-type': 'application/json',
-            ...(init.headers || {}),
-        },
-    });
+    // Bound every request so a half-open socket (sleep/resume, captive portal)
+    // can't leave the caller (and the `syncing` guard) hung indefinitely.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        return await fetch(`${CLOUD.siteUrl}${path}`, {
+            ...init,
+            signal: ctrl.signal,
+            headers: {
+                authorization: `Bearer ${token}`,
+                'content-type': 'application/json',
+                ...(init.headers || {}),
+            },
+        });
+    } catch {
+        // Network failure / abort / offline — callers treat null as "retry later".
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 /** Turn raw fetch/network failures into a friendly, offline-aware message. */
@@ -149,16 +166,20 @@ export async function setupPassphrase(
     };
 
     if (data.configured && data.salt) {
+        // A configured key must always carry a verifier. If it doesn't (partial
+        // setup / interrupted reset), we cannot validate the passphrase — refuse
+        // rather than silently accept a wrong key that would corrupt every sync.
+        if (!data.verifier || !data.verifierNonce) {
+            return { ok: false, error: 'Your sync key is incomplete. Please reset your passphrase to continue.' };
+        }
         const salt = Buffer.from(data.salt, 'base64');
         const k = await box.deriveKey(passphrase, salt);
-        if (data.verifier && data.verifierNonce) {
-            const ok = box.checkVerifier(
-                k,
-                Buffer.from(data.verifier, 'base64'),
-                Buffer.from(data.verifierNonce, 'base64')
-            );
-            if (!ok) return { ok: false, error: 'That passphrase is incorrect.' };
-        }
+        const ok = box.checkVerifier(
+            k,
+            Buffer.from(data.verifier, 'base64'),
+            Buffer.from(data.verifierNonce, 'base64')
+        );
+        if (!ok) return { ok: false, error: 'That passphrase is incorrect.' };
         key = k;
         host?.saveKey(k.toString('base64'));
         return { ok: true };
@@ -196,12 +217,18 @@ export async function resetPassphrase(
     if (reset.status === 402) return { ok: false, error: 'Cloud sync requires Clip Pro.' };
     if (!reset.ok) return { ok: false, error: 'Could not reset cloud data.' };
 
+    // The server key material is now gone, so the old key is useless. Establish
+    // the NEW key before touching local shadow state: if setup fails (network
+    // blip), we don't leave this device wiped-and-locked — the user can retry
+    // resetPassphrase, which re-runs the (idempotent) wipe and setup.
     key = null;
-    host?.clearSyncMap();
-    host?.setState('sync_cursor', '');
-
     const setup = await setupPassphrase(newPassphrase);
     if (!setup.ok) return setup;
+
+    // New key is live. Now clear the shadow map + cursor so the next sync
+    // re-uploads every local clip fresh under the new key.
+    host?.clearSyncMap();
+    host?.setState('sync_cursor', '');
     await syncNow();
     return { ok: true };
 }
@@ -276,6 +303,38 @@ export function stopDeviceHeartbeat(): void {
     }
 }
 
+// --- Deletions + local-state reset ------------------------------------------
+
+/**
+ * Record that the user genuinely deleted a clip, so the next push tombstones it
+ * across devices. Call this from the real user-delete path only — NOT from
+ * history-cap eviction or trimming, which are local capacity management.
+ */
+export function notePendingDeletion(type: string, content: string): void {
+    host?.markDeletedByContent(type, hashOf(type, content));
+}
+
+/** Record a "clear all history" as pending deletions of every synced clip. */
+export function notePendingDeletionAll(): void {
+    host?.markAllDeleted();
+}
+
+/**
+ * Wipe this device's local sync shadow state (map, cursor, enabled flag, device
+ * id). Used on sign-out and remote sign-out so a different account on the same
+ * machine never inherits the previous user's sync state.
+ */
+export function resetLocalSyncState(): void {
+    if (!host) return;
+    host.clearSyncMap();
+    host.setState('sync_cursor', '');
+    host.setState('sync_enabled', '0');
+    host.setState('sync_device_id', '');
+    host.setState('sync_last_sync', '');
+    lastSync = null;
+    lastError = null;
+}
+
 // --- Push -------------------------------------------------------------------
 
 type Outbound = {
@@ -287,9 +346,9 @@ type Outbound = {
     deleted: boolean;
 };
 
-function buildPayload(clientId: string, clip: LocalClip, version: number): Outbound | null {
+function buildPayload(clientId: string, clip: LocalClip, version: number, k: Buffer): Outbound | null {
     const plaintext = JSON.stringify({ t: clip.type, c: clip.content, p: clip.pinned ? 1 : 0 });
-    const { nonce, ciphertext } = box.encrypt(plaintext, key!);
+    const { nonce, ciphertext } = box.encrypt(plaintext, k);
     if (ciphertext.length > MAX_CLIP_BYTES) return null;
     return {
         clientId,
@@ -302,7 +361,10 @@ function buildPayload(clientId: string, clip: LocalClip, version: number): Outbo
 }
 
 async function pushPhase(): Promise<number> {
-    if (!host || !key) return 0;
+    // Capture the key up front: lock()/reset can null the module-level `key`
+    // mid-cycle, and we must not encrypt with null.
+    const k = key;
+    if (!host || !k) return 0;
     const local = host.readClips();
     const localByHash = new Map<string, LocalClip>();
     for (const c of local) localByHash.set(hkey(c.type, c.content), c);
@@ -320,7 +382,7 @@ async function pushPhase(): Promise<number> {
         const existing = mapByHash.get(k2);
         if (!existing) {
             const clientId = randomUUID();
-            const payload = buildPayload(clientId, clip, 1);
+            const payload = buildPayload(clientId, clip, 1, k);
             if (!payload) continue; // too large to sync
             outbound.push(payload);
             pending.push({
@@ -334,17 +396,19 @@ async function pushPhase(): Promise<number> {
             });
         } else if ((existing.pinned ? 1 : 0) !== (clip.pinned ? 1 : 0)) {
             const version = existing.version + 1;
-            const payload = buildPayload(existing.clientId, clip, version);
+            const payload = buildPayload(existing.clientId, clip, version, k);
             if (!payload) continue;
             outbound.push(payload);
             pending.push({ ...existing, version, pinned: clip.pinned ? 1 : 0, updatedAt: now });
         }
     }
 
-    // deleted locally (in map, non-deleted, but no longer present locally)
+    // Explicit user deletions only (deleted === 2, set by notePendingDeletion*).
+    // A clip merely absent locally is NOT a deletion: the local history is a
+    // capped rotating buffer, so eviction/trim would otherwise tombstone clips
+    // cloud-wide and on every other device.
     for (const r of mapRows) {
-        if (r.deleted) continue;
-        if (!localByHash.has(r.type + ':' + r.contentHash)) {
+        if (r.deleted === 2) {
             const version = r.version + 1;
             outbound.push({ clientId: r.clientId, version, deleted: true });
             pending.push({ ...r, version, deleted: 1, updatedAt: now });
@@ -380,7 +444,11 @@ async function pushPhase(): Promise<number> {
 // --- Pull -------------------------------------------------------------------
 
 async function pullPhase(): Promise<number> {
-    if (!host || !key) return 0;
+    // Capture the key: lock()/reset can null the module-level `key` between the
+    // awaits below, and decrypting with null would throw, skip the clip, yet
+    // still advance the cursor — silently losing those remote clips forever.
+    const k = key;
+    if (!host || !k) return 0;
     let cursor = host.getState('sync_cursor') || '';
     let applied = 0;
     let hasMore = true;
@@ -430,7 +498,7 @@ async function pullPhase(): Promise<number> {
                     const plaintext = box.decrypt(
                         Buffer.from(rc.ciphertext, 'base64'),
                         Buffer.from(rc.nonce, 'base64'),
-                        key
+                        k
                     );
                     const parsed = JSON.parse(plaintext) as { t: 'text' | 'image'; c: string; p?: number };
                     const type = parsed.t;

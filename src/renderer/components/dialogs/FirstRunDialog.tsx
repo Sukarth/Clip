@@ -84,7 +84,6 @@ const FirstRunDialog: React.FC<FirstRunDialogProps> = ({
                 <button
                     data-dialog-autofocus
                     onClick={onContinueOffline}
-                    disabled={busy}
                     style={{
                         display: 'block',
                         width: '100%',

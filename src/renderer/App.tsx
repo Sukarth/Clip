@@ -219,9 +219,22 @@ const App: React.FC = () => {
     // Cloud account state (browser sign-in via the loopback flow)
     const [account, setAccount] = useState<AuthState>({ loggedIn: false, email: null, name: null, avatarUrl: null, isPro: false, plan: null });
     const [authBusy, setAuthBusy] = useState(false);
+    // One-time first-run welcome (sign in for sync / continue offline).
+    const [showFirstRun, setShowFirstRun] = useState(false);
     useEffect(() => {
         const refreshAccount = () => window.electronAPI.auth.getState().then(setAccount).catch(() => { });
-        refreshAccount();
+        // Initial load: fetch the account, then decide the one-time welcome only
+        // once we know whether the user is already signed in — and mark it seen
+        // immediately so it never reappears later (e.g. after a sign-out).
+        window.electronAPI.auth.getState().then((s) => {
+            setAccount(s);
+            try {
+                if (!localStorage.getItem('clip.firstRunSeen')) {
+                    if (!s.loggedIn) setShowFirstRun(true);
+                    localStorage.setItem('clip.firstRunSeen', '1');
+                }
+            } catch { /* ignore */ }
+        }).catch(() => { });
         const unsub = window.electronAPI.auth.onChanged(setAccount);
         // Pick up name / avatar / plan changes made on the website each time the
         // window is summoned, without needing a restart.
@@ -230,14 +243,6 @@ const App: React.FC = () => {
             if (typeof unsub === 'function') unsub();
             if (typeof unsubShow === 'function') unsubShow();
         };
-    }, []);
-
-    // One-time first-run welcome (sign in for sync / continue offline).
-    const [showFirstRun, setShowFirstRun] = useState(false);
-    useEffect(() => {
-        try {
-            if (!localStorage.getItem('clip.firstRunSeen')) setShowFirstRun(true);
-        } catch { /* ignore */ }
     }, []);
 
     // Cloud sync state
@@ -261,16 +266,22 @@ const App: React.FC = () => {
     const submitPassphrase = async (passphrase: string) => {
         const isReset = syncModal.mode === 'reset';
         setSyncModal((m) => ({ ...m, busy: true, error: null }));
-        const r = isReset
-            ? await window.electronAPI.sync.resetPassphrase(passphrase)
-            : await window.electronAPI.sync.setupPassphrase(passphrase);
-        if (r.ok) {
-            setSyncStatus(r.status);
-            setSyncModal({ open: false, mode: 'enter', busy: false, error: null });
-            showToast('success', isReset ? 'Passphrase reset. Re-uploading your clips…' : 'Cloud sync is on.');
-            setTimeout(() => void refreshSync(), 1800);
-        } else {
-            setSyncModal((m) => ({ ...m, busy: false, error: r.error ?? 'Something went wrong.' }));
+        try {
+            const r = isReset
+                ? await window.electronAPI.sync.resetPassphrase(passphrase)
+                : await window.electronAPI.sync.setupPassphrase(passphrase);
+            if (r.ok) {
+                setSyncStatus(r.status);
+                setSyncModal({ open: false, mode: 'enter', busy: false, error: null });
+                showToast('success', isReset ? 'Passphrase reset. Re-uploading your clips…' : 'Cloud sync is on.');
+                setTimeout(() => void refreshSync(), 1800);
+            } else {
+                setSyncModal((m) => ({ ...m, busy: false, error: r.error ?? 'Something went wrong.' }));
+            }
+        } catch {
+            // A rejected IPC call (offline, service unreachable) must not leave
+            // the dialog stuck on "Working…" with no way forward.
+            setSyncModal((m) => ({ ...m, busy: false, error: 'Could not reach the sync service. Please try again.' }));
         }
     };
     const syncNow = async () => {
@@ -1916,6 +1927,11 @@ const App: React.FC = () => {
                         busy={authBusy}
                         onSignIn={async () => {
                             try { localStorage.setItem('clip.firstRunSeen', '1'); } catch { /* ignore */ }
+                            // Dismiss the welcome immediately so the app isn't locked
+                            // behind it during the browser sign-in (which can take up to
+                            // its 5-min timeout); it continues in the background and the
+                            // Profile tab reflects the result.
+                            setShowFirstRun(false);
                             setAuthBusy(true);
                             try {
                                 const s = await window.electronAPI.auth.login();
@@ -1925,7 +1941,6 @@ const App: React.FC = () => {
                                 showToast('error', e instanceof Error ? e.message : 'Sign-in failed.');
                             } finally {
                                 setAuthBusy(false);
-                                setShowFirstRun(false);
                             }
                         }}
                         onContinueOffline={() => {

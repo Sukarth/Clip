@@ -52,26 +52,43 @@ export function isLoggedIn(): boolean {
     return session !== null;
 }
 
-/** Returns the user id (sub) from the (unverified) access-token payload. */
-export function currentUserId(): string | null {
-    if (!session) return null;
+/** Decodes a JWT payload (unverified). Returns null on any malformed input. */
+function decodeJwt(token: string): Record<string, unknown> | null {
     try {
-        const payload = session.accessToken.split('.')[1] ?? '';
+        const payload = token.split('.')[1] ?? '';
         const json = Buffer.from(
             payload.replace(/-/g, '+').replace(/_/g, '/'),
             'base64'
         ).toString('utf8');
-        return (JSON.parse(json).sub as string) ?? null;
+        return JSON.parse(json) as Record<string, unknown>;
     } catch {
         return null;
     }
 }
 
+/** Returns the user id (sub) from the (unverified) access-token payload. */
+export function currentUserId(): string | null {
+    if (!session) return null;
+    return (decodeJwt(session.accessToken)?.sub as string) ?? null;
+}
+
+let refreshInFlight: Promise<void> | null = null;
+
 async function refreshIfNeeded(): Promise<void> {
     if (!session) return;
     const now = Math.floor(Date.now() / 1000);
     if (session.expiresAt - now > 60) return; // still valid
+    // Coalesce concurrent refreshes: Supabase rotates refresh tokens, so firing
+    // several at once would let the first succeed and the rest 4xx, spuriously
+    // logging the user out. All callers await the one in-flight refresh.
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
+    return refreshInFlight;
+}
 
+async function doRefresh(): Promise<void> {
+    if (!session) return;
+    const now = Math.floor(Date.now() / 1000);
     const res = await fetch(
         `${CLOUD.supabaseUrl}/auth/v1/token?grant_type=refresh_token`,
         {
@@ -85,9 +102,14 @@ async function refreshIfNeeded(): Promise<void> {
     );
 
     if (!res.ok) {
-        // Refresh token no longer valid — force a clean logout.
-        await logout();
-        throw new Error('Your session expired. Please sign in again.');
+        // Only a definitive auth failure (invalid/expired refresh token) should
+        // sign the user out. Transient 429/5xx must NOT — just fail this attempt
+        // and let the next tick retry, so a brief outage doesn't wipe the session.
+        if (res.status === 400 || res.status === 401) {
+            await logout();
+            throw new Error('Your session expired. Please sign in again.');
+        }
+        throw new Error('Could not refresh your session. Will retry.');
     }
 
     const data = (await res.json()) as {
@@ -276,26 +298,34 @@ export function login(): Promise<AuthState> {
                     const accessToken = params.get('access_token') ?? '';
                     const refreshToken = params.get('refresh_token') ?? '';
                     const expiresAt = Number(params.get('expires_at') ?? '0');
-                    const email = params.get('email') ?? '';
+                    // Prefer the email claim from the (self-consistent) JWT over
+                    // the form field, which URLSearchParams would mangle if it
+                    // ever contained a '+' (e.g. plus-addressed emails).
+                    const email =
+                        (decodeJwt(accessToken)?.email as string) ??
+                        (params.get('email') ?? '');
                     if (!accessToken || !refreshToken) {
                         res.writeHead(400);
                         res.end('missing tokens');
                         return;
                     }
-                    session = {
+                    const newSession: StoredSession = {
                         accessToken,
                         refreshToken,
                         expiresAt: expiresAt || Math.floor(Date.now() / 1000) + 3600,
                         email,
                     };
+                    // Persist FIRST: if the OS keystore write fails we must not
+                    // end up "logged in" only in memory with nothing on disk.
                     try {
-                        saveSession(session);
+                        saveSession(newSession);
                     } catch (e) {
                         res.writeHead(500);
                         res.end('store failed');
                         finish(() => reject(e as Error));
                         return;
                     }
+                    session = newSession;
                     res.writeHead(200, { 'content-type': 'text/plain' });
                     res.end('ok');
                     // Load Pro status, notify the app, then resolve.

@@ -1294,16 +1294,23 @@ function buildSyncHost(): cloudSync.SyncHost {
                 .run(row.clientId, row.contentHash, row.type, row.version, row.pinned, row.deleted, row.updatedAt);
         },
         clearSyncMap: () => { db.prepare('DELETE FROM sync_map').run(); },
+        markDeletedByContent: (type, contentHash) => {
+            db.prepare('UPDATE sync_map SET deleted = 2, updated_at = ? WHERE type = ? AND content_hash = ? AND deleted = 0')
+                .run(Date.now(), type, contentHash);
+        },
+        markAllDeleted: () => {
+            db.prepare('UPDATE sync_map SET deleted = 2, updated_at = ? WHERE deleted = 0').run(Date.now());
+        },
         refreshUi: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('clipboard-history', getClipboardHistory());
             }
         },
         onRemoteSignout: () => {
-            setAppState('sync_enabled', '0');
             cloudSync.stopAutoSync();
             cloudSync.stopDeviceHeartbeat();
             cloudSync.lock();
+            cloudSync.resetLocalSyncState();
             void cloudAuth.logout();
         },
         saveKey: (b64) => saveSyncKey(b64),
@@ -1805,6 +1812,14 @@ function restoreBackup(backupFile: string) {
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     ensureDatabaseSchema(db);
+    // The restored DB may predate cloud sync (no sync_map) or carry another
+    // device's shadow state. Recreate the table and reset the cursor + device
+    // id so the next sync re-reconciles from scratch and this install registers
+    // as its own device — rather than throwing 'no such table: sync_map' or
+    // hijacking the backup's origin device.
+    ensureSyncMapTable();
+    setAppState('sync_cursor', '');
+    setAppState('sync_device_id', '');
 
     // Verify the restore worked by counting records
     const count = db.prepare('SELECT COUNT(*) as count FROM history').get() as { count: number };
@@ -2191,6 +2206,9 @@ app.whenReady().then(() => {
         await cloudSync.deregisterDevice(); // remove from "Devices" (token still valid)
         cloudSync.lock();
         await cloudAuth.logout();
+        // Drop this user's sync shadow state so another account on this machine
+        // doesn't resume from it.
+        cloudSync.resetLocalSyncState();
         return cloudAuth.getAuthState(false);
     });
 
@@ -2576,6 +2594,9 @@ app.whenReady().then(() => {
 
     ipcMain.on('clear-clipboard-history', (event) => {
         db.prepare('DELETE FROM history').run();
+        // A user-initiated "clear all" is a real deletion: propagate it so other
+        // devices clear too (distinct from local cap-eviction, which does not).
+        cloudSync.notePendingDeletionAll();
         clipboard.clear();
         lastText = '';
         lastImageDataUrl = '';
@@ -2594,6 +2615,9 @@ app.whenReady().then(() => {
     ipcMain.on('delete-clipboard-item', (event, id) => {
         const row = db.prepare('SELECT type, content FROM history WHERE id = ?').get(id) as { type: string; content: string } | undefined;
         deleteClipboardItem(id);
+        // Record as a genuine user deletion so the next sync tombstones it
+        // cloud-wide (cap-eviction/trim intentionally do not do this).
+        if (row) cloudSync.notePendingDeletion(row.type, row.content);
         if (row) {
             if (row.type === 'text') {
                 try {
