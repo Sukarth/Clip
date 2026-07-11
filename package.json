@@ -28,7 +28,8 @@
     "package:fast": "npm run build && electron-builder --dir --config.compression=store --publish never",
     "package:zip": "npm run build && electron-builder --config.win.target=zip --publish never",
     "release": "npm run build && electron-builder --publish always",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "generate-icon": "node scripts/generate-icon.mjs"
   },
   "keywords": [],
   "license": "MIT",
@@ -43,6 +44,7 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
@@ -52,6 +54,7 @@
     "cross-env": "^10.1.0",
     "electron": "^41.1.1",
     "electron-builder": "^26.8.1",
+    "png-to-ico": "^3.0.2",
     "typescript": "^6.0.2",
     "vite": "^8.0.0",
     "wait-on": "^9.0.4"

@@ -1,0 +1,20 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#15171b"/>
+      <stop offset="1" stop-color="#0b0c0e"/>
+    </linearGradient>
+    <linearGradient id="clip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#bfe4ff"/>
+      <stop offset="1" stop-color="#4682b4"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- The site's "layered clips" mark (48-unit viewBox), scaled 8x and centered. -->
+  <g transform="translate(64,64) scale(8)">
+    <rect x="5" y="19" width="24" height="24" rx="6" fill="#1e2024" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
+    <rect x="11" y="13" width="24" height="24" rx="6" fill="#23262c" stroke="rgba(255,255,255,0.18)" stroke-width="0.6"/>
+    <rect x="19" y="5" width="24" height="24" rx="6" fill="url(#clip)"/>
+    <path d="M25 17.3l2.1 2.1 4.4-4.6" stroke="#06131f" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>
