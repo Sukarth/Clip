@@ -8,42 +8,6 @@ export interface IconGlyphProps {
     tint?: string;
 }
 
-function windowsPathToFileUrl(value: string): string {
-    const normalized = value.replace(/\\/g, '/');
-    const url = new URL('file://');
-    const pathname = normalized.startsWith('/') ? normalized : `/${normalized}`;
-    url.pathname = pathname
-        .split('/')
-        .map((segment) => encodeURIComponent(segment))
-        .join('/');
-    return url.toString();
-}
-
-function posixPathToFileUrl(value: string): string {
-    const url = new URL('file://');
-    url.pathname = value
-        .split('/')
-        .map((segment) => encodeURIComponent(segment))
-        .join('/');
-    return url.toString();
-}
-
-function withFileProtocolIfNeeded(value: string): string {
-    if (/^(data:image\/|https?:\/\/|file:\/\/)/i.test(value)) {
-        return value;
-    }
-
-    if (/^[a-zA-Z]:\\/.test(value)) {
-        return windowsPathToFileUrl(value);
-    }
-
-    if (value.startsWith('/')) {
-        return posixPathToFileUrl(value);
-    }
-
-    return value;
-}
-
 function sanitizeInlineSvg(svg: string): string | null {
     const trimmed = svg.trim();
     if (!/^<svg[\s>]/i.test(trimmed) || !/<\/svg>\s*$/i.test(trimmed)) {
@@ -77,21 +41,12 @@ function iconToImageSource(icon: string): string | null {
         return `data:image/svg+xml;utf8,${encodeURIComponent(sanitized)}`;
     }
 
-    if (
-        lower.startsWith('data:image/') ||
-        lower.startsWith('http://') ||
-        lower.startsWith('https://') ||
-        lower.startsWith('file://') ||
-        trimmed.startsWith('./') ||
-        trimmed.startsWith('../') ||
-        trimmed.startsWith('/') ||
-        /^[a-zA-Z]:\\/.test(trimmed)
-    ) {
-        return withFileProtocolIfNeeded(trimmed);
-    }
-
-    if (/\.(svg|png|jpg|jpeg|webp|ico)(\?.*)?$/i.test(trimmed)) {
-        return withFileProtocolIfNeeded(trimmed);
+    // Only inline data: image URIs may be rendered as an image source. Remote
+    // (http/https), local (file://), protocol-relative, and filesystem-path
+    // values are rejected here to prevent outbound beacons and local-file
+    // probing; anything else falls through to safe text rendering.
+    if (lower.startsWith('data:image/')) {
+        return trimmed;
     }
 
     return null;

@@ -83,6 +83,9 @@ const App: React.FC = () => {
         themeSurface,
         themeIcons,
         saveThemeEditorConfig,
+        captureThemeEditorSnapshot,
+        revertThemeEditorToSnapshot,
+        hasThemeEditorChangesSinceOpen,
         updateEditorActiveProfile,
         switchThemeProfile,
         createThemeProfileFromInput,
@@ -258,10 +261,17 @@ const App: React.FC = () => {
 
     const openPassphrase = (mode: 'enter' | 'reset') => setSyncModal({ open: true, mode, busy: false, error: null });
     const handleToggleSync = async (enable: boolean) => {
-        const st = await window.electronAPI.sync.setEnabled(enable);
-        setSyncStatus(st);
-        if (enable && !st.unlocked) openPassphrase('enter');
-        else void refreshSync();
+        try {
+            const st = await window.electronAPI.sync.setEnabled(enable);
+            setSyncStatus(st);
+            if (enable && !st.unlocked) openPassphrase('enter');
+            else void refreshSync();
+        } catch (error) {
+            // A rejected IPC call must not leave the toggle out of sync with the
+            // real state; surface the error and re-read the actual status.
+            showToast('error', `Failed to ${enable ? 'enable' : 'disable'} sync: ${error instanceof Error ? error.message : String(error)}`);
+            void refreshSync();
+        }
     };
     const submitPassphrase = async (passphrase: string) => {
         const isReset = syncModal.mode === 'reset';
@@ -285,12 +295,18 @@ const App: React.FC = () => {
         }
     };
     const syncNow = async () => {
-        const r = await window.electronAPI.sync.now();
-        await refreshSync();
-        if (r.error && r.error !== 'disabled' && r.error !== 'locked' && r.error !== 'busy') {
-            showToast('error', `Sync issue: ${r.error}`);
-        } else if (!r.error) {
-            showToast('success', `Synced (${r.pushed} up, ${r.pulled} down).`);
+        try {
+            const r = await window.electronAPI.sync.now();
+            await refreshSync();
+            if (r.error && r.error !== 'disabled' && r.error !== 'locked' && r.error !== 'busy') {
+                showToast('error', `Sync issue: ${r.error}`);
+            } else if (!r.error) {
+                showToast('success', `Synced (${r.pushed} up, ${r.pulled} down).`);
+            }
+        } catch (error) {
+            // A rejected IPC call (offline, service unreachable) must not surface
+            // as an unhandled rejection.
+            showToast('error', `Sync failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     };
 
@@ -714,12 +730,18 @@ const App: React.FC = () => {
                         setIsThemeProfileResetDialogClosing(false);
                     }, 300);
                 } else if (showSettings) {
-                    setIsSettingsDialogClosing(true);
-                    setTimeout(() => {
-                        setShowSettings(false);
-                        setSettingsDraftState(null);
-                        setIsSettingsDialogClosing(false);
-                    }, 300);
+                    // Prompt to save when there are unsaved settings/theme edits
+                    // instead of silently discarding them on Escape.
+                    if (hasUnsavedChanges || hasThemeEditorChangesSinceOpen()) {
+                        setShowUnsavedChangesConfirm('cancel');
+                    } else {
+                        setIsSettingsDialogClosing(true);
+                        setTimeout(() => {
+                            setShowSettings(false);
+                            setSettingsDraftState(null);
+                            setIsSettingsDialogClosing(false);
+                        }, 300);
+                    }
                 } else {
                     // @ts-ignore
                     window.electronAPI?.hideWindow();
@@ -728,7 +750,7 @@ const App: React.FC = () => {
         };
         window.addEventListener('keydown', escHandler);
         return () => window.removeEventListener('keydown', escHandler);
-    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, backupDeleteAction, handleDeleteDialogClose]);
+    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, backupDeleteAction, handleDeleteDialogClose, hasUnsavedChanges, hasThemeEditorChangesSinceOpen]);
 
     // Force refresh when Ctrl+Shift+V is pressed (global shortcut)
     // This effect is now primarily for development/debugging if needed,
@@ -825,6 +847,8 @@ const App: React.FC = () => {
     const openSettings = () => {
         setSettingsDraftState(settings);
         setThemeEditorConfig(themeConfig);
+        // Baseline for reverting autosaved-but-cancelled theme edits on close.
+        captureThemeEditorSnapshot();
         setActiveSettingsSection('General');
         setSettingsNavigationStack([]);
         setShowSettings(true);
@@ -846,7 +870,14 @@ const App: React.FC = () => {
     const handleSettingsBackOrClose = () => {
         setSettingsNavigationStack((stack) => {
             if (stack.length === 0) {
-                closeSettingsWithoutSaving();
+                // If there are unsaved settings/theme edits, prompt instead of
+                // silently discarding them. Theme edits autosave to disk, so we
+                // also check divergence from the editor-open baseline.
+                if (hasUnsavedChanges || hasThemeEditorChangesSinceOpen()) {
+                    setShowUnsavedChangesConfirm('cancel');
+                } else {
+                    closeSettingsWithoutSaving();
+                }
                 return stack;
             }
 
@@ -1024,15 +1055,32 @@ const App: React.FC = () => {
         const actionType = showUnsavedChangesConfirm;
 
         setIsUnsavedChangesDialogClosing(true);
-        setTimeout(() => {
+        setTimeout(async () => {
             setShowUnsavedChangesConfirm(null);
             setIsUnsavedChangesDialogClosing(false);
 
+            // Discard: revert any autosaved theme edits back to the baseline
+            // captured when the editor opened, so "Don't save" actually undoes
+            // changes that the ~220ms autosave already wrote to disk.
+            await revertThemeEditorToSnapshot();
+
             if (actionType === 'quit') {
                 window.electronAPI?.quitApp?.();
-            } else {
-                closeSettingsWithoutSaving();
+                return;
             }
+
+            // Close settings. Note: the theme editor config was already restored
+            // by the revert above, so we intentionally do NOT call
+            // closeSettingsWithoutSaving() here (its setThemeEditorConfig reset
+            // would re-apply the now-stale edited config).
+            setIsSettingsDialogClosing(true);
+            setTimeout(() => {
+                setShowSettings(false);
+                setSettingsDraftState(null);
+                setActiveSettingsSection('General');
+                setSettingsNavigationStack([]);
+                setIsSettingsDialogClosing(false);
+            }, 300);
         }, 300);
     };
 
@@ -1536,7 +1584,7 @@ const App: React.FC = () => {
                                 <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
                             </button>
 
-                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button">
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.electronAPI.openExternal('https://github.com/Sukarth/Clip')}>
                                 <div className="flex items-center gap-3">
                                     <span className="material-symbols-outlined text-on-surface-variant">gavel</span>
                                     <span className="text-sm text-on-surface">Licenses</span>
@@ -1544,7 +1592,7 @@ const App: React.FC = () => {
                                 <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
                             </button>
 
-                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button">
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.electronAPI.openExternal('https://getclip.vercel.app/privacy')}>
                                 <div className="flex items-center gap-3">
                                     <span className="material-symbols-outlined text-on-surface-variant">privacy_tip</span>
                                     <span className="text-sm text-on-surface">Privacy Policy</span>

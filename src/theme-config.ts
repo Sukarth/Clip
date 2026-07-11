@@ -147,7 +147,32 @@ function sanitizeColor(value: unknown, fallback: string) {
 }
 
 function sanitizeIcon(value: unknown, fallback: string) {
-    return sanitizeString(value, fallback, 12000);
+    const candidate = sanitizeString(value, fallback, 12000);
+    if (candidate === fallback) return fallback;
+
+    const trimmed = candidate.trim();
+    const lower = trimmed.toLowerCase();
+
+    // Inline SVG markup is sanitized/rendered as an inline data URI downstream.
+    if (lower.startsWith('<svg')) {
+        return candidate;
+    }
+
+    // Safe inline data: URIs are allowed through.
+    if (lower.startsWith('data:')) {
+        return candidate;
+    }
+
+    // Reject any value carrying a URL scheme (http:, https:, file:, javascript:,
+    // Windows drive paths like "c:\...", etc.) or a protocol-relative "//" prefix.
+    // These could turn an icon into an outbound beacon or a local-file probe when
+    // rendered into <img src>/CSS mask. Only plain icon tokens (emoji/text),
+    // inline SVG, and data: URIs are permitted.
+    if (trimmed.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+        return fallback;
+    }
+
+    return candidate;
 }
 
 export function normalizeThemeProfileKey(value: string) {

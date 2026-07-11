@@ -22,6 +22,10 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
     const [isThemeSaving, setIsThemeSaving] = React.useState(false);
     const hasHydratedRef = React.useRef(false);
     const autosaveTimeoutRef = React.useRef<number | null>(null);
+    // Snapshot of the persisted theme config captured when the theme editor opens.
+    // Because edits autosave to disk after ~220ms, "close without saving" needs a
+    // pre-edit baseline to revert to.
+    const openThemeSnapshotRef = React.useRef<ThemeConfig | null>(null);
 
     const activeThemeProfile = React.useMemo(() => getActiveThemeProfile(themeConfig), [themeConfig]);
     const activeThemeProfileKey = React.useMemo(() => {
@@ -53,6 +57,64 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
             setIsThemeSaving(false);
         }
     }, [themeEditorConfig, showToast]);
+
+    // Capture the currently persisted theme config as the baseline to revert to
+    // if the user later closes the editor without saving. Call this when the
+    // settings/theme editor opens.
+    const captureThemeEditorSnapshot = React.useCallback(() => {
+        openThemeSnapshotRef.current = JSON.parse(JSON.stringify(themeConfig));
+    }, [themeConfig]);
+
+    // Discard the current editor edits and restore the snapshot captured when the
+    // editor opened. Since edits are autosaved to disk, this writes the snapshot
+    // back to disk so autosaved-but-cancelled changes are actually reverted.
+    const revertThemeEditorToSnapshot = React.useCallback(async () => {
+        const snapshot = openThemeSnapshotRef.current;
+        if (!snapshot) return;
+        openThemeSnapshotRef.current = null;
+
+        // Cancel any pending autosave so it can't re-persist the discarded edits.
+        if (autosaveTimeoutRef.current !== null) {
+            window.clearTimeout(autosaveTimeoutRef.current);
+            autosaveTimeoutRef.current = null;
+        }
+
+        const sanitizedSnapshot = sanitizeThemeConfig(snapshot);
+        const driftedOnDisk = JSON.stringify(sanitizeThemeConfig(themeConfig)) !== JSON.stringify(sanitizedSnapshot);
+
+        if (!driftedOnDisk) {
+            // Disk already matches the baseline; just drop any uncommitted editor edits.
+            setThemeEditorConfig(sanitizedSnapshot);
+            return;
+        }
+
+        try {
+            const saved = await window.electronAPI?.saveThemeConfig?.(sanitizedSnapshot);
+            const next = saved ? sanitizeThemeConfig(saved) : sanitizedSnapshot;
+            setThemeConfig(next);
+            setThemeEditorConfig(next);
+        } catch (error) {
+            // Even if the disk write fails, revert in-memory state so the UI
+            // reflects the discard.
+            setThemeConfig(sanitizedSnapshot);
+            setThemeEditorConfig(sanitizedSnapshot);
+            showToast('error', `Failed to revert theme changes: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, [showToast, themeConfig]);
+
+    // Whether the persisted theme config has diverged from the baseline captured
+    // when the editor opened. Because theme edits autosave to disk, comparing the
+    // live editor against the last-persisted config would almost always report
+    // "no changes"; comparing against the open-time snapshot lets the close flow
+    // detect edits that were autosaved but not explicitly kept.
+    const hasThemeEditorChangesSinceOpen = React.useCallback(() => {
+        const snapshot = openThemeSnapshotRef.current;
+        if (!snapshot) return false;
+        return (
+            JSON.stringify(sanitizeThemeConfig(themeConfig)) !== JSON.stringify(sanitizeThemeConfig(snapshot))
+            || JSON.stringify(sanitizeThemeConfig(themeEditorConfig)) !== JSON.stringify(sanitizeThemeConfig(snapshot))
+        );
+    }, [themeConfig, themeEditorConfig]);
 
     const updateEditorActiveProfile = React.useCallback((updater: (profile: ThemeProfile) => ThemeProfile) => {
         setThemeEditorConfig((prev) => {
@@ -308,6 +370,9 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
         themeSurface,
         themeIcons,
         saveThemeEditorConfig,
+        captureThemeEditorSnapshot,
+        revertThemeEditorToSnapshot,
+        hasThemeEditorChangesSinceOpen,
         updateEditorActiveProfile,
         switchThemeProfile,
         createThemeProfileFromInput,

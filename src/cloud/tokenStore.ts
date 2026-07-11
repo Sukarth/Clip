@@ -22,7 +22,13 @@ export function initTokenStore(appDataDir: string): void {
 export function loadSession(): StoredSession | null {
     try {
         if (!filePath || !fs.existsSync(filePath)) return null;
-        if (!safeStorage.isEncryptionAvailable()) return null;
+        if (!safeStorage.isEncryptionAvailable()) {
+            // A session file is present but the OS keystore can't decrypt it right
+            // now, so the user reads as signed-out despite having a valid session.
+            // Log it so the situation isn't completely silent.
+            console.warn('[tokenStore] session file present but OS encryption (safeStorage) is unavailable; treating as signed-out.');
+            return null;
+        }
         const buf = fs.readFileSync(filePath);
         const json = safeStorage.decryptString(buf);
         return JSON.parse(json) as StoredSession;

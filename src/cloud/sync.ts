@@ -85,7 +85,11 @@ export function initSync(h: SyncHost): void {
     const kb = h.loadKey();
     if (kb) {
         try {
-            key = Buffer.from(kb, 'base64');
+            const decoded = Buffer.from(kb, 'base64');
+            // A valid derived key is exactly 32 bytes (AES-256). A wrong length
+            // means the cache is corrupt/truncated — treat as locked rather than
+            // let isUnlocked() report true for a key that can't encrypt/decrypt.
+            key = decoded.length === 32 ? decoded : null;
         } catch {
             key = null;
         }
@@ -371,11 +375,11 @@ function buildPayload(clientId: string, clip: LocalClip, version: number, k: Buf
     };
 }
 
-async function pushPhase(): Promise<number> {
+async function pushPhase(): Promise<{ accepted: number; skippedTooLarge: number }> {
     // Capture the key up front: lock()/reset can null the module-level `key`
     // mid-cycle, and we must not encrypt with null.
     const k = key;
-    if (!host || !k) return 0;
+    if (!host || !k) return { accepted: 0, skippedTooLarge: 0 };
     const local = host.readClips();
     const localByHash = new Map<string, LocalClip>();
     for (const c of local) localByHash.set(hkey(c.type, c.content), c);
@@ -387,6 +391,10 @@ async function pushPhase(): Promise<number> {
     const outbound: Outbound[] = [];
     const pending: SyncMapRow[] = [];
     const now = Date.now();
+    // Clips whose ciphertext exceeds MAX_CLIP_BYTES (buildPayload returns null).
+    // They can never sync, so count them and surface the total to the user
+    // rather than dropping them silently every cycle.
+    let skippedTooLarge = 0;
 
     // new + pin-changed
     for (const [k2, clip] of localByHash) {
@@ -394,7 +402,7 @@ async function pushPhase(): Promise<number> {
         if (!existing) {
             const clientId = randomUUID();
             const payload = buildPayload(clientId, clip, 1, k);
-            if (!payload) continue; // too large to sync
+            if (!payload) { skippedTooLarge++; continue; } // too large to sync
             outbound.push(payload);
             pending.push({
                 clientId,
@@ -408,7 +416,7 @@ async function pushPhase(): Promise<number> {
         } else if ((existing.pinned ? 1 : 0) !== (clip.pinned ? 1 : 0)) {
             const version = existing.version + 1;
             const payload = buildPayload(existing.clientId, clip, version, k);
-            if (!payload) continue;
+            if (!payload) { skippedTooLarge++; continue; }
             outbound.push(payload);
             pending.push({ ...existing, version, pinned: clip.pinned ? 1 : 0, updatedAt: now });
         }
@@ -426,7 +434,7 @@ async function pushPhase(): Promise<number> {
         }
     }
 
-    if (outbound.length === 0) return 0;
+    if (outbound.length === 0) return { accepted: 0, skippedTooLarge };
 
     let accepted = 0;
     for (let i = 0; i < outbound.length; i += 500) {
@@ -449,7 +457,7 @@ async function pushPhase(): Promise<number> {
             }
         }
     }
-    return accepted;
+    return { accepted, skippedTooLarge };
 }
 
 // --- Pull -------------------------------------------------------------------
@@ -609,16 +617,24 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; error
 
         const dev = await registerDevice();
         if (dev.removed) throw new Error('This device was signed out remotely.');
-        const pushed = await pushPhase();
+        // Pull BEFORE push: mapping existing cloud content locally first lets
+        // pushPhase's content-hash dedupe recognize it, so we don't re-upload
+        // content that's already in the cloud under a fresh clientId (duplicate
+        // clips + wasted quota). Pull-then-push is the safe order: pending local
+        // deletions (deleted===2) and un-pushed local clips are keyed by
+        // version/content and are not clobbered by an incoming pull.
         const pull = await pullPhase();
+        const push = await pushPhase();
+        const pushed = push.accepted;
         const pulled = pull.applied;
         lastSync = Date.now();
-        // BUG 2: don't overwrite a decrypt-failure signal with null. If clips
-        // failed to decrypt/parse this pull, surface the count so it isn't silent.
-        lastError =
-            pull.failed > 0
-                ? `${pull.failed} clip(s) couldn't be decrypted and were skipped.`
-                : null;
+        // BUG 2: don't overwrite a decrypt-failure signal with null. Surface both
+        // non-fatal skip signals from this cycle (undecryptable pulled clips and
+        // too-large local clips that can't be pushed) instead of dropping them.
+        const notes: string[] = [];
+        if (pull.failed > 0) notes.push(`${pull.failed} clip(s) couldn't be decrypted and were skipped.`);
+        if (push.skippedTooLarge > 0) notes.push(`${push.skippedTooLarge} clip(s) are too large to sync and were skipped.`);
+        lastError = notes.length > 0 ? notes.join(' ') : null;
         host.setState('sync_last_sync', String(lastSync));
         if (pushed > 0 || pulled > 0) host.refreshUi();
         return { pushed, pulled, error: lastError || undefined };

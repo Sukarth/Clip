@@ -25,6 +25,10 @@ let cachedName: string | null = null;
 let cachedAvatar: string | null = null;
 let onChange: (() => void) | null = null;
 let activeServer: http.Server | null = null;
+// Set synchronously at the very start of login() so a second concurrent call is
+// rejected before it can spawn another loopback server. activeServer alone can't
+// guard this: it's only assigned inside the async listen() callback.
+let loginInProgress = false;
 
 const LOGGED_OUT: AuthState = {
     loggedIn: false,
@@ -109,10 +113,18 @@ async function doRefresh(): Promise<void> {
     if (!session || session.refreshToken !== usingRefreshToken) return;
 
     if (!res.ok) {
-        // Only a definitive auth failure (invalid/expired refresh token) should
-        // sign the user out. Transient 429/5xx must NOT — just fail this attempt
-        // and let the next tick retry, so a brief outage doesn't wipe the session.
-        if (res.status === 400 || res.status === 401) {
+        // Definitive auth failures sign the user out: 400/401 (invalid/expired
+        // refresh token), 403 (account banned/revoked) and 422 (unprocessable —
+        // the token can't be used). Without these, a revoked account would retry
+        // forever while still showing cached Pro. Transient 429/5xx must NOT sign
+        // out — just fail this attempt and let the next tick retry, so a brief
+        // outage doesn't wipe the session.
+        if (
+            res.status === 400 ||
+            res.status === 401 ||
+            res.status === 403 ||
+            res.status === 422
+        ) {
             await logout();
             throw new Error('Your session expired. Please sign in again.');
         }
@@ -132,7 +144,18 @@ async function doRefresh(): Promise<void> {
         expiresAt: data.expires_at ?? now + (data.expires_in ?? 3600),
         email: data.user?.email ?? session.email,
     };
-    saveSession(session);
+    // Persisting the rotated token can fail (e.g. OS keystore momentarily
+    // unavailable). Don't throw out of the refresh if it does: the refreshed
+    // session is already live in memory and usable for this run. Throwing here
+    // would surface as a failed refresh while the OLD (now server-invalidated)
+    // token remains on disk — forcing a logout on next launch. Residual
+    // limitation: if the keystore stays unavailable, the rotated token can't be
+    // persisted and re-auth may still be required next launch.
+    try {
+        saveSession(session);
+    } catch (e) {
+        console.warn('[auth] could not persist refreshed session (kept in memory):', e);
+    }
 }
 
 /** A valid access token, refreshing transparently, or null if signed out. */
@@ -258,10 +281,15 @@ fetch('/deliver',{method:'POST',headers:{'content-type':'text/plain'},body:h})
  */
 export function login(): Promise<AuthState> {
     return new Promise<AuthState>((resolve, reject) => {
-        if (activeServer) {
+        // Reject a second concurrent login immediately. loginInProgress is set
+        // synchronously (below), unlike activeServer which is only assigned once
+        // the async listen() callback fires — a window a rapid second call would
+        // otherwise slip through, spawning a duplicate loopback server.
+        if (loginInProgress || activeServer) {
             reject(new Error('A sign-in is already in progress.'));
             return;
         }
+        loginInProgress = true;
 
         const state = crypto.randomBytes(16).toString('hex');
         let settled = false;
@@ -277,6 +305,7 @@ export function login(): Promise<AuthState> {
                 /* ignore */
             }
             activeServer = null;
+            loginInProgress = false;
             fn();
         };
 

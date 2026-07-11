@@ -1,7 +1,83 @@
 import * as React from 'react';
-import type { ThemeProfile } from '../../theme-config';
+import { WINDOW_SIZE_LIMITS, type ThemeProfile } from '../../theme-config';
 import type { Settings } from '../app-types';
 import { getSliderStyles } from '../theme-utils';
+
+// These values are interpolated raw into a <style> block, so they are sanitized
+// here (defense in depth) to prevent CSS breakout (`;{}<>`) and external
+// resource loads (url()/@import) via a malicious theme/settings file.
+const CSS_FONT_FAMILY_FALLBACK = 'Lexend, sans-serif';
+const CSS_ACCENT_FALLBACK = '#4682b4';
+
+// Sensible per-field defaults (mirroring the default dark theme) used when a
+// color value fails validation.
+const CSS_COLOR_DEFAULTS: Record<keyof ThemeProfile['colors'], string> = {
+    appBackground: 'rgba(30,32,36,0.95)',
+    panelBackground: 'rgba(30,32,36,0.95)',
+    overlayBackground: 'rgba(0,0,0,0.45)',
+    itemBackground: 'rgba(255,255,255,0.04)',
+    itemHoverBackground: 'rgba(255,255,255,0.10)',
+    inputBackground: 'rgba(255,255,255,0.07)',
+    inputBorder: '#333333',
+    border: 'rgba(255,255,255,0.08)',
+    textPrimary: '#ffffff',
+    textSecondary: '#cccccc',
+    textMuted: '#888888',
+    accent: '#4682b4',
+    danger: '#ff4136',
+    warning: '#ffb300',
+    success: '#2ecc40',
+    scrollbarThumb: '#444444',
+    scrollbarTrack: '#23252a',
+};
+
+const HEX_COLOR_PATTERN = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+// rgb()/rgba()/hsl()/hsla() restricted to numeric args (digits, dots, commas,
+// spaces, %, and the "/" alpha separator) — no letters, so url()/expressions
+// cannot slip through.
+const CSS_COLOR_FUNCTION_PATTERN = /^(rgb|rgba|hsl|hsla)\(\s*[0-9.,%/\s]+\)$/i;
+// Named colors / CSS keywords (transparent, currentColor, inherit, …). Restricted
+// to a purely alphabetic token: with no digits or special characters it cannot
+// contain `;{}<>`, quotes, parentheses, url() or @import, so it is inherently
+// safe against CSS breakout / external resource loads while still accepting the
+// full set of valid CSS named colors.
+const CSS_NAMED_COLOR_PATTERN = /^[a-z]{3,30}$/i;
+
+function sanitizeCssColor(value: unknown, fallback: string): string {
+    if (typeof value !== 'string') return fallback;
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    if (
+        HEX_COLOR_PATTERN.test(trimmed) ||
+        CSS_COLOR_FUNCTION_PATTERN.test(trimmed) ||
+        CSS_NAMED_COLOR_PATTERN.test(trimmed)
+    ) {
+        return trimmed;
+    }
+    return fallback;
+}
+
+function sanitizeThemeColors(colors: ThemeProfile['colors']): ThemeProfile['colors'] {
+    return (Object.keys(CSS_COLOR_DEFAULTS) as Array<keyof ThemeProfile['colors']>).reduce((acc, key) => {
+        acc[key] = sanitizeCssColor(colors?.[key], CSS_COLOR_DEFAULTS[key]);
+        return acc;
+    }, {} as ThemeProfile['colors']);
+}
+
+function sanitizeFontFamily(value: unknown): string {
+    if (typeof value !== 'string') return CSS_FONT_FAMILY_FALLBACK;
+    // Allow only letters, digits, spaces, commas, quotes and hyphens; everything
+    // else (`;{}<>()@:` etc.) is stripped so the value cannot break out of the
+    // declaration or pull in external resources via url()/@import.
+    const cleaned = value.replace(/[^a-zA-Z0-9 ,'"-]/g, '').trim();
+    return cleaned || CSS_FONT_FAMILY_FALLBACK;
+}
+
+function clampCssPx(value: unknown, limits: { min: number; max: number; default: number }): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return limits.default;
+    return Math.min(limits.max, Math.max(limits.min, Math.round(parsed)));
+}
 
 interface AppInlineStylesProps {
     settings: Settings;
@@ -19,7 +95,13 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
     effectiveBorderRadius,
 }) => {
     const styles = React.useMemo(
-        () => `
+        () => {
+            const safeColors = sanitizeThemeColors(themeColors);
+            const safeFontFamily = sanitizeFontFamily(themeTypography.fontFamily);
+            const safeAccentColor = sanitizeCssColor(settings.accentColor, CSS_ACCENT_FALLBACK);
+            const safeWindowWidth = clampCssPx(settings.windowWidth, WINDOW_SIZE_LIMITS.width);
+            const safeWindowHeight = clampCssPx(settings.windowHeight, WINDOW_SIZE_LIMITS.height);
+            return `
                 /* Global CSS for clean interface */
                 body {
                     margin: 0;
@@ -239,7 +321,7 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 .overflow-y-auto { overflow-y: auto; }
 
                 /* Custom slider styles */
-                ${getSliderStyles(settings.accentColor)}
+                ${getSliderStyles(safeAccentColor)}
 
                 /* Light theme slider styles */
                 .theme-light input[type="range"]::-webkit-slider-runnable-track {
@@ -249,13 +331,13 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     background: #ccc !important;
                 }
                 .clip-root {
-                    background: ${themeColors.appBackground};
+                    background: ${safeColors.appBackground};
                     border-radius: ${effectiveBorderRadius}px;
                     padding: 3%;
-                    height: ${settings.windowHeight}px;
-                    width: ${settings.windowWidth}px;
-                    color: ${themeColors.textPrimary};
-                    font-family: ${themeTypography.fontFamily};
+                    height: ${safeWindowHeight}px;
+                    width: ${safeWindowWidth}px;
+                    color: ${safeColors.textPrimary};
+                    font-family: ${safeFontFamily};
                     transition: box-shadow 0.2s, border-radius 0.3s, background 0.3s;
                     position: relative;
                     overflow: hidden;
@@ -269,54 +351,54 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
 
                 /* Dark mode option styling */
                 option {
-                    background: ${themeColors.panelBackground} !important;
-                    color: ${themeColors.textPrimary} !important;
+                    background: ${safeColors.panelBackground} !important;
+                    color: ${safeColors.textPrimary} !important;
                 }
 
                 select option {
-                    background: ${themeColors.panelBackground} !important;
-                    color: ${themeColors.textPrimary} !important;
+                    background: ${safeColors.panelBackground} !important;
+                    color: ${safeColors.textPrimary} !important;
                 }
 
                 /* Theme-based styling */
                 .theme-light .clip-root {
-                    background: ${themeColors.appBackground};
-                    color: ${themeColors.textPrimary};
+                    background: ${safeColors.appBackground};
+                    color: ${safeColors.textPrimary};
                     backdrop-filter: blur(${themeSurface.backdropBlur}px);
                     -webkit-backdrop-filter: blur(${themeSurface.backdropBlur}px);
                 }
 
                 .theme-light .clip-item {
-                    background: ${themeColors.itemBackground} !important;
-                    color: ${themeColors.textPrimary};
-                    border: 1px solid ${themeColors.border} !important;
+                    background: ${safeColors.itemBackground} !important;
+                    color: ${safeColors.textPrimary};
+                    border: 1px solid ${safeColors.border} !important;
                 }
 
                 .theme-light .clip-item:hover {
-                    background: ${themeColors.itemHoverBackground} !important;
-                    border: 1px solid ${themeColors.border} !important;
+                    background: ${safeColors.itemHoverBackground} !important;
+                    border: 1px solid ${safeColors.border} !important;
                 }
 
                 .theme-light .clip-settings-page {
-                    background: ${themeColors.panelBackground} !important;
-                    color: ${themeColors.textPrimary};
+                    background: ${safeColors.panelBackground} !important;
+                    color: ${safeColors.textPrimary};
                 }
 
 
                 .theme-light .clip-settings-scroll::-webkit-scrollbar-thumb {
-                    background: ${themeColors.scrollbarThumb};
-                    border: 2px solid ${themeColors.scrollbarTrack};
+                    background: ${safeColors.scrollbarThumb};
+                    border: 2px solid ${safeColors.scrollbarTrack};
                     max-height: 90%;
                 }
 
                 .theme-light .clip-settings-scroll::-webkit-scrollbar-thumb:hover {
-                    background: ${themeColors.accent};
+                    background: ${safeColors.accent};
                 }
 
                 .theme-light input, .theme-light select {
-                    background: ${themeColors.inputBackground} !important;
-                    color: ${themeColors.textPrimary} !important;
-                    border: 1px solid ${themeColors.inputBorder} !important;
+                    background: ${safeColors.inputBackground} !important;
+                    color: ${safeColors.textPrimary} !important;
+                    border: 1px solid ${safeColors.inputBorder} !important;
                     box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
                 }
 
@@ -330,67 +412,67 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 }
 
                 .theme-light input:focus, .theme-light select:focus {
-                    border-color: ${themeColors.accent} !important;
+                    border-color: ${safeColors.accent} !important;
                     box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
                     outline: none !important;
                 }
 
                 .theme-light option {
-                    background: ${themeColors.panelBackground} !important;
-                    color: ${themeColors.textPrimary} !important;
+                    background: ${safeColors.panelBackground} !important;
+                    color: ${safeColors.textPrimary} !important;
                 }
 
                 /* Dark mode theme-specific option styling */
                 .theme-dark option {
-                    background: ${themeColors.panelBackground} !important;
-                    color: ${themeColors.textPrimary} !important;
+                    background: ${safeColors.panelBackground} !important;
+                    color: ${safeColors.textPrimary} !important;
                 }
 
                 .theme-dark select option {
-                    background: ${themeColors.panelBackground} !important;
-                    color: ${themeColors.textPrimary} !important;
+                    background: ${safeColors.panelBackground} !important;
+                    color: ${safeColors.textPrimary} !important;
                 }
 
                 .theme-light button:not(.no-btn, .clip-pin-btn, .clip-delete-btn) {
-                    color: ${themeColors.textSecondary} !important;
-                    border: 1px solid ${themeColors.inputBorder} !important;
+                    color: ${safeColors.textSecondary} !important;
+                    border: 1px solid ${safeColors.inputBorder} !important;
                     box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
                     transition: all 0.2s ease !important;
                 }
 
                 .theme-light button:hover:not(.clip-pin-btn, .clip-delete-btn) {
-                    border-color: ${themeColors.accent} !important;
+                    border-color: ${safeColors.accent} !important;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.15) !important;
                 }
 
                 .theme-light button.clip-settings-save-btn {
-                    background: ${settings.accentColor} !important;
+                    background: ${safeAccentColor} !important;
                     color: #fff !important;
-                    border-color: ${settings.accentColor} !important;
+                    border-color: ${safeAccentColor} !important;
                 }
 
                 .theme-light button.clip-settings-save-btn:hover {
-                    background: ${settings.accentColor} !important;
-                    background: color-mix(in srgb, ${settings.accentColor} 85%, transparent) !important;
-                    box-shadow: 0 2px 8px color-mix(in srgb, ${settings.accentColor} 30%, transparent) !important;
+                    background: ${safeAccentColor} !important;
+                    background: color-mix(in srgb, ${safeAccentColor} 85%, transparent) !important;
+                    box-shadow: 0 2px 8px color-mix(in srgb, ${safeAccentColor} 30%, transparent) !important;
                 }
 
                 .theme-light h2 {
-                    color: ${themeColors.textPrimary} !important;
-                    border-bottom-color: ${themeColors.border} !important;
+                    color: ${safeColors.textPrimary} !important;
+                    border-bottom-color: ${safeColors.border} !important;
                 }
 
                 .theme-light h3 {
-                    color: ${themeColors.textSecondary} !important;
+                    color: ${safeColors.textSecondary} !important;
                 }
 
                 .theme-light span:not(.toast-message>span) {
-                    color: ${themeColors.textMuted} !important;
+                    color: ${safeColors.textMuted} !important;
                 }
 
                 /* Light mode text labels - only for text labels, not container labels */
                 .theme-light label:not([style*="background:"]) {
-                    color: ${themeColors.textSecondary} !important;
+                    color: ${safeColors.textSecondary} !important;
                 }
 
                 /* Light mode simple class-based styling */
@@ -405,16 +487,16 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 }
 
                 #danger-area {
-                    color: ${themeColors.danger} !important;
+                    color: ${safeColors.danger} !important;
                 }
 
                 .theme-light #reset-settings-warning {
-                    color: ${themeColors.warning} !important;
+                    color: ${safeColors.warning} !important;
                 }
 
                 .theme-light .settings-input:focus,
                 .theme-light .settings-select:focus {
-                    border-color: ${settings.accentColor} !important;
+                    border-color: ${safeAccentColor} !important;
                     box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
                 }
 
@@ -1652,14 +1734,14 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     opacity: 1;
                 }
                 .clip-list::-webkit-scrollbar-thumb {
-                    background: ${themeColors.scrollbarThumb};
+                    background: ${safeColors.scrollbarThumb};
                     border-radius: 6px;
-                    border: 2px solid ${themeColors.scrollbarTrack};
+                    border: 2px solid ${safeColors.scrollbarTrack};
                     min-height: 20px !important;
                     transition: background 0.2s;
                 }
                 .clip-list::-webkit-scrollbar-thumb:hover {
-                    background: ${themeColors.accent};
+                    background: ${safeColors.accent};
                 }
 
                 /* Backup list scrollbar styling */
@@ -1673,20 +1755,21 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     transition: background 0.2s;
                 }
                 .clip-settings-scroll div[style*="overflowY"]::-webkit-scrollbar-thumb:hover {
-                    background: ${settings.accentColor};
+                    background: ${safeAccentColor};
                 }
 
                 *:focus-visible {
                     outline: none !important;
-                    box-shadow: inset 0 0 0 2px ${themeColors.accent} !important;
+                    box-shadow: inset 0 0 0 2px ${safeColors.accent} !important;
                 }
 
                 .clip-item:focus,
                 .clip-item:focus-visible {
                     outline: none !important;
-                    box-shadow: inset 0 0 0 2px ${themeColors.accent} !important;
+                    box-shadow: inset 0 0 0 2px ${safeColors.accent} !important;
                 }
-            `,
+            `;
+        },
         [effectiveBorderRadius, settings, themeColors, themeSurface, themeTypography],
     );
 

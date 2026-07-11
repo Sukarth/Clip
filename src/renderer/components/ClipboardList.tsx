@@ -71,9 +71,13 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
             if (lastFocusedKeyRef.current !== listForceKey) {
                 lastFocusedKeyRef.current = listForceKey;
                 const timer = setTimeout(() => {
-                    const firstItem = listRef.current?.querySelector('[data-index="0"] .clip-item') as HTMLElement;
-                    if (firstItem) {
-                        firstItem.focus();
+                    // On window show, keep focus on the search box so the user can
+                    // type-to-search immediately instead of stealing focus to the
+                    // first list row. Arrow keys still move into the list (handled
+                    // by the keydown listener below) once the user interacts.
+                    const searchInput = document.querySelector('input[type="text"]') as HTMLElement | null;
+                    if (searchInput) {
+                        searchInput.focus();
                     }
                 }, 50);
                 return () => clearTimeout(timer);

@@ -49,6 +49,9 @@ const MAX_HISTORY = 100;
 let mainWindow: BrowserWindow | null = null;
 let lastText = '';
 let lastImageDataUrl = '';
+// Raw bitmap of the last polled clipboard image, used to skip re-encoding an
+// unchanged image to a data URL on every poll tick (see pollClipboard).
+let lastImageBitmap: Buffer | null = null;
 let tray: Tray | null = null;
 let windowHideBehavior: 'hide' | 'tray' = 'hide';
 let showInTaskbar: boolean = false;
@@ -79,6 +82,10 @@ type ClipboardHistoryItem = {
 let temporaryClipboardItem: ClipboardHistoryItem | null = null;
 
 // --- Win+V override state ---
+// NOTE: This flag is not currently wired up — nothing reads it (updateGlobalShortcut
+// ignores it) and the renderer has no UI bound to `set-win-v-override`. Implementing
+// a real Win+V override (intercepting the OS clipboard shortcut) is a deliberate
+// follow-up; the flag is retained so that work has a home.
 let winVOverrideEnabled = false;
 let backendShortcut = 'Control+Shift+V';
 const SAFE_SHORTCUT_FALLBACK = 'Control+Shift+V';
@@ -334,10 +341,13 @@ async function cleanupAhkProcesses() {
                 const cmd = cols[1] || '';
                 const pid = cols[2]?.trim();
 
-                // Only kill processes using our script path that are NOT our current process
-                if (cmd.includes(lastAhkScriptPath!) && pid && parseInt(pid) !== ahkProcessPid) {
+                // Only kill processes using our script path that are NOT our current process.
+                // Validate the PID is purely numeric before use — the wmic CSV columns can
+                // shift, and interpolating an unvalidated value into a shell command would be
+                // a command-injection risk. Use execFile (no shell) with an argv array too.
+                if (cmd.includes(lastAhkScriptPath!) && pid && /^[0-9]+$/.test(pid) && parseInt(pid) !== ahkProcessPid) {
                     processesToKill++;
-                    exec(`taskkill /PID ${pid} /F`, (killErr) => {
+                    execFile('taskkill', ['/PID', pid, '/F'], (killErr) => {
                         processesKilled++;
                         if (!killErr) {
                             console.log(`[main] Cleaned up orphaned AHK process with PID ${pid}`);
@@ -584,14 +594,38 @@ function handleShortcutChangeQueued(shortcut: string) {
     shortcutChangeChain = shortcutChangeChain.then(() => handleShortcutChange(shortcut));
 }
 
+// Surface a hotkey-registration failure to the user. A hotkey silently failing
+// to register (because another app owns it) leaves Clip with no way to open, so
+// we always notify here regardless of the general notification preference.
+function notifyShortcutRegistrationFailed(shortcut: string) {
+    logError(`Global shortcut registration failed: ${shortcut}`);
+    try {
+        new Notification({
+            title: 'Clip - Shortcut unavailable',
+            body: `The shortcut "${shortcut}" is already in use by another app. Pick a different one in Settings.`,
+        }).show();
+    } catch { }
+}
+
 // Helper to (re)register global shortcut
 function updateGlobalShortcut() {
     try {
         globalShortcut.unregisterAll();
     } catch { }
-    globalShortcut.register(backendShortcut, () => {
-        showMainWindow();
-    });
+    try {
+        const registered = globalShortcut.register(backendShortcut, () => {
+            showMainWindow();
+        });
+        // register() returns false when the accelerator is already taken by
+        // another application; it doesn't throw in that case.
+        if (!registered) {
+            console.error(`[main] Failed to register global shortcut "${backendShortcut}" (already in use)`);
+            notifyShortcutRegistrationFailed(backendShortcut);
+        }
+    } catch (error) {
+        console.error(`[main] Error registering global shortcut "${backendShortcut}":`, error);
+        notifyShortcutRegistrationFailed(backendShortcut);
+    }
 }
 
 // Determine if running in portable mode and get appropriate data directory
@@ -865,7 +899,16 @@ function readSettingsFromFile() {
     try {
         return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     } catch (error) {
-        console.error('[main] Failed to parse settings file:', error);
+        console.error('[main] Failed to parse settings file; quarantining corrupt file.', error);
+        // Quarantine the corrupt file before the caller writes fresh defaults so
+        // the user's (recoverable) data isn't silently overwritten. Mirrors the
+        // theme-config corrupt path (see readThemeConfigFromFile).
+        try {
+            const backupName = `clip-settings.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+            fs.renameSync(settingsPath, path.join(getAppDataPath(), backupName));
+        } catch (renameError) {
+            console.error('[main] Failed to quarantine corrupt settings file:', renameError);
+        }
         return null;
     }
 }
@@ -998,6 +1041,13 @@ function initializeThemeConfig() {
     }
 
     return persistThemeConfig(createDefaultThemeConfig());
+}
+
+// Re-read the freshest persisted theme config (on-disk file → DB backup →
+// in-memory copy) so profile mutations build on the last SAVED state rather
+// than a possibly-stale `activeThemeConfig`.
+function getFreshThemeConfig() {
+    return readThemeConfigFromFile() || readThemeConfigFromDb() || activeThemeConfig;
 }
 
 function suppressBlurHide(ms: number) {
@@ -1492,6 +1542,22 @@ function createMainWindow() {
             : `file://${path.resolve(__dirname, '../renderer/index.html')}`
     );
 
+    // Security: route window.open / target=_blank and any in-app navigation away
+    // from arbitrary origins. External http(s) links open in the user's browser;
+    // navigation is only permitted to the app's own content (the dev server URL
+    // in development and the packaged file:// bundle in production).
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+        return { action: 'deny' };
+    });
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        const isAppContent = url.startsWith(devServerUrl) || url.startsWith('file://');
+        if (!isAppContent) {
+            event.preventDefault();
+            if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+        }
+    });
+
     mainWindow.on('close', (e) => {
         e.preventDefault(); // Always prevent actual close
 
@@ -1529,12 +1595,6 @@ function createMainWindow() {
     // Hide window when it loses focus (same behavior as pressing ESC)
     mainWindow.on('blur', () => {
         if (mainWindow && mainWindow.isVisible()) {
-            // Don't hide if triggered by AHK (give AHK time to focus)
-            if (isAhkTriggered) {
-                console.log('[main] Window lost focus but AHK is active, not hiding...');
-                return;
-            }
-
             if (isBlurHideSuppressed()) {
                 console.log('[main] Window blur hide suppressed briefly');
                 return;
@@ -1542,7 +1602,13 @@ function createMainWindow() {
 
             console.log('[main] Window lost focus, hiding...');
 
-            // Restore focus to the previous window before hiding
+            // Restore focus to the previous window before hiding.
+            // NOTE (known limitation): this always re-foregrounds the window that
+            // was active before Clip opened, even when the blur happened because
+            // the user clicked a *different* app. Distinguishing "user clicked
+            // elsewhere" from "focus should return to the origin window" needs the
+            // new foreground HWND at blur time; left as a follow-up to avoid
+            // regressing the normal open→pick→paste-back flow.
             restorePreviousWindow();
 
             if (windowHideBehavior === 'hide') {
@@ -1592,13 +1658,28 @@ function pollClipboard() {
         clearInterval(clipboardPollTimer);
     }
 
+    // NOTE: This is interval-based polling (Electron exposes no clipboard-change
+    // event on Windows). Two rapid copies within one interval collapse into a
+    // single detection — inherent to polling; not changed here to avoid the cost
+    // of a tighter interval / native clipboard listener.
     clipboardPollTimer = setInterval(() => {
         const text = clipboard.readText();
         const image = clipboard.readImage();
         let imageDataUrl = '';
         if (!image.isEmpty()) {
             // Compare image content, not dimensions, so same-size updates are detected.
-            imageDataUrl = image.toDataURL();
+            // Encoding to a data URL (PNG + base64) is expensive, so first compare the
+            // raw bitmap buffer (a cheap memcmp): only re-encode when the pixels have
+            // actually changed and reuse the previous data URL otherwise.
+            const bitmap = image.toBitmap();
+            if (lastImageBitmap && lastImageDataUrl && bitmap.equals(lastImageBitmap)) {
+                imageDataUrl = lastImageDataUrl;
+            } else {
+                imageDataUrl = image.toDataURL();
+                lastImageBitmap = bitmap;
+            }
+        } else {
+            lastImageBitmap = null;
         }
 
         // Track last seen clipboard content to avoid unnecessary DB/cache/log updates
@@ -1608,6 +1689,10 @@ function pollClipboard() {
         if (text && text !== lastText) {
             lastText = text;
             shouldUpdate = true;
+            // NOTE: When image storage is disabled, the temporary image preview
+            // (below) is cleared here on any text copy and only reappears when a
+            // new image is copied. Accepted as-is; re-surfacing it would require
+            // retaining the last temp image across text copies.
             setTemporaryClipboardItem(null);
             const item = { type: 'text' as const, content: text, timestamp: Date.now() };
             insertClipboardItem(item);
@@ -1617,9 +1702,12 @@ function pollClipboard() {
                 console.log('[main] Sent clipboard-item (text) to renderer');
             }
             if (showNotifications) {
+                // Never echo the copied content into the OS notification / Action
+                // Center — it can leak secrets (passwords, tokens) to a persistent,
+                // shoulder-surfable surface. Use a generic body instead.
                 const notification = {
                     title: 'Clip - New Text Copied',
-                    body: text.length > 50 ? text.substring(0, 50) + '...' : text
+                    body: 'Copied to Clip history'
                 };
                 new Notification(notification).show();
             }
@@ -1825,6 +1913,21 @@ function restoreBackup(backupFile: string) {
         db.close();
     }
 
+    // Remove the OLD database's WAL/SHM sidecars before overwriting the main DB
+    // file. The backup is a checkpointed copy with no sidecars of its own, so any
+    // leftover -wal/-shm belongs to the pre-restore database — if left in place,
+    // SQLite may replay that stale WAL on reopen and resurrect old data.
+    for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+        try {
+            if (fs.existsSync(sidecar)) {
+                fs.unlinkSync(sidecar);
+                console.log(`[main] Removed stale DB sidecar: ${sidecar}`);
+            }
+        } catch (sidecarError) {
+            console.error(`[main] Failed to remove DB sidecar ${sidecar}:`, sidecarError);
+        }
+    }
+
     // From here the live db is closed, so the reopen below MUST run on every
     // path (success or failure) — otherwise a failed copy would leave db null
     // and brick the app until restart. Capture any copy error and rethrow it
@@ -1864,6 +1967,11 @@ function restoreBackup(backupFile: string) {
     // and this install registers as its own device — rather than hijacking the
     // backup's origin device.
     setAppState('sync_cursor', '');
+    // We intentionally do NOT deregister the previous device on the server here:
+    // this is a synchronous restore path and deregistration requires a network
+    // round-trip. The orphaned remote "device" row ages out via the server-side
+    // heartbeat TTL (the device heartbeat stops refreshing it). Explicit cleanup
+    // would be a follow-up if it ever proves necessary.
     setAppState('sync_device_id', '');
 
     // Verify the restore worked by counting records
@@ -2024,9 +2132,6 @@ function setupAutoBackup() {
 }
 setupAutoBackup();
 
-// Flag to temporarily disable blur hiding when triggered by AHK
-let isAhkTriggered = false;
-
 let wmClipShowHookedForWindowId: number | null = null;
 
 // Native Windows message handler for AHK trigger
@@ -2043,6 +2148,17 @@ function registerNativeMessageHandler() {
             // Run on next tick to avoid re-entrancy surprises.
             setImmediate(() => {
                 try {
+                    // TRUST ASSUMPTION: wParam is treated as the HWND of the paste
+                    // target and is not authenticated — any local process that can
+                    // find Clip's window could post WM_CLIP_SHOW (0x8001) with an
+                    // arbitrary HWND. This is intentional: our AHK helper captures
+                    // the pre-Clip foreground window and passes it here precisely
+                    // because it is more reliable than re-detecting the foreground
+                    // after the async post. parseHwndParam already rejects
+                    // non-positive/garbage values, and the worst case is that a
+                    // subsequent paste targets the caller-supplied window. Kept as
+                    // documented rather than dropping wParam (which would regress
+                    // the AHK paste-back flow).
                     const targetFromAhk = parseHwndParam(wParam);
                     if (targetFromAhk && targetFromAhk > 0) {
                         lastForegroundHwnd = targetFromAhk;
@@ -2076,7 +2192,14 @@ function savePreviousHwnd(preferredFromAhk?: number | null) {
             const clipmsg = require(clipmsgPath);
             const hwnd = Number(clipmsg?.getForegroundWindow?.());
             const mainHwnd = getMainWindowHwnd();
-            if (Number.isFinite(hwnd) && hwnd > 0 && (!mainHwnd || hwnd !== mainHwnd)) {
+            if (Number.isFinite(hwnd) && hwnd > 0) {
+                if (mainHwnd && hwnd === mainHwnd) {
+                    // Clip's own window is already foreground (e.g. the shortcut
+                    // was pressed again while Clip is open). Keep the previously
+                    // saved target — overwriting it here would destroy the real
+                    // paste destination.
+                    return;
+                }
                 lastForegroundHwnd = Math.trunc(hwnd);
                 return;
             }
@@ -2303,6 +2426,9 @@ app.whenReady().then(() => {
     });
     ipcMain.handle('sync:list-backups', () => cloudSync.listBackups());
     ipcMain.handle('sync:restore-backup', async (_e, id: string) => {
+        // Track the temp file so it is always removed (finally), not just on the
+        // success path — otherwise a failed restore leaks a multi-MB .db file.
+        let tempName: string | null = null;
         try {
             const bytes = await cloudSync.downloadBackup(id);
             if (!bytes) return { ok: false, error: 'Could not download or decrypt the backup.' };
@@ -2310,10 +2436,9 @@ app.whenReady().then(() => {
                 return { ok: false, error: 'The backup file is not valid.' };
             }
             ensureBackupDir();
-            const name = `clip-backup-cloud-${Date.now()}.db`;
-            fs.writeFileSync(path.join(getBackupDir(), name), bytes);
-            restoreBackup(name);
-            try { fs.unlinkSync(path.join(getBackupDir(), name)); } catch { /* ignore */ }
+            tempName = `clip-backup-cloud-${Date.now()}.db`;
+            fs.writeFileSync(path.join(getBackupDir(), tempName), bytes);
+            restoreBackup(tempName);
             invalidateHistoryCache();
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('clipboard-history', getClipboardHistory());
@@ -2321,10 +2446,21 @@ app.whenReady().then(() => {
             return { ok: true };
         } catch (e) {
             return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        } finally {
+            if (tempName) {
+                try { fs.unlinkSync(path.join(getBackupDir(), tempName)); } catch { /* best-effort */ }
+            }
         }
     });
 
     ipcMain.on('paste-clipboard-item', (_event, item) => {
+        // getPreferredPasteTargetHwnd() returns null when the saved target is
+        // missing or resolves to Clip's own window — so we never explicitly
+        // target Clip. A null target means SendPaste falls back to whatever is
+        // foreground after we hide Clip (normally the previous window, which the
+        // OS re-foregrounds), which keeps paste working even when the native
+        // foreground-capture module is unavailable. The content is on the
+        // clipboard regardless, so a missed target still leaves it pasteable.
         const preferredTargetHwnd = getPreferredPasteTargetHwnd();
 
         if (item.type === 'text') {
@@ -2369,6 +2505,11 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('set-window-hide-behavior', (_event, behavior) => {
+        // Only accept the two known values; ignore anything else and keep the
+        // current behavior rather than assigning an arbitrary renderer value.
+        if (behavior !== 'hide' && behavior !== 'tray') {
+            return;
+        }
         windowHideBehavior = behavior;
         if (windowHideBehavior === 'tray' && mainWindow) {
             ensureTray(mainWindow);
@@ -2495,6 +2636,11 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('reload-settings-from-disk', () => {
+        // applySettingsRuntime() clamps the values that drive main-process state
+        // (window size, maxItems, shortcut). The raw parsed document is returned
+        // to the renderer unmodified; per-field clamping/normalization of the
+        // returned object is handled renderer-side. No dedicated settings
+        // normalizer exists here to reuse, so we intentionally don't add one.
         const fromFile = readSettingsFromFile();
         if (!fromFile) {
             const fallback = createDefaultSettingsDocument();
@@ -2518,20 +2664,28 @@ app.whenReady().then(() => {
             throw new Error('Profile name is required');
         }
 
+        // Build from the freshest saved config, not the (possibly stale)
+        // in-memory copy. NOTE (follow-up): the theme-config-updated broadcast
+        // below will replace the renderer's editor state, so any unsaved edits in
+        // the theme editor are discarded when a profile is created. Fully
+        // preserving in-progress edits needs renderer coordination (e.g. the
+        // renderer merging rather than replacing on this event).
+        const current = getFreshThemeConfig();
+
         const keyBase = normalizeThemeProfileKey(cleanName);
         let key = keyBase;
         let index = 2;
-        while (activeThemeConfig.profiles[key]) {
+        while (current.profiles[key]) {
             key = `${keyBase}-${index}`;
             index += 1;
         }
 
-        const source = activeThemeConfig.profiles[activeThemeConfig.activeProfile] || createDefaultThemeConfig().profiles.default;
+        const source = current.profiles[current.activeProfile] || createDefaultThemeConfig().profiles.default;
         const next = {
-            ...activeThemeConfig,
+            ...current,
             activeProfile: key,
             profiles: {
-                ...activeThemeConfig.profiles,
+                ...current.profiles,
                 [key]: {
                     ...JSON.parse(JSON.stringify(source)),
                     name: cleanName,
@@ -2547,19 +2701,21 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('delete-theme-profile', (_event, profileKey) => {
+        // Operate on the freshest saved config rather than the in-memory copy.
+        const current = getFreshThemeConfig();
         const key = normalizeThemeProfileKey(String(profileKey || ''));
-        const existingKeys = Object.keys(activeThemeConfig.profiles);
-        if (!activeThemeConfig.profiles[key]) {
-            return activeThemeConfig;
+        const existingKeys = Object.keys(current.profiles);
+        if (!current.profiles[key]) {
+            return current;
         }
         if (existingKeys.length <= 1) {
             throw new Error('At least one profile must remain');
         }
 
-        const { [key]: _removed, ...rest } = activeThemeConfig.profiles;
-        const fallbackKey = rest[activeThemeConfig.activeProfile] ? activeThemeConfig.activeProfile : Object.keys(rest)[0];
+        const { [key]: _removed, ...rest } = current.profiles;
+        const fallbackKey = rest[current.activeProfile] ? current.activeProfile : Object.keys(rest)[0];
         const next = {
-            ...activeThemeConfig,
+            ...current,
             activeProfile: fallbackKey,
             profiles: rest,
         };
@@ -2572,13 +2728,15 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('set-active-theme-profile', (_event, profileKey) => {
+        // Switch the active profile on the freshest saved config.
+        const current = getFreshThemeConfig();
         const key = normalizeThemeProfileKey(String(profileKey || ''));
-        if (!activeThemeConfig.profiles[key]) {
+        if (!current.profiles[key]) {
             throw new Error('Profile not found');
         }
 
         const next = {
-            ...activeThemeConfig,
+            ...current,
             activeProfile: key,
         };
 
@@ -2735,6 +2893,10 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('set-win-v-override', (_event, enabled) => {
+        // NOTE: Win+V override is not currently wired up — updateGlobalShortcut()
+        // does not consult winVOverrideEnabled, and no renderer UI sends this
+        // message, so toggling it has no effect today. Left in place as the hook
+        // point for a future implementation (see winVOverrideEnabled declaration).
         winVOverrideEnabled = !!enabled;
         updateGlobalShortcut();
     });
@@ -2792,7 +2954,15 @@ app.whenReady().then(() => {
                 $schema: getSettingsSchemaUri(),
                 ...(settings || {}),
             };
-            fs.writeFileSync(getSettingsPath(), JSON.stringify(nextSettings, null, 2), 'utf8');
+            // JSON.stringify throws on invalid/circular input (caught below), so a
+            // malformed renderer object never reaches disk. Write to a temp file
+            // then rename over the target so a crash mid-write can't leave a
+            // truncated/corrupt settings file.
+            const settingsPath = getSettingsPath();
+            const serialized = JSON.stringify(nextSettings, null, 2);
+            const tmpPath = `${settingsPath}.tmp`;
+            fs.writeFileSync(tmpPath, serialized, 'utf8');
+            fs.renameSync(tmpPath, settingsPath);
             handleShortcutChangeQueued(backendShortcut);
         } catch (error) {
             console.error('[main] Failed to save settings to file:', error);
