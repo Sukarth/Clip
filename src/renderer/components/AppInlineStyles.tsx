@@ -79,6 +79,26 @@ function clampCssPx(value: unknown, limits: { min: number; max: number; default:
     return Math.min(limits.max, Math.max(limits.min, Math.round(parsed)));
 }
 
+// Force a color's alpha to `alpha` (0..1), so the transparency slider actually
+// controls the window's opacity instead of the alpha baked into the theme color.
+// Handles rgb()/rgba()/hex precisely; falls back to color-mix for hsl()/named.
+function withAlpha(color: string, alpha: number): string {
+    const a = Math.min(1, Math.max(0, alpha));
+    const trimmed = color.trim();
+    const rgb = trimmed.match(/^rgba?\(\s*([0-9.]+)[ ,]+([0-9.]+)[ ,]+([0-9.]+)/i);
+    if (rgb) return `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${a})`;
+    const hex = trimmed.replace('#', '');
+    if (/^[0-9a-f]{3}$/i.test(hex)) {
+        const r = parseInt(hex[0] + hex[0], 16), g = parseInt(hex[1] + hex[1], 16), b = parseInt(hex[2] + hex[2], 16);
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+    if (/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(hex)) {
+        const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+    return `color-mix(in srgb, ${trimmed} ${Math.round(a * 100)}%, transparent)`;
+}
+
 interface AppInlineStylesProps {
     settings: Settings;
     themeColors: ThemeProfile['colors'];
@@ -101,6 +121,14 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
             const safeAccentColor = sanitizeCssColor(settings.accentColor, CSS_ACCENT_FALLBACK);
             const safeWindowWidth = clampCssPx(settings.windowWidth, WINDOW_SIZE_LIMITS.width);
             const safeWindowHeight = clampCssPx(settings.windowHeight, WINDOW_SIZE_LIMITS.height);
+            // The transparency slider (theme surface, falling back to the legacy
+            // settings value) drives the window's opacity. Clamp to a sane range so
+            // the window can't become fully invisible.
+            const rawTransparency = Number(themeSurface?.transparency ?? settings.transparency ?? 1);
+            const effectiveTransparency = Number.isFinite(rawTransparency)
+                ? Math.min(1, Math.max(0.2, rawTransparency))
+                : 1;
+            const appBg = withAlpha(safeColors.appBackground, effectiveTransparency);
             return `
                 /* Global CSS for clean interface */
                 body {
@@ -331,7 +359,7 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     background: #ccc !important;
                 }
                 .clip-root {
-                    background: ${safeColors.appBackground};
+                    background: ${appBg};
                     border-radius: ${effectiveBorderRadius}px;
                     padding: 3%;
                     height: ${safeWindowHeight}px;
@@ -362,7 +390,7 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
 
                 /* Theme-based styling */
                 .theme-light .clip-root {
-                    background: ${safeColors.appBackground};
+                    background: ${appBg};
                     color: ${safeColors.textPrimary};
                     backdrop-filter: blur(${themeSurface.backdropBlur}px);
                     -webkit-backdrop-filter: blur(${themeSurface.backdropBlur}px);
@@ -1091,11 +1119,11 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     margin: 0;
                     color: #e5e2e1;
                     font-size: 14px;
-                    font-weight: 700;
+                    font-weight: 600;
                 }
                 .json-file-card-title p {
                     margin: 2px 0 0;
-                    color: #8c919c;
+                    color: #c3c6d0;
                     font-size: 11px;
                     line-height: 1.45;
                 }
@@ -1106,10 +1134,14 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     justify-content: space-between;
                     gap: 12px;
                     padding: 12px 14px;
-                    border-radius: 14px;
-                    border: 1px solid #43474f;
-                    background: linear-gradient(180deg, rgba(42, 42, 42, 0.9) 0%, rgba(28, 28, 28, 0.95) 100%) !important;
+                    border-radius: 1.5rem;
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    background: #2a2a2a;
                     cursor: pointer;
+                    transition: background-color 0.15s ease;
+                }
+                .json-file-pill:hover {
+                    background: #333333;
                 }
                 .json-file-pill-main {
                     display: flex;
@@ -1129,13 +1161,13 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 }
                 .json-file-pill-text strong {
                     color: #e5e2e1;
-                    font-size: 12px;
-                    font-weight: 700;
+                    font-size: 13px;
+                    font-weight: 500;
                     word-break: break-all;
                 }
                 .json-file-pill-text span {
-                    color: #8c919c !important;
-                    font-size: 10px;
+                    color: #c3c6d0 !important;
+                    font-size: 11px;
                 }
                 .json-file-pill-copy {
                     display: flex;
@@ -1162,20 +1194,21 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 }
                 .json-action-btn {
                     width: 100%;
-                    padding: 10px 12px;
-                    border-radius: 12px;
+                    min-height: 41px;
+                    padding: 8px 12px;
+                    border-radius: 1.5rem;
                     background: #2a2a2a;
-                    border: 1px solid #43474f;
+                    border: 1px solid rgba(255, 255, 255, 0.12);
                     color: #e5e2e1;
                     font-size: 12px;
-                    font-weight: 700;
+                    font-weight: 500;
                     transition: all 0.2s ease;
                     font-family: inherit;
                     cursor: pointer;
                 }
                 .json-action-btn:hover {
-                    background: #353534;
-                    border-color: #8c919c;
+                    background: #333333;
+                    border-color: rgba(255, 255, 255, 0.2);
                     color: #ffffff;
                 }
                 .bg-surface-container-high {

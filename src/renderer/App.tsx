@@ -1401,7 +1401,10 @@ const App: React.FC = () => {
                                 <span className="text-xs font-semibold text-primary uppercase tracking-wider">Sync</span>
                             </div>
 
-                            <div className="flex items-center justify-between py-2">
+                            <div
+                                className="flex items-center justify-between py-2"
+                                style={{ opacity: account.loggedIn && account.isPro ? 1 : 0.5 }}
+                            >
                                 <div>
                                     <h3 className="font-medium text-on-surface text-sm">Cloud Sync</h3>
                                     <p className="text-[11px] text-on-surface-variant">Sync clipboard across devices</p>
@@ -1567,16 +1570,27 @@ const App: React.FC = () => {
                 return (
                     <div className="space-y-3 py-3">
                         <div className="bg-surface-container-low p-5 rounded-xl flex flex-col items-center text-center">
-                            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center mb-3" style={{ boxShadow: '0 10px 24px rgba(171, 204, 255, 0.2)' }}>
-                                <span className="material-symbols-outlined text-on-primary text-4xl" style={{ fontVariationSettings: "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24" }}>content_paste</span>
+                            <div className="mb-3" style={{ filter: 'drop-shadow(0 10px 24px rgba(171, 204, 255, 0.25))' }}>
+                                <svg width={72} height={72} viewBox="0 0 48 48" fill="none" role="img" aria-label="Clip logo">
+                                    <defs>
+                                        <linearGradient id="aboutClipGrad" x1="0" y1="0" x2="1" y2="1">
+                                            <stop offset="0" stopColor="#bfe4ff" />
+                                            <stop offset="1" stopColor="#4682b4" />
+                                        </linearGradient>
+                                    </defs>
+                                    <rect x="5" y="19" width="24" height="24" rx="6" fill="#1e2024" stroke="rgba(255,255,255,0.14)" />
+                                    <rect x="11" y="13" width="24" height="24" rx="6" fill="#23262c" stroke="rgba(255,255,255,0.18)" />
+                                    <rect x="19" y="5" width="24" height="24" rx="6" fill="url(#aboutClipGrad)" />
+                                    <path d="M25 17.3l2.1 2.1 4.4-4.6" stroke="#06131f" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
                             </div>
                             <h2 className="text-xl font-bold text-on-surface">Clip</h2>
                             <p className="text-sm text-primary font-medium">Version 1.1.0</p>
-                            <p className="text-xs text-on-surface-variant mt-1">Build 2026.04.05</p>
+                            <p className="text-xs text-on-surface-variant mt-1">Built by Sukarth Acharya</p>
                         </div>
 
                         <div className="bg-surface-container-low p-4 rounded-xl space-y-2">
-                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.open('https://github.com/Sukarth/Clip/releases', '_blank')}>
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.electronAPI.openExternal('https://github.com/Sukarth/Clip/releases')}>
                                 <div className="flex items-center gap-3">
                                     <span className="material-symbols-outlined text-on-surface-variant">description</span>
                                     <span className="text-sm text-on-surface">Release Notes</span>
@@ -1584,10 +1598,10 @@ const App: React.FC = () => {
                                 <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
                             </button>
 
-                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.electronAPI.openExternal('https://github.com/Sukarth/Clip')}>
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.electronAPI.openExternal('https://github.com/Sukarth/Clip/blob/main/LICENSE')}>
                                 <div className="flex items-center gap-3">
                                     <span className="material-symbols-outlined text-on-surface-variant">gavel</span>
-                                    <span className="text-sm text-on-surface">Licenses</span>
+                                    <span className="text-sm text-on-surface">License</span>
                                 </div>
                                 <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
                             </button>
@@ -1600,12 +1614,12 @@ const App: React.FC = () => {
                                 <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
                             </button>
 
-                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.open('https://github.com/Sukarth/Clip', '_blank')}>
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => window.electronAPI.openExternal('https://github.com/Sukarth/Clip')}>
                                 <div className="flex items-center gap-3">
                                     <span className="material-symbols-outlined text-on-surface-variant">code</span>
                                     <span className="text-sm text-on-surface">GitHub Repository</span>
                                 </div>
-                                <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">open_in_new</span>
+                                <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
                             </button>
                         </div>
 
@@ -1615,8 +1629,11 @@ const App: React.FC = () => {
                                 <span className="text-xs font-semibold text-primary uppercase tracking-wider">Credits</span>
                             </div>
                             <p className="text-xs text-on-surface-variant leading-relaxed">
-                                Made with love. Built using Electron, React, and TypeScript.
-                                Icons by Material Design Icons.
+                                Made with ❤️ by Sukarth.
+                                <br />
+                                Built with Electron, React, TypeScript, and better-sqlite3. Encrypted
+                                cloud sync via Supabase and hash-wasm (Argon2id); billing by Polar.
+                                Icons by Material Symbols. Fonts: Lexend and JetBrains Mono.
                             </p>
                         </div>
                     </div>

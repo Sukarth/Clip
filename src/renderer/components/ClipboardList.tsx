@@ -87,6 +87,27 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
 
     React.useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Home' || e.key === 'End') {
+                // Don't interfere with settings/other modals.
+                if (document.querySelector('.clip-settings-page') || document.querySelector('.clip-dialog-backdrop')) {
+                    return;
+                }
+                const active = document.activeElement as HTMLElement | null;
+                // Only hijack Home/End when a list item is focused — leave the
+                // search input's normal cursor behavior alone.
+                if (!active || !active.classList.contains('clip-item')) {
+                    return;
+                }
+                if (filteredItems.length === 0) return;
+                e.preventDefault();
+                const targetIndex = e.key === 'Home' ? 0 : filteredItems.length - 1;
+                rowVirtualizer.scrollToIndex(targetIndex, { align: e.key === 'Home' ? 'start' : 'end' });
+                setTimeout(() => {
+                    const el = listRef.current?.querySelector(`[data-index="${targetIndex}"] .clip-item`) as HTMLElement | null;
+                    if (el) el.focus();
+                }, 50);
+                return;
+            }
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 const active = document.activeElement as HTMLElement | null;
 

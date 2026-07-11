@@ -133,7 +133,7 @@ const SettingsDataSection: React.FC<SettingsDataSectionProps> = ({
                     </div>
                 </div>
 
-                <button className="json-file-pill" type="button" title="Click to copy" onClick={() => settingsPaths?.configPath && void copyTextToClipboard(settingsPaths.configPath, 'Settings JSON path')}>
+                <button className="json-file-pill" type="button" title="Click to copy" onClick={() => settingsPaths?.configPath && void copyTextToClipboard(settingsPaths.configPath, 'Settings file path')}>
                     <span className="json-file-pill-main">
                         <span className="material-symbols-outlined">description</span>
                         <span className="json-file-pill-text">
