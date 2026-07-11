@@ -89,6 +89,10 @@ async function refreshIfNeeded(): Promise<void> {
 async function doRefresh(): Promise<void> {
     if (!session) return;
     const now = Math.floor(Date.now() / 1000);
+    // Capture the token we're refreshing. If the user logs out (or re-logs in)
+    // during the network round-trip, the session we're refreshing is no longer
+    // current and we must NOT resurrect/overwrite it (or sign out the new one).
+    const usingRefreshToken = session.refreshToken;
     const res = await fetch(
         `${CLOUD.supabaseUrl}/auth/v1/token?grant_type=refresh_token`,
         {
@@ -97,9 +101,12 @@ async function doRefresh(): Promise<void> {
                 apikey: CLOUD.supabaseAnonKey,
                 'content-type': 'application/json',
             },
-            body: JSON.stringify({ refresh_token: session.refreshToken }),
+            body: JSON.stringify({ refresh_token: usingRefreshToken }),
         }
     );
+
+    // The session changed out from under us during the await — abandon quietly.
+    if (!session || session.refreshToken !== usingRefreshToken) return;
 
     if (!res.ok) {
         // Only a definitive auth failure (invalid/expired refresh token) should

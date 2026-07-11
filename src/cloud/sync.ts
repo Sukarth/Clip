@@ -68,6 +68,10 @@ const PULL_LIMIT = 200;
 
 let host: SyncHost | null = null;
 let key: Buffer | null = null; // derived encryption key — in memory only
+// Has `key` been checked against the server's *current* verifier since this
+// unlock? An auto-unlocked (OS-cached) key can be stale if another device reset
+// the passphrase, so we must verify it once before trusting it for sync.
+let keyVerified = false;
 let syncing = false;
 let lastSync: number | null = null;
 let lastError: string | null = null;
@@ -86,6 +90,9 @@ export function initSync(h: SyncHost): void {
             key = null;
         }
     }
+    // The cached key is loaded but NOT yet checked against the server — the
+    // first syncNow verifies it before use (see BUG 1 handling there).
+    keyVerified = false;
 }
 
 export function isEnabled(): boolean {
@@ -102,6 +109,7 @@ export function getStatus(): SyncStatus {
 
 export function lock(): void {
     key = null;
+    keyVerified = false;
     host?.saveKey(null);
 }
 
@@ -181,6 +189,7 @@ export async function setupPassphrase(
         );
         if (!ok) return { ok: false, error: 'That passphrase is incorrect.' };
         key = k;
+        keyVerified = true; // checkVerifier just passed against the server's current verifier
         host?.saveKey(k.toString('base64'));
         return { ok: true };
     }
@@ -200,6 +209,7 @@ export async function setupPassphrase(
     });
     if (!put || !put.ok) return { ok: false, error: 'Could not save your sync key.' };
     key = k;
+    keyVerified = true; // first-time setup: this key defines the server verifier, so it is trusted
     host?.saveKey(k.toString('base64'));
     return { ok: true };
 }
@@ -222,6 +232,7 @@ export async function resetPassphrase(
     // blip), we don't leave this device wiped-and-locked — the user can retry
     // resetPassphrase, which re-runs the (idempotent) wipe and setup.
     key = null;
+    keyVerified = false;
     const setup = await setupPassphrase(newPassphrase);
     if (!setup.ok) return setup;
 
@@ -443,14 +454,18 @@ async function pushPhase(): Promise<number> {
 
 // --- Pull -------------------------------------------------------------------
 
-async function pullPhase(): Promise<number> {
+async function pullPhase(): Promise<{ applied: number; failed: number }> {
     // Capture the key: lock()/reset can null the module-level `key` between the
     // awaits below, and decrypting with null would throw, skip the clip, yet
     // still advance the cursor — silently losing those remote clips forever.
     const k = key;
-    if (!host || !k) return 0;
+    if (!host || !k) return { applied: 0, failed: 0 };
     let cursor = host.getState('sync_cursor') || '';
     let applied = 0;
+    // Clips whose ciphertext couldn't be decrypted/parsed. The cursor still
+    // advances past them (a stuck cursor would be worse), so surface the count
+    // to the user instead of dropping them silently.
+    let failed = 0;
     let hasMore = true;
     let guard = 0;
 
@@ -525,8 +540,10 @@ async function pullPhase(): Promise<number> {
                     applied++;
                 }
             } catch (e) {
-                // Undecryptable (stale key/garbage) or malformed — skip this clip.
+                // Undecryptable (stale key/garbage) or malformed — skip this clip
+                // but record it so syncNow can surface the loss to the user.
                 console.error('[sync] could not apply remote clip', rc.clientId, e);
+                failed++;
             }
         }
 
@@ -536,7 +553,7 @@ async function pullPhase(): Promise<number> {
         }
         hasMore = Boolean(data.hasMore);
     }
-    return applied;
+    return { applied, failed };
 }
 
 // --- Cycle + scheduling -----------------------------------------------------
@@ -549,15 +566,62 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; error
 
     syncing = true;
     try {
+        // BUG 1: an auto-unlocked (OS-cached) key is trusted blindly. If another
+        // device ran resetPassphrase, the server now has a new salt/verifier and
+        // our cached key is stale — every push would upload ciphertext no one can
+        // read. Verify the key against the server's current verifier once per
+        // unlock, before pushing/pulling anything.
+        if (!keyVerified) {
+            const res = await api('/api/sync/keys', { method: 'GET' });
+            // Only a definitive server response can confirm or refute the key. A
+            // null/failed response = offline/transient: don't verify, don't block
+            // (network calls below simply no-op), and retry verification next cycle.
+            if (res && res.ok) {
+                const kd = (await res.json().catch(() => null)) as {
+                    configured?: boolean;
+                    salt?: string;
+                    verifier?: string | null;
+                    verifierNonce?: string | null;
+                } | null;
+                const k = key; // re-read: a concurrent lock() during the await may have cleared it
+                if (k && kd && kd.configured && kd.salt && kd.verifier && kd.verifierNonce) {
+                    const ok = box.checkVerifier(
+                        k,
+                        Buffer.from(kd.verifier, 'base64'),
+                        Buffer.from(kd.verifierNonce, 'base64')
+                    );
+                    if (!ok) {
+                        // Definitive mismatch: the passphrase was reset elsewhere.
+                        // Drop the stale key (+ OS cache), reset the pull cursor and
+                        // shadow map so re-unlock re-syncs cleanly, and stop here.
+                        lock();
+                        lastError =
+                            'Your saved passphrase is out of date (it was reset on another device). Please enter your passphrase again.';
+                        host.setState('sync_cursor', '');
+                        host.clearSyncMap();
+                        return { pushed: 0, pulled: 0, error: lastError };
+                    }
+                }
+                // Passed, or the server has no verifier configured → trust the key.
+                keyVerified = true;
+            }
+        }
+
         const dev = await registerDevice();
         if (dev.removed) throw new Error('This device was signed out remotely.');
         const pushed = await pushPhase();
-        const pulled = await pullPhase();
+        const pull = await pullPhase();
+        const pulled = pull.applied;
         lastSync = Date.now();
-        lastError = null;
+        // BUG 2: don't overwrite a decrypt-failure signal with null. If clips
+        // failed to decrypt/parse this pull, surface the count so it isn't silent.
+        lastError =
+            pull.failed > 0
+                ? `${pull.failed} clip(s) couldn't be decrypted and were skipped.`
+                : null;
         host.setState('sync_last_sync', String(lastSync));
         if (pushed > 0 || pulled > 0) host.refreshUi();
-        return { pushed, pulled };
+        return { pushed, pulled, error: lastError || undefined };
     } catch (e) {
         lastError = netMessage(e);
         return { pushed: 0, pulled: 0, error: lastError };

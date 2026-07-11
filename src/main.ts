@@ -1328,8 +1328,14 @@ function getClipboardHistory() {
         return cachedClipboardHistory;
     }
 
-    // Fetch fresh data and cache it
-    const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(maxHistoryItems) as ClipboardHistoryItem[];
+    // Fetch fresh data and cache it. Pinned rows are fetched separately and
+    // placed first, then the newest unpinned rows. A single
+    // `ORDER BY pinned DESC, id DESC LIMIT ?` would return only pinned rows
+    // once the number of pinned items reaches maxHistoryItems, hiding newly
+    // copied (unpinned) clips even though they are stored.
+    const pinned = db.prepare('SELECT id, type, content, timestamp, pinned FROM history WHERE pinned = 1 ORDER BY id DESC').all() as ClipboardHistoryItem[];
+    const unpinned = db.prepare('SELECT id, type, content, timestamp, pinned FROM history WHERE pinned = 0 ORDER BY id DESC LIMIT ?').all(maxHistoryItems) as ClipboardHistoryItem[];
+    const history = [...pinned, ...unpinned];
     cachedClipboardHistory = composeClipboardHistory(history);
     cacheTimestamp = now;
     console.log(`[main] Cached ${cachedClipboardHistory.length} clipboard items`);
@@ -1365,7 +1371,13 @@ function getClipboardHistoryAsync(): Promise<any[]> {
         // Use setImmediate to avoid blocking the event loop
         setImmediate(() => {
             try {
-                const history = db.prepare('SELECT id, type, content, timestamp, pinned FROM history ORDER BY pinned DESC, id DESC LIMIT ?').all(maxHistoryItems) as ClipboardHistoryItem[];
+                // Fetch pinned rows separately and place them first, then the
+                // newest unpinned rows, so newly copied clips always show even
+                // when there are maxHistoryItems or more pinned items. (See the
+                // synchronous getClipboardHistory for the reasoning.)
+                const pinned = db.prepare('SELECT id, type, content, timestamp, pinned FROM history WHERE pinned = 1 ORDER BY id DESC').all() as ClipboardHistoryItem[];
+                const unpinned = db.prepare('SELECT id, type, content, timestamp, pinned FROM history WHERE pinned = 0 ORDER BY id DESC LIMIT ?').all(maxHistoryItems) as ClipboardHistoryItem[];
+                const history = [...pinned, ...unpinned];
                 const combinedHistory = composeClipboardHistory(history);
 
                 // Only log and update if the length has changed
@@ -1793,31 +1805,64 @@ function restoreBackup(backupFile: string) {
         throw new Error('Backup file is empty');
     }
 
+    // Validate the backup is a real SQLite database BEFORE touching the live
+    // connection. If it isn't, we throw here while the current db is still
+    // open, so a bad backup can never leave the app without a database.
+    const header = Buffer.alloc(SQLITE_MAGIC_HEADER.length);
+    const headerFd = fs.openSync(backupPath, 'r');
+    try {
+        fs.readSync(headerFd, header, 0, SQLITE_MAGIC_HEADER.length, 0);
+    } finally {
+        fs.closeSync(headerFd);
+    }
+    if (!isSqliteBuffer(header)) {
+        throw new Error('Backup file is not a valid SQLite database');
+    }
+
     // Close the current database connection
     if (db) {
         console.log('[main] Closing current database connection');
         db.close();
     }
 
-    // Copy the backup file to replace the current database
-    console.log(`[main] Copying backup to: ${dbPath}`);
-    fs.copyFileSync(backupPath, dbPath);
+    // From here the live db is closed, so the reopen below MUST run on every
+    // path (success or failure) — otherwise a failed copy would leave db null
+    // and brick the app until restart. Capture any copy error and rethrow it
+    // only after the connection has been restored.
+    let copyError: unknown = null;
+    try {
+        // Copy the backup file to replace the current database
+        console.log(`[main] Copying backup to: ${dbPath}`);
+        fs.copyFileSync(backupPath, dbPath);
 
-    // Verify the copied file
-    const restoredStats = fs.statSync(dbPath);
-    console.log(`[main] Restored database size: ${restoredStats.size} bytes`);
+        // Verify the copied file
+        const restoredStats = fs.statSync(dbPath);
+        console.log(`[main] Restored database size: ${restoredStats.size} bytes`);
+    } catch (error) {
+        copyError = error;
+    } finally {
+        // Reinitialize the database connection with the restored data (or, if
+        // the copy failed, whatever file is still at dbPath). Running this in
+        // finally guarantees db is a valid open Database on every exit path.
+        console.log('[main] Reinitializing database connection');
+        db = new Database(dbPath);
+        db.pragma('journal_mode = WAL');
+        ensureDatabaseSchema(db);
+        // The restored DB may predate cloud sync (no sync_map) or carry another
+        // device's shadow state. Recreate the table so a later query can't throw
+        // 'no such table: sync_map'.
+        ensureSyncMapTable();
+    }
 
-    // Reinitialize the database connection with the restored data
-    console.log('[main] Reinitializing database connection');
-    db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    ensureDatabaseSchema(db);
-    // The restored DB may predate cloud sync (no sync_map) or carry another
-    // device's shadow state. Recreate the table and reset the cursor + device
-    // id so the next sync re-reconciles from scratch and this install registers
-    // as its own device — rather than throwing 'no such table: sync_map' or
-    // hijacking the backup's origin device.
-    ensureSyncMapTable();
+    // The copy failed: db is back open on the original file, so the app keeps
+    // working. Surface the original error so the caller/IPC reports the failure.
+    if (copyError) {
+        throw copyError;
+    }
+
+    // Reset the cursor + device id so the next sync re-reconciles from scratch
+    // and this install registers as its own device — rather than hijacking the
+    // backup's origin device.
     setAppState('sync_cursor', '');
     setAppState('sync_device_id', '');
 
