@@ -9,6 +9,8 @@ interface DangerAreaDialogProps {
     onConfirmClearAll: () => void;
     onConfirmResetSettings: () => void;
     onClose: () => void;
+    /** When true, clearing also propagates to the user's other synced devices. */
+    syncClearsAllDevices?: boolean;
 }
 
 const DangerAreaDialog: React.FC<DangerAreaDialogProps> = ({
@@ -19,6 +21,7 @@ const DangerAreaDialog: React.FC<DangerAreaDialogProps> = ({
     onConfirmClearAll,
     onConfirmResetSettings,
     onClose,
+    syncClearsAllDevices,
 }) => {
     return (
         <div
@@ -63,9 +66,19 @@ const DangerAreaDialog: React.FC<DangerAreaDialogProps> = ({
                         fontSize: 17,
                     }}
                 >
-                    {dangerAction === 'clear'
-                        ? 'Clear ALL clipboard history? This action cannot be undone.'
-                        : 'Reset ALL settings to default?'}
+                    {dangerAction === 'clear' ? (
+                        <>
+                            Clear ALL clipboard history? This action cannot be undone.
+                            {syncClearsAllDevices && (
+                                <div style={{ fontSize: 13, fontWeight: 500, marginTop: 10, color: '#ffb300' }}>
+                                    Cloud sync is on, so this also clears your synced clipboard
+                                    history on every device you&apos;re signed in to.
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        'Reset ALL settings to default?'
+                    )}
                 </div>
                 <button
                     style={{

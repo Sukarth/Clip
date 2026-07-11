@@ -1887,6 +1887,7 @@ const App: React.FC = () => {
                     handleClearAll={handleClearAll}
                     resetSettings={resetSettings}
                     closeDangerDialog={closeDangerDialog}
+                    syncClearsAllDevices={!!(account.loggedIn && account.isPro && syncStatus?.enabled)}
                     showRestartConfirm={showRestartConfirm}
                     isRestartDialogClosing={isRestartDialogClosing}
                     restartReason={restartReason}

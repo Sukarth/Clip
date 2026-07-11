@@ -24,6 +24,7 @@ interface AppDialogsProps {
     handleClearAll: () => void;
     resetSettings: () => void;
     closeDangerDialog: () => void;
+    syncClearsAllDevices?: boolean;
 
     showRestartConfirm: boolean;
     isRestartDialogClosing: boolean;
@@ -77,6 +78,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
     handleClearAll,
     resetSettings,
     closeDangerDialog,
+    syncClearsAllDevices,
     showRestartConfirm,
     isRestartDialogClosing,
     restartReason,
@@ -267,6 +269,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                     onConfirmClearAll={handleClearAll}
                     onConfirmResetSettings={resetSettings}
                     onClose={closeDangerDialog}
+                    syncClearsAllDevices={syncClearsAllDevices}
                 />
             )}
 
