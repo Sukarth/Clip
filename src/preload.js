@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setWinVOverride: (enabled) => ipcRenderer.send('set-win-v-override', enabled),
     setBackendShortcut: (shortcut) => ipcRenderer.send('set-backend-shortcut', shortcut),
     restartApp: () => ipcRenderer.send('restart-app'),
+    openExternal: (url) => ipcRenderer.send('open-external', url),
     saveSettingsToFile: (settings) => ipcRenderer.send('save-settings-to-file', settings),
     getThemeConfig: () => ipcRenderer.invoke('get-theme-config'),
     getThemeSchema: () => ipcRenderer.invoke('get-theme-schema'),

@@ -220,9 +220,16 @@ const App: React.FC = () => {
     const [account, setAccount] = useState<AuthState>({ loggedIn: false, email: null, name: null, avatarUrl: null, isPro: false, plan: null });
     const [authBusy, setAuthBusy] = useState(false);
     useEffect(() => {
-        window.electronAPI.auth.getState().then(setAccount).catch(() => { });
+        const refreshAccount = () => window.electronAPI.auth.getState().then(setAccount).catch(() => { });
+        refreshAccount();
         const unsub = window.electronAPI.auth.onChanged(setAccount);
-        return () => { if (typeof unsub === 'function') unsub(); };
+        // Pick up name / avatar / plan changes made on the website each time the
+        // window is summoned, without needing a restart.
+        const unsubShow = window.electronAPI.onWindowWillShow?.(refreshAccount);
+        return () => {
+            if (typeof unsub === 'function') unsub();
+            if (typeof unsubShow === 'function') unsubShow();
+        };
     }, []);
 
     // One-time first-run welcome (sign in for sync / continue offline).
@@ -1381,7 +1388,7 @@ const App: React.FC = () => {
                                     <p className="text-xs text-on-surface-variant text-center">Upgrade to Pro to sync across your devices.</p>
                                     <button
                                         type="button"
-                                        onClick={() => window.open('https://getclip.vercel.app/pricing', '_blank')}
+                                        onClick={() => window.electronAPI.openExternal('https://getclip.vercel.app/#pricing')}
                                         className="w-full mt-2 py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold hover:brightness-110 transition-all border-0"
                                     >
                                         Upgrade to Pro

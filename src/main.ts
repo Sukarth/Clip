@@ -2133,6 +2133,11 @@ app.whenReady().then(() => {
     ensureSyncMapTable();
     cloudSync.initSync(buildSyncHost());
     cloudSync.startAutoSync();
+    // Register this device (for the account's "Devices & sessions" list) and
+    // keep it fresh — independent of Pro / cloud sync. Also poll the profile so
+    // name / avatar / plan changes made on the website show up without a restart.
+    cloudSync.startDeviceHeartbeat();
+    setInterval(() => { void cloudAuth.refreshProfile(); }, 90 * 1000);
 
     // Handle startup behavior based on command line arguments and settings
     const isStartHidden = process.argv.includes('--start-hidden') || process.argv.includes('--hidden');
@@ -2169,13 +2174,23 @@ app.whenReady().then(() => {
     ipcMain.handle('auth:login', async () => {
         const state = await cloudAuth.login();
         cloudSync.startAutoSync();
+        cloudSync.startDeviceHeartbeat(); // registers this device immediately
         return state;
     });
     ipcMain.handle('auth:logout', async () => {
         cloudSync.stopAutoSync();
+        cloudSync.stopDeviceHeartbeat();
+        await cloudSync.deregisterDevice(); // remove from "Devices" (token still valid)
         cloudSync.lock();
         await cloudAuth.logout();
         return cloudAuth.getAuthState(false);
+    });
+
+    // Open an external https link in the user's default browser.
+    ipcMain.on('open-external', (_e, url: string) => {
+        if (typeof url === 'string' && /^https:\/\//i.test(url)) {
+            void shell.openExternal(url);
+        }
     });
 
     // --- Cloud sync IPC ---

@@ -155,6 +155,22 @@ async function fetchProfile(): Promise<void> {
     }
 }
 
+function profileSnapshot(): string {
+    return JSON.stringify([cachedIsPro, cachedPlan, cachedName, cachedAvatar]);
+}
+
+/**
+ * Re-fetch the profile and, if anything the UI shows changed (name, avatar,
+ * plan, Pro status), broadcast an auth-changed event so the app updates without
+ * a restart. Safe to call on a timer or when the window regains focus.
+ */
+export async function refreshProfile(): Promise<void> {
+    if (!session) return;
+    const before = profileSnapshot();
+    await fetchProfile();
+    if (profileSnapshot() !== before) emit();
+}
+
 export async function getAuthState(refresh = true): Promise<AuthState> {
     if (!session) return LOGGED_OUT;
     if (refresh) await fetchProfile();

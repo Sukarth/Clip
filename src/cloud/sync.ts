@@ -208,25 +208,71 @@ export async function resetPassphrase(
 
 // --- Device registration ----------------------------------------------------
 
-async function ensureDevice(): Promise<void> {
-    if (!host) return;
+/**
+ * Register or heartbeat this device with the server so it shows up in the
+ * account's "Devices & sessions" list. This is NOT tied to Pro or cloud sync —
+ * any signed-in app registers a device. If the device was removed from the web
+ * ("sign out this device"), we stand the app down locally. Never throws.
+ */
+export async function registerDevice(): Promise<{ ok: boolean; removed?: boolean }> {
+    if (!host) return { ok: false };
     const existing = host.getState('sync_device_id');
-    const res = await api('/api/sync/device', {
-        method: 'POST',
-        body: JSON.stringify({
-            deviceId: existing,
-            name: os.hostname(),
-            platform: process.platform,
-        }),
-    });
-    if (res && res.ok) {
-        const d = (await res.json()) as { deviceId?: string; removed?: boolean };
-        if (d.removed) {
-            // This device was signed out from the web — stand down locally.
-            host.onRemoteSignout();
-            throw new Error('This device was signed out remotely.');
-        }
-        if (d.deviceId) host.setState('sync_device_id', d.deviceId);
+    let res: Response | null = null;
+    try {
+        res = await api('/api/sync/device', {
+            method: 'POST',
+            body: JSON.stringify({
+                deviceId: existing || null,
+                name: os.hostname(),
+                platform: process.platform,
+            }),
+        });
+    } catch {
+        return { ok: false };
+    }
+    if (!res || !res.ok) return { ok: false };
+    const d = (await res.json().catch(() => ({}))) as { deviceId?: string; removed?: boolean };
+    if (d.removed) {
+        // This device was signed out from the web — stand down locally.
+        host.setState('sync_device_id', '');
+        host.onRemoteSignout();
+        return { ok: true, removed: true };
+    }
+    if (d.deviceId) host.setState('sync_device_id', d.deviceId);
+    return { ok: true };
+}
+
+/** Remove this device's server record (called on local sign-out). */
+export async function deregisterDevice(): Promise<void> {
+    if (!host) return;
+    const id = host.getState('sync_device_id');
+    if (!id) return;
+    try {
+        await api(`/api/sync/device?deviceId=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch {
+        /* best effort */
+    }
+    host.setState('sync_device_id', '');
+}
+
+let deviceTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Keep the device record fresh (last-seen) and detect a remote sign-out, on a
+ * slow timer that runs whenever the user is signed in — independent of sync.
+ */
+export function startDeviceHeartbeat(intervalMs = 5 * 60 * 1000): void {
+    stopDeviceHeartbeat();
+    void registerDevice();
+    deviceTimer = setInterval(() => {
+        void registerDevice();
+    }, intervalMs);
+}
+
+export function stopDeviceHeartbeat(): void {
+    if (deviceTimer) {
+        clearInterval(deviceTimer);
+        deviceTimer = null;
     }
 }
 
@@ -435,7 +481,8 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; error
 
     syncing = true;
     try {
-        await ensureDevice();
+        const dev = await registerDevice();
+        if (dev.removed) throw new Error('This device was signed out remotely.');
         const pushed = await pushPhase();
         const pulled = await pullPhase();
         lastSync = Date.now();

@@ -43,6 +43,7 @@ interface ElectronAPI {
     setWinVOverride: (enabled: boolean) => void;
     setBackendShortcut: (shortcut: string) => void;
     restartApp: () => void;
+    openExternal: (url: string) => void;
     saveSettingsToFile: (settings: any) => void;
     getThemeConfig: () => Promise<ThemeConfig>;
     getThemeSchema: () => Promise<ThemeSchema>;
