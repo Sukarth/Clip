@@ -1630,10 +1630,10 @@ const App: React.FC = () => {
                             </div>
                             <p className="text-xs text-on-surface-variant leading-relaxed">
                                 Made with ❤️ by Sukarth.
-                                <br />
+                                <br /><br />
                                 Built with Electron, React, TypeScript, and better-sqlite3. Encrypted
-                                cloud sync via Supabase and hash-wasm (Argon2id); billing by Polar.
-                                Icons by Material Symbols. Fonts: Lexend and JetBrains Mono.
+                                cloud sync via Supabase and hash-wasm (Argon2id). Billing by Polar.
+                                Icons by Material Symbols. Fonts used: Lexend and JetBrains Mono.
                             </p>
                         </div>
                     </div>
