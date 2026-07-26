@@ -399,6 +399,10 @@ const App: React.FC = () => {
     const [isBackupRestoreDialogClosing, setIsBackupRestoreDialogClosing] = useState(false);
     const [backupRestoreBusy, setBackupRestoreBusy] = useState(false);
 
+    // --- Unpin confirmation state (turning off "Pin Favorite Items" with pins present) ---
+    const [showUnpinConfirm, setShowUnpinConfirm] = useState(false);
+    const [isUnpinConfirmClosing, setIsUnpinConfirmClosing] = useState(false);
+
     const reloadSettingsFromDisk = useCallback(async () => {
         try {
             const loaded = await window.electronAPI?.reloadSettingsFromDisk?.();
@@ -436,10 +440,62 @@ const App: React.FC = () => {
             void window.electronAPI?.saveThemeConfig?.(mergedThemeConfig);
 
             showToast('info', 'Settings reloaded from disk.');
+
+            // Surface any corrections the main process made while re-reading the
+            // file (clamped values, ignored keys, ...) right away.
+            try {
+                const notices = await window.electronAPI?.getStartupNotices?.();
+                if (Array.isArray(notices)) {
+                    notices.forEach((notice, index) => {
+                        window.setTimeout(() => {
+                            showToast(notice.type === 'error' ? 'error' : 'info', notice.message);
+                        }, index * 400);
+                    });
+                }
+            } catch { /* older preloads may not expose getStartupNotices */ }
         } catch (error) {
             showToast('error', `Failed to reload settings from disk: ${error instanceof Error ? error.message : String(error)}`);
         }
     }, [editorThemeProfile, persistSettings, settings, showToast, themeConfig, themeEditorConfig]);
+
+    // File-first settings boot: after a relaunch the settings file (already
+    // sanitized by the main process) wins over the localStorage cache, and any
+    // notices collected while loading it are surfaced as toasts.
+    useEffect(() => {
+        let cancelled = false;
+        const timers: number[] = [];
+
+        (async () => {
+            try {
+                const loaded = await window.electronAPI?.getSettings?.();
+                if (!cancelled && loaded && typeof loaded === 'object') {
+                    setSettings((prev) => {
+                        const merged = { ...prev, ...loaded };
+                        // Write the cache directly instead of persistSettings so
+                        // this boot sync never re-triggers saveSettingsToFile.
+                        localStorage.setItem('clip-settings', JSON.stringify(merged));
+                        return merged;
+                    });
+                }
+            } catch { /* older preloads may not expose getSettings */ }
+
+            try {
+                const notices = await window.electronAPI?.getStartupNotices?.();
+                if (!cancelled && Array.isArray(notices)) {
+                    notices.forEach((notice, index) => {
+                        timers.push(window.setTimeout(() => {
+                            showToast(notice.type === 'error' ? 'error' : 'info', notice.message);
+                        }, index * 400));
+                    });
+                }
+            } catch { /* older preloads may not expose getStartupNotices */ }
+        })();
+
+        return () => {
+            cancelled = true;
+            timers.forEach((timer) => window.clearTimeout(timer));
+        };
+    }, [showToast]);
 
     const copyTextToClipboard = useCallback(async (value: string, label: string) => {
         try {
@@ -698,6 +754,12 @@ const App: React.FC = () => {
                         setBackupToDelete('');
                         setIsBackupDeleteDialogClosing(false);
                     }, 300);
+                } else if (showUnpinConfirm) {
+                    setIsUnpinConfirmClosing(true);
+                    setTimeout(() => {
+                        setShowUnpinConfirm(false);
+                        setIsUnpinConfirmClosing(false);
+                    }, 300);
                 } else if (backupRestoreTarget) {
                     if (!backupRestoreBusy) {
                         setIsBackupRestoreDialogClosing(true);
@@ -760,7 +822,7 @@ const App: React.FC = () => {
         };
         window.addEventListener('keydown', escHandler);
         return () => window.removeEventListener('keydown', escHandler);
-    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, backupDeleteAction, backupRestoreTarget, backupRestoreBusy, handleDeleteDialogClose, hasUnsavedChanges, hasThemeEditorChangesSinceOpen]);
+    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, backupDeleteAction, backupRestoreTarget, backupRestoreBusy, showUnpinConfirm, handleDeleteDialogClose, hasUnsavedChanges, hasThemeEditorChangesSinceOpen]);
 
     // Force refresh when Ctrl+Shift+V is pressed (global shortcut)
     // This effect is now primarily for development/debugging if needed,
@@ -1276,6 +1338,39 @@ const App: React.FC = () => {
     };
 
     const pinnedItemsCount = React.useMemo(() => items.filter((item) => item.pinned).length, [items]);
+
+    const applyPinFavoriteItems = useCallback((value: boolean) => {
+        setSettingsDraft((prev) => ({ ...(prev ?? settings), pinFavoriteItems: value }));
+    }, [setSettingsDraft, settings]);
+
+    const handleTogglePinning = useCallback((value: boolean) => {
+        if (value === false && pinnedItemsCount > 0) {
+            setShowUnpinConfirm(true);
+            return;
+        }
+        applyPinFavoriteItems(value);
+    }, [applyPinFavoriteItems, pinnedItemsCount]);
+
+    const closeUnpinConfirmDialog = useCallback(() => {
+        setIsUnpinConfirmClosing(true);
+        setTimeout(() => {
+            setShowUnpinConfirm(false);
+            setIsUnpinConfirmClosing(false);
+        }, 300);
+    }, []);
+
+    const handleConfirmUnpin = useCallback(async () => {
+        try {
+            await window.electronAPI?.unpinAllItems?.();
+            applyPinFavoriteItems(false);
+            showToast('success', 'All items unpinned.');
+            requestClipboardHistory();
+        } catch (error) {
+            showToast('error', `Failed to unpin items: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        closeUnpinConfirmDialog();
+    }, [applyPinFavoriteItems, closeUnpinConfirmDialog, requestClipboardHistory, showToast]);
+
     const imageItemsCount = React.useMemo(() => items.filter((item) => item.type === 'image').length, [items]);
     const oldestItemAgeLabel = React.useMemo(() => {
         if (items.length === 0) {
@@ -1331,6 +1426,7 @@ const App: React.FC = () => {
                         settings={settings}
                         setSettingsDraft={setSettingsDraft}
                         themeColors={themeColors}
+                        onTogglePinning={handleTogglePinning}
                     />
                 );
             case 'Backups':
@@ -1694,6 +1790,16 @@ const App: React.FC = () => {
                                 Icons by Material Symbols. Fonts used: Lexend and JetBrains Mono.
                             </p>
                         </div>
+
+                        <div className="bg-surface-container-low p-4 rounded-xl" style={{ marginTop: 12 }}>
+                            <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={handleQuitFromSettings}>
+                                <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-on-surface-variant">power_settings_new</span>
+                                    <span className="text-sm text-on-surface">Quit Clip</span>
+                                </div>
+                                <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
+                            </button>
+                        </div>
                     </div>
                 );
             default:
@@ -1783,6 +1889,7 @@ const App: React.FC = () => {
 
                 <div
                     className="clip-header"
+                    title="Drag to move"
                     style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh', position: 'relative', zIndex: 3, cursor: 'default' }}
                     onMouseDown={(event) => {
                         if (showSettings) return;
@@ -1806,6 +1913,21 @@ const App: React.FC = () => {
                         lastDragEmitRef.current = 0;
                     }}
                 >
+                    <div
+                        aria-hidden="true"
+                        style={{
+                            position: 'absolute',
+                            top: 4,
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            width: 42,
+                            height: 5,
+                            borderRadius: 999,
+                            background: 'rgba(255,255,255,0.22)',
+                            cursor: 'grab',
+                            pointerEvents: 'none',
+                        }}
+                    />
                     <span className="clip-title" style={{ fontWeight: themeTypography.fontWeightBold, fontSize: themeTypography.titleFontSize, color: themeColors.textPrimary }}>
                         <span style={{ marginRight: 6 }}>
                             <IconGlyph value={themeIcons.clipboard} fallback="📋" label="Clipboard" size={16} />
@@ -2048,6 +2170,11 @@ const App: React.FC = () => {
                     onCreateBackupFirst={handleCreateBackupForMaxItems}
                     onConfirmMaxItemsWarning={handleConfirmMaxItemsWarning}
                     onCancelMaxItemsWarning={closeMaxItemsWarningDialog}
+                    showUnpinConfirm={showUnpinConfirm}
+                    isUnpinConfirmClosing={isUnpinConfirmClosing}
+                    pinnedItemsCount={pinnedItemsCount}
+                    onConfirmUnpin={handleConfirmUnpin}
+                    onCancelUnpin={closeUnpinConfirmDialog}
                 />
 
                 {showFirstRun && !account.loggedIn && (

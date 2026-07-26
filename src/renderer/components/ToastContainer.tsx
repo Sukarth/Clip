@@ -12,22 +12,22 @@ const Toast: React.FC<{
     message: ToastMessage;
     onDismiss: (id: string) => void;
     accentColor: string;
-}> = ({ message, onDismiss, accentColor }) => {
-    let bgColor = '';
-    let icon = '💬';
+}> = ({ message, onDismiss }) => {
+    let icon = 'info';
+    let iconColor = '#abccff';
 
     switch (message.type) {
         case 'success':
-            bgColor = accentColor;
-            icon = '✅';
+            icon = 'check_circle';
+            iconColor = '#9ad1a2';
             break;
         case 'error':
-            bgColor = '#ff4136';
-            icon = '❌';
+            icon = 'error';
+            iconColor = '#ff9d94';
             break;
         default:
-            bgColor = '#0074D9';
-            icon = 'ℹ️';
+            icon = 'info';
+            iconColor = '#abccff';
             break;
     }
 
@@ -46,22 +46,31 @@ const Toast: React.FC<{
             role="button"
             tabIndex={0}
             style={{
-                background: bgColor,
-                color: '#fff',
-                padding: '10px 16px',
-                borderRadius: 8,
+                background: '#242424',
+                border: '1px solid rgba(255,255,255,0.1)',
+                color: '#e5e2e1',
+                padding: '10px 14px',
+                borderRadius: 10,
                 marginBottom: 10,
                 display: 'flex',
                 alignItems: 'center',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
                 cursor: 'pointer',
-                maxWidth: '90%',
+                width: 'min(360px, 85vw)',
+                boxSizing: 'border-box',
+                textAlign: 'left',
                 gap: 8,
                 willChange: 'transform, opacity',
             }}
         >
-            <span style={{ fontSize: 18, marginRight: 4 }}>{icon}</span>
-            <span>{message.message}</span>
+            <span
+                className="material-symbols-outlined"
+                aria-hidden="true"
+                style={{ fontSize: 18, color: iconColor, flexShrink: 0 }}
+            >
+                {icon}
+            </span>
+            <span style={{ fontSize: 13, lineHeight: 1.4, wordBreak: 'break-word' }}>{message.message}</span>
         </div>
     );
 };
@@ -106,14 +115,15 @@ const ToastContainer: React.FC<ToastContainerProps> = ({
                         fontSize: 12,
                         color: '#ccc',
                         padding: '4px 8px',
-                        background: 'rgba(0,0,0,0.3)',
+                        background: 'rgba(36,36,36,0.9)',
+                        border: '1px solid rgba(255,255,255,0.1)',
                         borderRadius: 4,
                         marginBottom: 5,
                         cursor: 'pointer',
                         transition: 'background 0.2s',
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.5)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.3)')}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(52,52,52,0.95)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(36,36,36,0.9)')}
                 >
                     Clear all notifications
                 </div>

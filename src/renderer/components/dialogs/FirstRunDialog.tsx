@@ -37,14 +37,14 @@ const FirstRunDialog: React.FC<FirstRunDialogProps> = ({
                 aria-label="Welcome to Clip"
                 className="fade-in"
                 style={{
-                    background: dark ? '#222' : '#f0f0f0',
+                    background: dark ? '#1a1a1a' : '#f0f0f0',
                     borderRadius: 12,
                     padding: 24,
                     maxWidth: 'min(380px, 80vw)',
                     boxSizing: 'border-box',
                     textAlign: 'center',
                     boxShadow: '0 8px 28px #0009',
-                    border: `1px solid ${dark ? '#444' : '#ccc'}`,
+                    border: `1px solid ${dark ? '#333' : '#ccc'}`,
                 }}
             >
                 <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>

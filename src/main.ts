@@ -770,10 +770,6 @@ function createDefaultSettingsDocument() {
         enableBackups: false,
         backupInterval: 900000,
         maxBackups: 5,
-        borderRadius: 18,
-        transparency: 0.95,
-        accentColor: '#4682b4',
-        theme: 'dark',
         showNotifications: false,
         startWithSystem: true,
         storeImagesInClipboard: true,
@@ -800,10 +796,6 @@ function getSettingsSchema() {
             'enableBackups',
             'backupInterval',
             'maxBackups',
-            'borderRadius',
-            'transparency',
-            'accentColor',
-            'theme',
             'showNotifications',
             'startWithSystem',
             'storeImagesInClipboard',
@@ -854,31 +846,6 @@ function getSettingsSchema() {
                 maximum: 100,
                 description: 'Maximum number of backup files to keep.',
                 default: 5,
-            },
-            borderRadius: {
-                type: 'integer',
-                minimum: 0,
-                maximum: 40,
-                description: 'Window corner radius.',
-                default: 18,
-            },
-            transparency: {
-                type: 'number',
-                minimum: 0.35,
-                maximum: 1,
-                description: 'Window transparency value. 1 is fully opaque.',
-                default: 0.95,
-            },
-            accentColor: {
-                type: 'string',
-                description: 'Accent color used by the app UI.',
-                default: '#4682b4',
-            },
-            theme: {
-                type: 'string',
-                enum: ['light', 'dark', 'system'],
-                description: 'UI theme mode.',
-                default: 'dark',
             },
             showNotifications: {
                 type: 'boolean',
@@ -1025,9 +992,6 @@ function normalizeSettingsDocument(raw: any): { settings: any; changed: boolean;
     bool('enableBackups');
     num('backupInterval', 60 * 1000, 24 * 60 * 60 * 1000);
     num('maxBackups', 1, 50);
-    num('borderRadius', 0, 40);
-    num('transparency', 0.35, 1, false);
-    oneOf('theme', ['dark', 'light', 'system']);
     bool('showNotifications');
     bool('startWithSystem');
     bool('storeImagesInClipboard');
@@ -1035,15 +999,6 @@ function normalizeSettingsDocument(raw: any): { settings: any; changed: boolean;
     bool('deleteConfirm');
     num('windowWidth', WINDOW_SIZE_LIMITS.width.min, WINDOW_SIZE_LIMITS.width.max);
     num('windowHeight', WINDOW_SIZE_LIMITS.height.min, WINDOW_SIZE_LIMITS.height.max);
-
-    // accentColor: keep only plausible CSS color strings.
-    const accent = raw.accentColor;
-    if (typeof accent === 'string' && /^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\)|[a-z]{3,30})$/i.test(accent.trim())) {
-        out.accentColor = accent.trim();
-    } else {
-        out.accentColor = defaults.accentColor;
-        if (accent !== undefined) { changed = true; notes.push('"accentColor" was not a valid color; reset to default.'); }
-    }
 
     // globalShortcut: reject the whole accelerator if any token is unknown.
     const validShortcut = validateAccelerator(raw.globalShortcut);
@@ -1058,13 +1013,23 @@ function normalizeSettingsDocument(raw: any): { settings: any; changed: boolean;
         }
     }
 
+    // Theme-related values used to live in settings.json; they moved to
+    // clip-theme.json. Drop them silently (every pre-move file has them).
+    const LEGACY_THEME_KEYS = new Set(['theme', 'accentColor', 'borderRadius', 'transparency']);
+
     // Drop unknown keys (schema is additionalProperties: false). $schema is re-added on write.
     for (const key of Object.keys(raw)) {
-        if (key !== '$schema' && !(key in out)) { changed = true; notes.push(`Unknown setting "${key}" removed.`); }
+        if (key === '$schema' || key in out || LEGACY_THEME_KEYS.has(key)) continue;
+        changed = true;
+        notes.push(`Unknown setting "${key}" removed.`);
     }
 
     return { settings: out, changed, corrupt, notes };
 }
+
+// Legacy settings.theme captured during load so the theme config can adopt it
+// as its mode the first time a pre-move settings file is migrated.
+let legacyThemeModeFromSettings: 'dark' | 'light' | 'system' | null = null;
 
 function readSettingsFromFile() {
     const settingsPath = getSettingsPath();
@@ -1194,21 +1159,34 @@ function persistThemeConfig(config: unknown) {
     return sanitized;
 }
 
+// One-time migration: a pre-move settings.json carried the theme mode; adopt
+// it as the theme config's mode unless the theme file already has one.
+function applyLegacyThemeMode<T extends { mode?: string }>(config: T): T {
+    if (!legacyThemeModeFromSettings) return config;
+    try {
+        const themePath = getThemeConfigPath();
+        if (fs.existsSync(themePath) && /"mode"\s*:/.test(fs.readFileSync(themePath, 'utf8'))) {
+            return config;
+        }
+    } catch { /* fall through to adopting the legacy value */ }
+    return { ...config, mode: legacyThemeModeFromSettings };
+}
+
 function initializeThemeConfig() {
     writeThemeSchemaFile();
 
     const fromFile = readThemeConfigFromFile();
     if (fromFile) {
-        return persistThemeConfig(fromFile);
+        return persistThemeConfig(applyLegacyThemeMode(fromFile));
     }
 
     const fromDb = readThemeConfigFromDb();
     if (fromDb) {
         console.log('[main] Restored theme file from DB backup.');
-        return persistThemeConfig(fromDb);
+        return persistThemeConfig(applyLegacyThemeMode(fromDb));
     }
 
-    return persistThemeConfig(createDefaultThemeConfig());
+    return persistThemeConfig(applyLegacyThemeMode(createDefaultThemeConfig()));
 }
 
 // Re-read the freshest persisted theme config (on-disk file → DB backup →
@@ -1342,6 +1320,10 @@ function loadValidatedSettings(): any {
     let recoveredFromParseFailure = fileExisted && raw === null;
 
     if (raw !== null) {
+        // Remember a pre-move theme mode so initializeThemeConfig can migrate it.
+        if (raw && typeof raw === 'object' && ['dark', 'light', 'system'].includes((raw as any).theme)) {
+            legacyThemeModeFromSettings = (raw as any).theme;
+        }
         const { settings, changed, corrupt, notes } = normalizeSettingsDocument(raw);
         if (!corrupt) {
             if (changed) {

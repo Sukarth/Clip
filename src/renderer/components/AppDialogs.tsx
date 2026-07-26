@@ -8,6 +8,7 @@ import DeleteConfirmDialog from './dialogs/DeleteConfirmDialog';
 import MaxItemsWarningDialog from './dialogs/MaxItemsWarningDialog';
 import RestartDialog from './dialogs/RestartDialog';
 import ThemeProfileDialog from './dialogs/ThemeProfileDialog';
+import UnpinConfirmDialog from './dialogs/UnpinConfirmDialog';
 import UnsavedChangesDialog from './dialogs/UnsavedChangesDialog';
 
 interface AppDialogsProps {
@@ -70,6 +71,12 @@ interface AppDialogsProps {
     onCreateBackupFirst: () => void | Promise<void>;
     onConfirmMaxItemsWarning: () => void | Promise<void>;
     onCancelMaxItemsWarning: () => void;
+
+    showUnpinConfirm: boolean;
+    isUnpinConfirmClosing: boolean;
+    pinnedItemsCount: number;
+    onConfirmUnpin: () => void | Promise<void>;
+    onCancelUnpin: () => void;
 }
 
 const AppDialogs: React.FC<AppDialogsProps> = ({
@@ -123,6 +130,11 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
     onCreateBackupFirst,
     onConfirmMaxItemsWarning,
     onCancelMaxItemsWarning,
+    showUnpinConfirm,
+    isUnpinConfirmClosing,
+    pinnedItemsCount,
+    onConfirmUnpin,
+    onCancelUnpin,
 }) => {
     const activeDialogRef = React.useRef<HTMLDivElement | null>(null);
     const previousFocusedElementRef = React.useRef<HTMLElement | null>(null);
@@ -138,6 +150,10 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
         }
         if (backupDeleteAction) {
             onCancelBackupDelete();
+            return;
+        }
+        if (showUnpinConfirm) {
+            onCancelUnpin();
             return;
         }
         if (backupRestoreTarget) {
@@ -178,10 +194,12 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
         onCancelMaxItemsWarning,
         onCancelThemeProfileDelete,
         onCancelThemeProfileReset,
+        onCancelUnpin,
         showMaxItemsWarning,
         showRestartConfirm,
         showThemeProfileDeleteConfirm,
         showThemeProfileResetConfirm,
+        showUnpinConfirm,
         showUnsavedChangesConfirm,
     ]);
 
@@ -194,7 +212,8 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
         backupRestoreTarget ||
         showThemeProfileResetConfirm ||
         showThemeProfileDeleteConfirm ||
-        showMaxItemsWarning,
+        showMaxItemsWarning ||
+        showUnpinConfirm,
     );
 
     React.useEffect(() => {
@@ -327,6 +346,20 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                         void onConfirmBackupDelete();
                     }}
                     onCancel={onCancelBackupDelete}
+                />
+            )}
+
+            {showUnpinConfirm && (
+                <UnpinConfirmDialog
+                    settings={settings}
+                    themeColors={themeColors}
+                    count={pinnedItemsCount}
+                    isClosing={isUnpinConfirmClosing}
+                    dialogRef={activeDialogRef}
+                    onConfirm={() => {
+                        void onConfirmUnpin();
+                    }}
+                    onCancel={onCancelUnpin}
                 />
             )}
 

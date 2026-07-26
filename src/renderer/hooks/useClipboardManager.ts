@@ -85,16 +85,11 @@ export function useClipboardManager({
 
         const dispose = window.electronAPI?.onClipboardHistory?.(handleHistory);
 
-        const welcomeTimer = setTimeout(() => {
-            showToast('info', 'Welcome to Clip! Your clipboard history is ready.');
-        }, 1000);
-
         return () => {
             isMounted = false;
-            clearTimeout(welcomeTimer);
             if (typeof dispose === 'function') dispose();
         };
-    }, [logger, showToast]);
+    }, [logger]);
 
     React.useEffect(() => {
         const handler = () => {

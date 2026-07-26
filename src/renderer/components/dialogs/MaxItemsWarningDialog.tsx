@@ -93,7 +93,14 @@ const MaxItemsWarningDialog: React.FC<MaxItemsWarningDialogProps> = ({
                             <br />
                             <br />
                             <span style={{ color: themeColors.danger, fontWeight: 600 }}>
-                                ⚠️ This will immediately delete {itemsToDelete} clipboard items from the oldest entries.
+                                <span
+                                    className="material-symbols-outlined"
+                                    aria-hidden="true"
+                                    style={{ fontSize: 15, verticalAlign: 'text-bottom', marginRight: 4 }}
+                                >
+                                    warning
+                                </span>
+                                This will immediately delete {itemsToDelete} clipboard items from the oldest entries.
                             </span>
                             <br />
                             <br />
@@ -113,30 +120,33 @@ const MaxItemsWarningDialog: React.FC<MaxItemsWarningDialogProps> = ({
                 {isReducingMaxItems && !backupCreated && (
                     <button
                         style={{
-                            background: themeColors.success,
-                            color: '#fff',
-                            border: `1px solid ${themeColors.success}`,
-                            borderRadius: 6,
-                            padding: '6px 16px',
-                            marginBottom: 12,
+                            display: 'block',
+                            width: '100%',
+                            boxSizing: 'border-box',
+                            background: settings.accentColor,
+                            color: '#06131f',
+                            border: `1px solid ${settings.accentColor}`,
+                            borderRadius: 8,
+                            padding: '10px 16px',
+                            marginBottom: 8,
                             fontWeight: 600,
                             cursor: 'pointer',
-                            width: '100%',
-                            fontSize: 13,
                         }}
                         onClick={onCreateBackupFirst}
                     >
-                        📦 Create Backup First
+                        Create Backup First
                     </button>
                 )}
                 <button
                     style={{
-                        background: themeColors.success,
-                        color: '#222',
-                        border: `1px solid ${themeColors.success}`,
-                        borderRadius: 6,
-                        padding: '8px 18px',
-                        marginRight: 10,
+                        display: 'block',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        background: '#c94f4f',
+                        color: '#fff',
+                        border: '1px solid #c94f4f',
+                        borderRadius: 8,
+                        padding: '10px 16px',
                         marginBottom: 8,
                         fontWeight: 600,
                         cursor: 'pointer',
@@ -152,11 +162,14 @@ const MaxItemsWarningDialog: React.FC<MaxItemsWarningDialogProps> = ({
                 <button
                     data-dialog-autofocus
                     style={{
-                        background: '#222',
+                        display: 'block',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        background: '#2a2a2a',
                         color: '#fff',
                         border: '1px solid #444',
-                        borderRadius: 6,
-                        padding: '8px 18px',
+                        borderRadius: 8,
+                        padding: '10px 16px',
                         fontWeight: 600,
                         cursor: 'pointer',
                     }}

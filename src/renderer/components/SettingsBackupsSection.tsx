@@ -212,6 +212,7 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                         onChange={(value) => update({ backupInterval: Number(value) })}
                         options={BACKUP_INTERVALS.map((option) => ({ value: option.value, label: option.label.replace(/^(\d)/, 'Every $1').replace(/^1 hour$/, 'Every hour').replace(/^1 day$/, 'Every day') }))}
                     />
+                    <p className="text-[11px] text-on-surface-variant">Automatic backups run in the background and can take up to a minute after the interval to appear. Use the refresh icon to update the list.</p>
                 </div>
 
                 <div className="space-y-2 py-2">

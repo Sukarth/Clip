@@ -1,21 +1,24 @@
 import * as React from 'react';
 import type { Settings } from '../../app-types';
+import type { ThemeProfile } from '../../../theme-config';
 
-interface UnsavedChangesDialogProps {
+interface UnpinConfirmDialogProps {
     settings: Settings;
+    themeColors: ThemeProfile['colors'];
+    count: number;
     isClosing: boolean;
     dialogRef: React.RefObject<HTMLDivElement | null>;
-    onSave: () => void;
-    onDontSave: () => void;
+    onConfirm: () => void;
     onCancel: () => void;
 }
 
-const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
+const UnpinConfirmDialog: React.FC<UnpinConfirmDialogProps> = ({
     settings,
+    themeColors,
+    count,
     isClosing,
     dialogRef,
-    onSave,
-    onDontSave,
+    onConfirm,
     onCancel,
 }) => {
     return (
@@ -31,7 +34,7 @@ const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                zIndex: 2100,
+                zIndex: 2200,
                 borderRadius: settings.borderRadius,
             }}
         >
@@ -40,68 +43,63 @@ const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
                 className={`${isClosing ? 'fade-out' : 'fade-in'}`}
                 role="dialog"
                 aria-modal="true"
-                aria-label="Unsaved changes confirmation"
+                aria-label="Turn off pinning confirmation"
                 tabIndex={-1}
                 style={{
                     background: settings.theme === 'light' ? '#f0f0f0' : '#222',
                     borderRadius: 10,
                     padding: 24,
-                    maxWidth: 'min(350px, 80vw)',
+                    maxWidth: 'min(400px, 80vw)',
                     boxSizing: 'border-box',
                     textAlign: 'center',
                     boxShadow: '0 2px 12px #0008',
                     border: `1px solid ${settings.theme === 'light' ? '#ccc' : '#444'}`,
                 }}
             >
-                <div style={{ marginBottom: 18, fontWeight: 600, fontSize: 17 }}>
-                    You have unsaved changes. Do you want to save them?
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    <button
+                <div
+                    style={{
+                        marginBottom: 18,
+                        fontWeight: 600,
+                        fontSize: 17,
+                        lineHeight: 1.4,
+                    }}
+                >
+                    Turn off pinning?
+                    <div
                         style={{
-                            flex: 1,
-                            boxSizing: 'border-box',
-                            background: settings.accentColor,
-                            color: '#06131f',
-                            border: `1px solid ${settings.accentColor}`,
-                            borderRadius: 8,
-                            padding: '9px 14px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
+                            fontSize: 14,
+                            fontWeight: 400,
+                            color: themeColors.textSecondary,
+                            marginTop: 8,
                         }}
-                        onClick={onSave}
                     >
-                        Save
-                    </button>
-                    <button
-                        style={{
-                            flex: 1,
-                            boxSizing: 'border-box',
-                            background: '#c94f4f',
-                            color: '#fff',
-                            border: '1px solid #c94f4f',
-                            borderRadius: 8,
-                            padding: '9px 14px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                        }}
-                        onClick={onDontSave}
-                    >
-                        Don't Save
-                    </button>
+                        This will unpin your {count} pinned item{count !== 1 ? 's' : ''}. The items stay in your
+                        history but will no longer be kept at the top.
+                    </div>
                 </div>
+                <button
+                    style={{
+                        background: '#c94f4f',
+                        color: '#fff',
+                        border: '1px solid #c94f4f',
+                        borderRadius: 8,
+                        padding: '8px 18px',
+                        marginRight: 10,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                    }}
+                    onClick={onConfirm}
+                >
+                    Unpin and turn off
+                </button>
                 <button
                     data-dialog-autofocus
                     style={{
-                        display: 'block',
-                        width: '100%',
-                        boxSizing: 'border-box',
-                        marginTop: 8,
                         background: '#2a2a2a',
                         color: '#fff',
                         border: '1px solid #444',
                         borderRadius: 8,
-                        padding: '9px 14px',
+                        padding: '8px 18px',
                         fontWeight: 600,
                         cursor: 'pointer',
                     }}
@@ -114,4 +112,4 @@ const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
     );
 };
 
-export default React.memo(UnsavedChangesDialog);
+export default React.memo(UnpinConfirmDialog);

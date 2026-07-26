@@ -14,12 +14,14 @@ interface SettingsBehaviorSectionProps {
         textSecondary: string;
         textPrimary: string;
     };
+    onTogglePinning?: (value: boolean) => void;
 }
 
 const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
     settingsDraft,
     settings,
     setSettingsDraft,
+    onTogglePinning,
 }) => {
     const current = settingsDraft ?? settings;
     const update = React.useCallback((patch: Partial<Settings>) => {
@@ -56,14 +58,26 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                     </div>
                     <Switch checked={current.storeImagesInClipboard} onChange={(value) => update({ storeImagesInClipboard: value })} accentColor="#abccff" />
                 </div>
+                <p className="text-[11px] text-on-surface-variant">Changing this doesn't affect items already in your history.</p>
 
                 <div className="flex items-center justify-between py-2">
                     <div>
                         <h3 className="font-medium text-on-surface text-sm">Pin Favorite Items</h3>
                         <p className="text-[11px] text-on-surface-variant">Allow pinning frequently used items</p>
                     </div>
-                    <Switch checked={current.pinFavoriteItems} onChange={(value) => update({ pinFavoriteItems: value })} accentColor="#abccff" />
+                    <Switch
+                        checked={current.pinFavoriteItems}
+                        onChange={(value) => {
+                            if (onTogglePinning) {
+                                onTogglePinning(value);
+                            } else {
+                                update({ pinFavoriteItems: value });
+                            }
+                        }}
+                        accentColor="#abccff"
+                    />
                 </div>
+                <p className="text-[11px] text-on-surface-variant">Existing items are unaffected when turning this on.</p>
             </div>
 
             <div className="bg-surface-container-low p-4 rounded-xl space-y-3">

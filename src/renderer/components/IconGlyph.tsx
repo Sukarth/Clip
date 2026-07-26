@@ -106,6 +106,24 @@ const IconGlyph: React.FC<IconGlyphProps> = ({
     }
 
     const text = value?.trim() || fallback;
+
+    // Lowercase snake_case tokens are Material Symbols ligature names (the
+    // default theme icons, e.g. "delete" or "content_paste"); anything else
+    // (emoji, arbitrary text) renders as plain text.
+    if (/^[a-z][a-z0-9_]{1,60}$/.test(text)) {
+        return (
+            <span
+                className="material-symbols-outlined"
+                role="img"
+                aria-label={label}
+                title={label}
+                style={{ fontSize: size, lineHeight: 1, color: tint || 'inherit' }}
+            >
+                {text}
+            </span>
+        );
+    }
+
     return (
         <span title={label} style={{ fontSize: size, lineHeight: 1, color: tint || 'inherit' }}>
             {text}

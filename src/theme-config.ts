@@ -1,31 +1,38 @@
-export const THEME_CONFIG_VERSION = 1;
+export const THEME_CONFIG_VERSION = 2;
 
 export const WINDOW_SIZE_LIMITS = {
     width: { min: 320, max: 1200, default: 400 },
     height: { min: 420, max: 1600, default: 600 },
 } as const;
 
+export interface ThemeColors {
+    appBackground: string;
+    panelBackground: string;
+    overlayBackground: string;
+    itemBackground: string;
+    itemHoverBackground: string;
+    inputBackground: string;
+    inputBorder: string;
+    border: string;
+    textPrimary: string;
+    textSecondary: string;
+    textMuted: string;
+    accent: string;
+    danger: string;
+    warning: string;
+    success: string;
+    scrollbarThumb: string;
+    scrollbarTrack: string;
+}
+
+export type ThemeMode = 'dark' | 'light' | 'system';
+
 export interface ThemeProfile {
     name: string;
-    colors: {
-        appBackground: string;
-        panelBackground: string;
-        overlayBackground: string;
-        itemBackground: string;
-        itemHoverBackground: string;
-        inputBackground: string;
-        inputBorder: string;
-        border: string;
-        textPrimary: string;
-        textSecondary: string;
-        textMuted: string;
-        accent: string;
-        danger: string;
-        warning: string;
-        success: string;
-        scrollbarThumb: string;
-        scrollbarTrack: string;
-    };
+    /** Palette used in dark mode. */
+    colors: ThemeColors;
+    /** Palette used in light mode. */
+    lightColors: ThemeColors;
     typography: {
         fontFamily: string;
         monoFontFamily: string;
@@ -56,12 +63,34 @@ export interface ThemeProfile {
 
 export interface ThemeConfig {
     version: number;
+    /** Dark / light / follow-OS. Lives here (not in settings) with the palettes it selects. */
+    mode: ThemeMode;
     activeProfile: string;
     profiles: Record<string, ThemeProfile>;
 }
 
 export const DEFAULT_THEME_PROFILE_KEY = 'default';
 const THEME_SCHEMA_ID = 'https://clip.local/schemas/clip-theme.schema.json';
+
+export const DEFAULT_LIGHT_COLORS: ThemeColors = {
+    appBackground: 'rgba(244,246,249,0.97)',
+    panelBackground: 'rgba(244,246,249,0.97)',
+    overlayBackground: 'rgba(0,0,0,0.35)',
+    itemBackground: '#ffffff',
+    itemHoverBackground: '#e8edf3',
+    inputBackground: '#ffffff',
+    inputBorder: '#c9ced6',
+    border: 'rgba(0,0,0,0.12)',
+    textPrimary: '#1c1e21',
+    textSecondary: '#49525d',
+    textMuted: '#6b7280',
+    accent: '#4682b4',
+    danger: '#c94f4f',
+    warning: '#a2731a',
+    success: '#3e8e57',
+    scrollbarThumb: '#c1c7cf',
+    scrollbarTrack: '#e6e9ee',
+};
 
 const DEFAULT_THEME_PROFILE: ThemeProfile = {
     name: 'Default',
@@ -84,6 +113,7 @@ const DEFAULT_THEME_PROFILE: ThemeProfile = {
         scrollbarThumb: '#444444',
         scrollbarTrack: '#23252a',
     },
+    lightColors: { ...DEFAULT_LIGHT_COLORS },
     typography: {
         fontFamily: 'Lexend, sans-serif',
         monoFontFamily: 'Consolas, Monaco, monospace',
@@ -101,15 +131,29 @@ const DEFAULT_THEME_PROFILE: ThemeProfile = {
         panelBorderWidth: 1,
     },
     icons: {
-        delete: '🗑️',
-        pin: '📌',
-        pinFilled: '📍',
-        settings: '⚙️',
-        close: '✕',
-        search: '🔍',
-        confirm: '✓',
-        clipboard: '📋',
+        delete: 'delete',
+        pin: 'keep',
+        pinFilled: 'keep',
+        settings: 'settings',
+        close: 'close',
+        search: 'search',
+        confirm: 'check',
+        clipboard: 'content_paste',
     },
+};
+
+// Icon values saved by older versions (emoji defaults). Migrated on sanitize so
+// existing theme files pick up the Material Symbols icons; user-customized
+// icons are left untouched.
+const LEGACY_ICON_MIGRATION: Record<string, string> = {
+    '🗑️': 'delete',
+    '📌': 'keep',
+    '📍': 'keep',
+    '⚙️': 'settings',
+    '✕': 'close',
+    '🔍': 'search',
+    '✓': 'check',
+    '📋': 'content_paste',
 };
 
 const CSS_COLOR_HEX_PATTERN = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
@@ -185,34 +229,27 @@ export function normalizeThemeProfileKey(value: string) {
     return normalized || DEFAULT_THEME_PROFILE_KEY;
 }
 
+function sanitizeColorSet(input: unknown, defaults: ThemeColors): ThemeColors {
+    const colors = (input && typeof input === 'object' ? input : {}) as Partial<ThemeColors>;
+    const out = {} as ThemeColors;
+    (Object.keys(defaults) as (keyof ThemeColors)[]).forEach((key) => {
+        out[key] = sanitizeColor(colors[key], defaults[key]);
+    });
+    return out;
+}
+
 function sanitizeThemeProfile(input: unknown): ThemeProfile {
     const source = (input && typeof input === 'object' ? input : {}) as Partial<ThemeProfile>;
-    const colors = (source.colors && typeof source.colors === 'object' ? source.colors : {}) as Partial<ThemeProfile['colors']>;
     const typography = (source.typography && typeof source.typography === 'object' ? source.typography : {}) as Partial<ThemeProfile['typography']>;
     const surface = (source.surface && typeof source.surface === 'object' ? source.surface : {}) as Partial<ThemeProfile['surface']>;
     const icons = (source.icons && typeof source.icons === 'object' ? source.icons : {}) as Partial<ThemeProfile['icons']>;
 
     return {
         name: sanitizeString(source.name, DEFAULT_THEME_PROFILE.name, 60),
-        colors: {
-            appBackground: sanitizeColor(colors.appBackground, DEFAULT_THEME_PROFILE.colors.appBackground),
-            panelBackground: sanitizeColor(colors.panelBackground, DEFAULT_THEME_PROFILE.colors.panelBackground),
-            overlayBackground: sanitizeColor(colors.overlayBackground, DEFAULT_THEME_PROFILE.colors.overlayBackground),
-            itemBackground: sanitizeColor(colors.itemBackground, DEFAULT_THEME_PROFILE.colors.itemBackground),
-            itemHoverBackground: sanitizeColor(colors.itemHoverBackground, DEFAULT_THEME_PROFILE.colors.itemHoverBackground),
-            inputBackground: sanitizeColor(colors.inputBackground, DEFAULT_THEME_PROFILE.colors.inputBackground),
-            inputBorder: sanitizeColor(colors.inputBorder, DEFAULT_THEME_PROFILE.colors.inputBorder),
-            border: sanitizeColor(colors.border, DEFAULT_THEME_PROFILE.colors.border),
-            textPrimary: sanitizeColor(colors.textPrimary, DEFAULT_THEME_PROFILE.colors.textPrimary),
-            textSecondary: sanitizeColor(colors.textSecondary, DEFAULT_THEME_PROFILE.colors.textSecondary),
-            textMuted: sanitizeColor(colors.textMuted, DEFAULT_THEME_PROFILE.colors.textMuted),
-            accent: sanitizeColor(colors.accent, DEFAULT_THEME_PROFILE.colors.accent),
-            danger: sanitizeColor(colors.danger, DEFAULT_THEME_PROFILE.colors.danger),
-            warning: sanitizeColor(colors.warning, DEFAULT_THEME_PROFILE.colors.warning),
-            success: sanitizeColor(colors.success, DEFAULT_THEME_PROFILE.colors.success),
-            scrollbarThumb: sanitizeColor(colors.scrollbarThumb, DEFAULT_THEME_PROFILE.colors.scrollbarThumb),
-            scrollbarTrack: sanitizeColor(colors.scrollbarTrack, DEFAULT_THEME_PROFILE.colors.scrollbarTrack),
-        },
+        colors: sanitizeColorSet(source.colors, DEFAULT_THEME_PROFILE.colors),
+        // Older profiles (version 1) have no light palette; they get the default
+        // light colors, which is what makes light mode actually light.
+        lightColors: sanitizeColorSet(source.lightColors, DEFAULT_LIGHT_COLORS),
         typography: {
             fontFamily: sanitizeString(typography.fontFamily, DEFAULT_THEME_PROFILE.typography.fontFamily, 200),
             monoFontFamily: sanitizeString(typography.monoFontFamily, DEFAULT_THEME_PROFILE.typography.monoFontFamily, 200),
@@ -230,21 +267,29 @@ function sanitizeThemeProfile(input: unknown): ThemeProfile {
             panelBorderWidth: clampNumber(surface.panelBorderWidth, 0, 4, DEFAULT_THEME_PROFILE.surface.panelBorderWidth),
         },
         icons: {
-            delete: sanitizeIcon(icons.delete, DEFAULT_THEME_PROFILE.icons.delete),
-            pin: sanitizeIcon(icons.pin, DEFAULT_THEME_PROFILE.icons.pin),
-            pinFilled: sanitizeIcon(icons.pinFilled, DEFAULT_THEME_PROFILE.icons.pinFilled),
-            settings: sanitizeIcon(icons.settings, DEFAULT_THEME_PROFILE.icons.settings),
-            close: sanitizeIcon(icons.close, DEFAULT_THEME_PROFILE.icons.close),
-            search: sanitizeIcon(icons.search, DEFAULT_THEME_PROFILE.icons.search),
-            confirm: sanitizeIcon(icons.confirm, DEFAULT_THEME_PROFILE.icons.confirm),
-            clipboard: sanitizeIcon(icons.clipboard, DEFAULT_THEME_PROFILE.icons.clipboard),
+            delete: sanitizeThemeIcon(icons.delete, DEFAULT_THEME_PROFILE.icons.delete),
+            pin: sanitizeThemeIcon(icons.pin, DEFAULT_THEME_PROFILE.icons.pin),
+            pinFilled: sanitizeThemeIcon(icons.pinFilled, DEFAULT_THEME_PROFILE.icons.pinFilled),
+            settings: sanitizeThemeIcon(icons.settings, DEFAULT_THEME_PROFILE.icons.settings),
+            close: sanitizeThemeIcon(icons.close, DEFAULT_THEME_PROFILE.icons.close),
+            search: sanitizeThemeIcon(icons.search, DEFAULT_THEME_PROFILE.icons.search),
+            confirm: sanitizeThemeIcon(icons.confirm, DEFAULT_THEME_PROFILE.icons.confirm),
+            clipboard: sanitizeThemeIcon(icons.clipboard, DEFAULT_THEME_PROFILE.icons.clipboard),
         },
     };
+}
+
+function sanitizeThemeIcon(value: unknown, fallback: string) {
+    const sanitized = sanitizeIcon(value, fallback);
+    // Old emoji defaults saved in existing theme files become the equivalent
+    // Material Symbols token; genuinely custom icons pass through unchanged.
+    return LEGACY_ICON_MIGRATION[sanitized] ?? sanitized;
 }
 
 export function createDefaultThemeConfig(): ThemeConfig {
     return {
         version: THEME_CONFIG_VERSION,
+        mode: 'dark',
         activeProfile: DEFAULT_THEME_PROFILE_KEY,
         profiles: {
             [DEFAULT_THEME_PROFILE_KEY]: JSON.parse(JSON.stringify(DEFAULT_THEME_PROFILE)),
@@ -278,9 +323,13 @@ export function sanitizeThemeConfig(input: unknown): ThemeConfig {
 
     const requestedProfile = normalizeThemeProfileKey(String(source.activeProfile || fallback.activeProfile));
     const activeProfile = nextProfiles[requestedProfile] ? requestedProfile : Object.keys(nextProfiles)[0];
+    const mode: ThemeMode = source.mode === 'light' || source.mode === 'system' || source.mode === 'dark'
+        ? source.mode
+        : 'dark';
 
     return {
         version: THEME_CONFIG_VERSION,
+        mode,
         activeProfile,
         profiles: nextProfiles,
     };
@@ -341,6 +390,13 @@ export function getThemeSchema() {
         ])
     );
 
+    const lightColorProperties = Object.fromEntries(
+        Object.entries(DEFAULT_LIGHT_COLORS).map(([key, defaultValue]) => [
+            key,
+            createThemeColorSchema(defaultValue, `${colorDescriptions[key as keyof ThemeColors]} (light mode)`),
+        ])
+    );
+
     const typographyProperties = {
         fontFamily: createThemeStringSchema(DEFAULT_THEME_PROFILE.typography.fontFamily, 'Primary UI font family.', 200),
         monoFontFamily: createThemeStringSchema(DEFAULT_THEME_PROFILE.typography.monoFontFamily, 'Monospace font family for code or fixed-width text.', 200),
@@ -396,6 +452,12 @@ export function getThemeSchema() {
                 const: THEME_CONFIG_VERSION,
                 description: 'Theme file version.',
             },
+            mode: {
+                type: 'string',
+                enum: ['dark', 'light', 'system'],
+                default: 'dark',
+                description: 'Color mode: dark, light, or follow the OS setting.',
+            },
             activeProfile: {
                 type: 'string',
                 description: 'The currently active theme profile key.',
@@ -422,6 +484,12 @@ export function getThemeSchema() {
                         additionalProperties: false,
                         required: Object.keys(DEFAULT_THEME_PROFILE.colors),
                         properties: colorProperties,
+                    },
+                    lightColors: {
+                        type: 'object',
+                        description: 'Palette used when the app is in light mode.',
+                        additionalProperties: false,
+                        properties: lightColorProperties,
                     },
                     typography: {
                         type: 'object',
