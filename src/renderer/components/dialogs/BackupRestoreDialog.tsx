@@ -2,25 +2,27 @@ import * as React from 'react';
 import type { Settings } from '../../app-types';
 import type { ThemeProfile } from '../../../theme-config';
 
-interface BackupDeleteDialogProps {
+interface BackupRestoreDialogProps {
     settings: Settings;
     themeColors: ThemeProfile['colors'];
-    action: 'single' | 'multiple' | 'cloud';
-    selectedBackupsSize: number;
+    kind: 'local' | 'cloud';
+    label: string;
+    busy: boolean;
     isClosing: boolean;
     dialogRef: React.RefObject<HTMLDivElement | null>;
-    onConfirmDelete: () => void;
+    onConfirmRestore: () => void;
     onCancel: () => void;
 }
 
-const BackupDeleteDialog: React.FC<BackupDeleteDialogProps> = ({
+const BackupRestoreDialog: React.FC<BackupRestoreDialogProps> = ({
     settings,
     themeColors,
-    action,
-    selectedBackupsSize,
+    kind,
+    label,
+    busy,
     isClosing,
     dialogRef,
-    onConfirmDelete,
+    onConfirmRestore,
     onCancel,
 }) => {
     return (
@@ -45,13 +47,13 @@ const BackupDeleteDialog: React.FC<BackupDeleteDialogProps> = ({
                 className={`${isClosing ? 'fade-out' : 'fade-in'}`}
                 role="dialog"
                 aria-modal="true"
-                aria-label="Backup delete confirmation"
+                aria-label="Backup restore confirmation"
                 tabIndex={-1}
                 style={{
                     background: settings.theme === 'light' ? '#f0f0f0' : '#222',
                     borderRadius: 10,
                     padding: 24,
-                    maxWidth: 'min(400px, 80vw)',
+                    maxWidth: 'min(420px, 80vw)',
                     boxSizing: 'border-box',
                     textAlign: 'center',
                     boxShadow: '0 2px 12px #0008',
@@ -61,17 +63,12 @@ const BackupDeleteDialog: React.FC<BackupDeleteDialogProps> = ({
                 <div
                     style={{
                         marginBottom: 18,
-                        color: '#ff4136',
                         fontWeight: 600,
                         fontSize: 17,
                         lineHeight: 1.4,
                     }}
                 >
-                    {action === 'single'
-                        ? 'Delete backup permanently?'
-                        : action === 'cloud'
-                            ? 'Delete cloud backup permanently?'
-                            : `Delete ${selectedBackupsSize} backup${selectedBackupsSize !== 1 ? 's' : ''} permanently?`}
+                    Restore {kind === 'cloud' ? 'cloud backup' : 'backup'} "{label}"?
                     <div
                         style={{
                             fontSize: 14,
@@ -80,23 +77,27 @@ const BackupDeleteDialog: React.FC<BackupDeleteDialogProps> = ({
                             marginTop: 8,
                         }}
                     >
-                        This action cannot be undone.
+                        Your current clipboard history will be replaced with this
+                        backup's contents.
+                        {kind === 'cloud' ? ' The backup is downloaded and decrypted on this device first.' : ''}
                     </div>
                 </div>
                 <button
                     style={{
-                        background: '#ff4136',
-                        color: '#fff',
-                        border: '1px solid #ff4136',
+                        background: settings.accentColor,
+                        color: '#06131f',
+                        border: `1px solid ${settings.accentColor}`,
                         borderRadius: 6,
                         padding: '8px 18px',
                         marginRight: 10,
                         fontWeight: 600,
-                        cursor: 'pointer',
+                        cursor: busy ? 'wait' : 'pointer',
+                        opacity: busy ? 0.7 : 1,
                     }}
-                    onClick={onConfirmDelete}
+                    disabled={busy}
+                    onClick={onConfirmRestore}
                 >
-                    Yes, Delete
+                    {busy ? 'Restoring…' : 'Yes, Restore'}
                 </button>
                 <button
                     data-dialog-autofocus
@@ -107,8 +108,9 @@ const BackupDeleteDialog: React.FC<BackupDeleteDialogProps> = ({
                         borderRadius: 6,
                         padding: '8px 18px',
                         fontWeight: 600,
-                        cursor: 'pointer',
+                        cursor: busy ? 'default' : 'pointer',
                     }}
+                    disabled={busy}
                     onClick={onCancel}
                 >
                     Cancel
@@ -118,4 +120,4 @@ const BackupDeleteDialog: React.FC<BackupDeleteDialogProps> = ({
     );
 };
 
-export default React.memo(BackupDeleteDialog);
+export default React.memo(BackupRestoreDialog);

@@ -719,6 +719,37 @@ export async function listBackups(): Promise<CloudBackup[]> {
     }
 }
 
+/** Delete one cloud backup by id. */
+export async function deleteBackup(id: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+        const res = await api(`/api/sync/backup?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!res) return { ok: false, error: 'You need to be signed in and online.' };
+        if (!res.ok) {
+            return { ok: false, error: res.status === 404 ? 'That backup no longer exists.' : `Delete failed (${res.status}).` };
+        }
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, error: netMessage(e) };
+    }
+}
+
+/** Rename one cloud backup (display label only, nothing re-encrypted). */
+export async function renameBackup(id: string, name: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+        const res = await api('/api/sync/backup', {
+            method: 'PATCH',
+            body: JSON.stringify({ id, name }),
+        });
+        if (!res) return { ok: false, error: 'You need to be signed in and online.' };
+        if (!res.ok) {
+            return { ok: false, error: res.status === 404 ? 'That backup no longer exists.' : `Rename failed (${res.status}).` };
+        }
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, error: netMessage(e) };
+    }
+}
+
 /** Download + decrypt one backup, returning the raw DB bytes (or null). */
 export async function downloadBackup(id: string): Promise<Buffer | null> {
     if (!key) return null;

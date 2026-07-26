@@ -322,17 +322,15 @@ const App: React.FC = () => {
     }, [syncStatus?.enabled, syncStatus?.unlocked, loadBackups]);
     const backupNow = async () => {
         setBackupBusy(true);
-        const r = await window.electronAPI.sync.backupNow();
-        setBackupBusy(false);
-        if (r.ok) { showToast('success', 'Backed up to the cloud.'); void loadBackups(); }
-        else showToast('error', r.error ?? 'Backup failed.');
-    };
-    const restoreCloudBackup = async (id: string) => {
-        setBackupBusy(true);
-        const r = await window.electronAPI.sync.restoreBackup(id);
-        setBackupBusy(false);
-        if (r.ok) showToast('success', 'Restored from cloud backup. Restart Clip to be safe.');
-        else showToast('error', r.error ?? 'Restore failed.');
+        try {
+            const r = await window.electronAPI.sync.backupNow();
+            if (r.ok) { showToast('success', 'Backed up to the cloud.'); void loadBackups(); }
+            else showToast('error', r.error ?? 'Backup failed.');
+        } catch (error) {
+            showToast('error', `Backup failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setBackupBusy(false);
+        }
     };
 
     const handleWindowWillShow = useCallback(() => {
@@ -386,16 +384,20 @@ const App: React.FC = () => {
         }
     };
 
-    // --- Backup restore dropdown state ---
+    // --- Local backup list state ---
     const [backupList, setBackupList] = useState<BackupEntry[]>([]);
-    const [selectedBackup, setSelectedBackup] = useState<string>('');
 
     // --- Backup selection and deletion state ---
     const [selectedBackups, setSelectedBackups] = useState<Set<string>>(new Set());
-    const [showBackupManagement, setShowBackupManagement] = useState(false);
-    const [backupDeleteAction, setBackupDeleteAction] = useState<'single' | 'multiple' | null>(null);
+    // 'single'/'multiple' target local backup files; 'cloud' targets a cloud backup id.
+    const [backupDeleteAction, setBackupDeleteAction] = useState<'single' | 'multiple' | 'cloud' | null>(null);
     const [backupToDelete, setBackupToDelete] = useState<string>('');
     const [isBackupDeleteDialogClosing, setIsBackupDeleteDialogClosing] = useState(false);
+
+    // --- Backup restore confirmation state (local file or cloud id) ---
+    const [backupRestoreTarget, setBackupRestoreTarget] = useState<{ kind: 'local' | 'cloud'; id: string; label: string } | null>(null);
+    const [isBackupRestoreDialogClosing, setIsBackupRestoreDialogClosing] = useState(false);
+    const [backupRestoreBusy, setBackupRestoreBusy] = useState(false);
 
     const reloadSettingsFromDisk = useCallback(async () => {
         try {
@@ -696,6 +698,14 @@ const App: React.FC = () => {
                         setBackupToDelete('');
                         setIsBackupDeleteDialogClosing(false);
                     }, 300);
+                } else if (backupRestoreTarget) {
+                    if (!backupRestoreBusy) {
+                        setIsBackupRestoreDialogClosing(true);
+                        setTimeout(() => {
+                            setBackupRestoreTarget(null);
+                            setIsBackupRestoreDialogClosing(false);
+                        }, 300);
+                    }
                 } else if (showUnsavedChangesConfirm) {
                     setIsUnsavedChangesDialogClosing(true);
                     setTimeout(() => {
@@ -750,7 +760,7 @@ const App: React.FC = () => {
         };
         window.addEventListener('keydown', escHandler);
         return () => window.removeEventListener('keydown', escHandler);
-    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, backupDeleteAction, handleDeleteDialogClose, hasUnsavedChanges, hasThemeEditorChangesSinceOpen]);
+    }, [showMaxItemsWarning, dangerAction, showThemeProfileDeleteConfirm, showThemeProfileResetConfirm, showSettings, isSettingsDialogClosing, deleteTarget, showRestartConfirm, isRestartDialogClosing, showUnsavedChangesConfirm, backupDeleteAction, backupRestoreTarget, backupRestoreBusy, handleDeleteDialogClose, hasUnsavedChanges, hasThemeEditorChangesSinceOpen]);
 
     // Force refresh when Ctrl+Shift+V is pressed (global shortcut)
     // This effect is now primarily for development/debugging if needed,
@@ -1103,15 +1113,15 @@ const App: React.FC = () => {
 
     const handleConfirmBackupDelete = async () => {
         try {
-            let success = false;
-
             if (backupDeleteAction === 'single' && backupToDelete) {
-                success = await window.electronAPI?.deleteBackup?.(backupToDelete);
+                const success = await window.electronAPI?.deleteBackup?.(backupToDelete);
                 if (success) {
                     showToast('success', 'Backup deleted successfully');
-                    if (selectedBackup === backupToDelete) {
-                        setSelectedBackup('');
-                    }
+                    setSelectedBackups((prev) => {
+                        const next = new Set(prev);
+                        next.delete(backupToDelete);
+                        return next;
+                    });
                 } else {
                     showToast('error', 'Failed to delete backup');
                 }
@@ -1119,12 +1129,17 @@ const App: React.FC = () => {
                 const deletedCount = await window.electronAPI?.deleteMultipleBackups?.(Array.from(selectedBackups));
                 if (deletedCount > 0) {
                     showToast('success', `${deletedCount} backup${deletedCount !== 1 ? 's' : ''} deleted successfully`);
-                    if (selectedBackups.has(selectedBackup)) {
-                        setSelectedBackup('');
-                    }
                     setSelectedBackups(new Set());
                 } else {
                     showToast('error', 'Failed to delete backups');
+                }
+            } else if (backupDeleteAction === 'cloud' && backupToDelete) {
+                const r = await window.electronAPI.sync.deleteBackup(backupToDelete);
+                if (r.ok) {
+                    showToast('success', 'Cloud backup deleted');
+                    void loadBackups();
+                } else {
+                    showToast('error', r.error ?? 'Failed to delete cloud backup');
                 }
             }
 
@@ -1136,6 +1151,45 @@ const App: React.FC = () => {
         }
 
         closeBackupDeleteDialog();
+    };
+
+    const closeBackupRestoreDialog = () => {
+        setIsBackupRestoreDialogClosing(true);
+        setTimeout(() => {
+            setBackupRestoreTarget(null);
+            setIsBackupRestoreDialogClosing(false);
+        }, 300);
+    };
+
+    const handleConfirmBackupRestore = async () => {
+        if (!backupRestoreTarget || backupRestoreBusy) return;
+        setBackupRestoreBusy(true);
+        try {
+            let ok = false;
+            let err: string | undefined;
+            if (backupRestoreTarget.kind === 'local') {
+                ok = !!(await window.electronAPI?.restoreBackup?.(backupRestoreTarget.id));
+                if (!ok) err = 'Could not restore this backup.';
+            } else {
+                const r = await window.electronAPI.sync.restoreBackup(backupRestoreTarget.id);
+                ok = r.ok;
+                err = r.error;
+            }
+            if (ok) {
+                showToast('success', 'Backup restored.');
+                await refreshBackupList();
+                setRestartReason('restore');
+                setShowRestartConfirm(true);
+            } else {
+                showToast('error', err ?? 'Restore failed.');
+            }
+        } catch (error) {
+            log.error('Restore backup error', error instanceof Error ? error.message : String(error));
+            showToast('error', `Restore failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setBackupRestoreBusy(false);
+            closeBackupRestoreDialog();
+        }
     };
 
     const closeThemeProfileResetDialog = () => {
@@ -1288,18 +1342,24 @@ const App: React.FC = () => {
                         isBackingUp={isBackingUp}
                         setIsBackingUp={setIsBackingUp}
                         setBackupList={setBackupList}
-                        setSelectedBackup={setSelectedBackup}
                         showToast={showToast}
                         log={log}
                         refreshBackupList={refreshBackupList}
-                        showBackupManagement={showBackupManagement}
-                        setShowBackupManagement={setShowBackupManagement}
                         backupList={backupList}
                         selectedBackups={selectedBackups}
                         setSelectedBackups={setSelectedBackups}
-                        selectedBackup={selectedBackup}
                         setBackupToDelete={setBackupToDelete}
                         setBackupDeleteAction={setBackupDeleteAction}
+                        onRequestRestore={(kind, id, label) => setBackupRestoreTarget({ kind, id, label })}
+                        loggedIn={account.loggedIn}
+                        isPro={account.isPro}
+                        syncEnabled={!!syncStatus?.enabled}
+                        syncUnlocked={!!syncStatus?.unlocked}
+                        cloudBackups={cloudBackups}
+                        cloudBusy={backupBusy}
+                        onCloudBackupNow={() => void backupNow()}
+                        onRefreshCloudBackups={() => void loadBackups()}
+                        onNavigateToAccount={() => pushSettingsSection('Profile')}
                     />
                 );
             case 'Data':
@@ -1516,22 +1576,20 @@ const App: React.FC = () => {
                                             <div className="mt-1 pt-2 border-t border-white/5">
                                                 <div className="flex items-center justify-between">
                                                     <span className="text-[11px] text-on-surface-variant">Cloud backups</span>
-                                                    <button type="button" onClick={() => void backupNow()} disabled={backupBusy} className="text-[11px] text-primary bg-transparent border-0 hover:underline disabled:opacity-60">
-                                                        {backupBusy ? 'Working…' : 'Back up now'}
-                                                    </button>
+                                                    <div className="flex items-center gap-3">
+                                                        <button type="button" onClick={() => void backupNow()} disabled={backupBusy} className="text-[11px] text-primary bg-transparent border-0 hover:underline disabled:opacity-60">
+                                                            {backupBusy ? 'Working…' : 'Back up now'}
+                                                        </button>
+                                                        <button type="button" onClick={() => pushSettingsSection('Backups')} className="text-[11px] text-primary bg-transparent border-0 hover:underline">
+                                                            Manage
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                                {cloudBackups.length === 0 ? (
-                                                    <p className="text-[10px] text-on-surface-variant mt-1">No cloud backups yet.</p>
-                                                ) : (
-                                                    <ul className="mt-1 space-y-1">
-                                                        {cloudBackups.map((b) => (
-                                                            <li key={b.id} className="flex items-center justify-between gap-2 text-[10px] text-on-surface-variant">
-                                                                <span className="truncate">{(b.deviceName || 'Device')} · {new Date(b.createdAt).toLocaleDateString()} · {(b.sizeBytes / 1024).toFixed(0)} KB</span>
-                                                                <button type="button" onClick={() => void restoreCloudBackup(b.id)} disabled={backupBusy} className="shrink-0 text-primary bg-transparent border-0 hover:underline disabled:opacity-60">Restore</button>
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                )}
+                                                <p className="text-[10px] text-on-surface-variant mt-1">
+                                                    {cloudBackups.length === 0
+                                                        ? 'No cloud backups yet.'
+                                                        : `${cloudBackups.length} cloud backup${cloudBackups.length !== 1 ? 's' : ''}. Restore, rename, or delete them under Backups.`}
+                                                </p>
                                             </div>
                                         </>
                                     )}
@@ -1968,6 +2026,11 @@ const App: React.FC = () => {
                     selectedBackupsSize={selectedBackups.size}
                     onConfirmBackupDelete={handleConfirmBackupDelete}
                     onCancelBackupDelete={closeBackupDeleteDialog}
+                    backupRestoreTarget={backupRestoreTarget}
+                    isBackupRestoreDialogClosing={isBackupRestoreDialogClosing}
+                    backupRestoreBusy={backupRestoreBusy}
+                    onConfirmBackupRestore={handleConfirmBackupRestore}
+                    onCancelBackupRestore={closeBackupRestoreDialog}
                     showThemeProfileResetConfirm={showThemeProfileResetConfirm}
                     isThemeProfileResetDialogClosing={isThemeProfileResetDialogClosing}
                     onConfirmThemeProfileReset={handleConfirmThemeProfileReset}

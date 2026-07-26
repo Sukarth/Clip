@@ -38,4 +38,5 @@ export interface Settings {
 export interface BackupEntry {
     file: string;
     time: number;
+    size: number;
 }

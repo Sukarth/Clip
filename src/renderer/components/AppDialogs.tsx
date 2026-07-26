@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { ClipboardItem, Settings } from '../app-types';
 import type { ThemeProfile } from '../../theme-config';
 import BackupDeleteDialog from './dialogs/BackupDeleteDialog';
+import BackupRestoreDialog from './dialogs/BackupRestoreDialog';
 import DangerAreaDialog from './dialogs/DangerAreaDialog';
 import DeleteConfirmDialog from './dialogs/DeleteConfirmDialog';
 import MaxItemsWarningDialog from './dialogs/MaxItemsWarningDialog';
@@ -38,11 +39,17 @@ interface AppDialogsProps {
     handleUnsavedDontSave: () => void;
     handleUnsavedCancel: () => void;
 
-    backupDeleteAction: 'single' | 'multiple' | null;
+    backupDeleteAction: 'single' | 'multiple' | 'cloud' | null;
     isBackupDeleteDialogClosing: boolean;
     selectedBackupsSize: number;
     onConfirmBackupDelete: () => void | Promise<void>;
     onCancelBackupDelete: () => void;
+
+    backupRestoreTarget: { kind: 'local' | 'cloud'; id: string; label: string } | null;
+    isBackupRestoreDialogClosing: boolean;
+    backupRestoreBusy: boolean;
+    onConfirmBackupRestore: () => void | Promise<void>;
+    onCancelBackupRestore: () => void;
 
     showThemeProfileResetConfirm: boolean;
     isThemeProfileResetDialogClosing: boolean;
@@ -94,6 +101,11 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
     selectedBackupsSize,
     onConfirmBackupDelete,
     onCancelBackupDelete,
+    backupRestoreTarget,
+    isBackupRestoreDialogClosing,
+    backupRestoreBusy,
+    onConfirmBackupRestore,
+    onCancelBackupRestore,
     showThemeProfileResetConfirm,
     isThemeProfileResetDialogClosing,
     onConfirmThemeProfileReset,
@@ -128,6 +140,10 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
             onCancelBackupDelete();
             return;
         }
+        if (backupRestoreTarget) {
+            if (!backupRestoreBusy) onCancelBackupRestore();
+            return;
+        }
         if (showUnsavedChangesConfirm) {
             handleUnsavedCancel();
             return;
@@ -149,6 +165,9 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
         }
     }, [
         backupDeleteAction,
+        backupRestoreBusy,
+        backupRestoreTarget,
+        onCancelBackupRestore,
         closeDangerDialog,
         closeRestartDialog,
         dangerAction,
@@ -172,6 +191,7 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
         showRestartConfirm ||
         showUnsavedChangesConfirm ||
         backupDeleteAction ||
+        backupRestoreTarget ||
         showThemeProfileResetConfirm ||
         showThemeProfileDeleteConfirm ||
         showMaxItemsWarning,
@@ -307,6 +327,22 @@ const AppDialogs: React.FC<AppDialogsProps> = ({
                         void onConfirmBackupDelete();
                     }}
                     onCancel={onCancelBackupDelete}
+                />
+            )}
+
+            {backupRestoreTarget && (
+                <BackupRestoreDialog
+                    settings={settings}
+                    themeColors={themeColors}
+                    kind={backupRestoreTarget.kind}
+                    label={backupRestoreTarget.label}
+                    busy={backupRestoreBusy}
+                    isClosing={isBackupRestoreDialogClosing}
+                    dialogRef={activeDialogRef}
+                    onConfirmRestore={() => {
+                        void onConfirmBackupRestore();
+                    }}
+                    onCancel={onCancelBackupRestore}
                 />
             )}
 

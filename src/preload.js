@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listBackups: () => ipcRenderer.invoke('list-backups'),
     restoreBackup: (file) => ipcRenderer.invoke('restore-backup', file),
     deleteBackup: (file) => ipcRenderer.invoke('delete-backup', file),
+    renameBackup: (file, newLabel) => ipcRenderer.invoke('rename-backup', file, newLabel),
     deleteMultipleBackups: (files) => ipcRenderer.invoke('delete-multiple-backups', files),
     exportDb: () => ipcRenderer.invoke('export-db'),
     importDb: (buffer) => ipcRenderer.invoke('import-db', buffer),
@@ -94,6 +95,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         backupNow: () => ipcRenderer.invoke('sync:backup-now'),
         listBackups: () => ipcRenderer.invoke('sync:list-backups'),
         restoreBackup: (id) => ipcRenderer.invoke('sync:restore-backup', id),
+        deleteBackup: (id) => ipcRenderer.invoke('sync:delete-backup', id),
+        renameBackup: (id, name) => ipcRenderer.invoke('sync:rename-backup', id, name),
     },
     isDevelopment: () => {
         // Check multiple indicators for development mode

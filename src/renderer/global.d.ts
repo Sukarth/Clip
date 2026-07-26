@@ -27,9 +27,10 @@ interface ElectronAPI {
     setNotifications: (enabled: boolean) => void;
     setStartWithSystem: (enabled: boolean) => void;
     createBackup: () => Promise<string>;
-    listBackups: () => Promise<{ file: string; time: number }[]>;
+    listBackups: () => Promise<{ file: string; time: number; size: number }[]>;
     restoreBackup: (file: string) => Promise<boolean>;
     deleteBackup: (file: string) => Promise<boolean>;
+    renameBackup: (file: string, newLabel: string) => Promise<{ ok: boolean; file?: string; error?: string }>;
     deleteMultipleBackups: (files: string[]) => Promise<number>;
     exportDb: () => Promise<Uint8Array>;
     importDb: (buffer: ArrayBuffer) => Promise<boolean>;
@@ -75,6 +76,8 @@ interface ElectronAPI {
         backupNow: () => Promise<{ ok: boolean; error?: string }>;
         listBackups: () => Promise<CloudBackupView[]>;
         restoreBackup: (id: string) => Promise<{ ok: boolean; error?: string }>;
+        deleteBackup: (id: string) => Promise<{ ok: boolean; error?: string }>;
+        renameBackup: (id: string, name: string) => Promise<{ ok: boolean; error?: string }>;
     };
     isDevelopment: () => boolean;
 }

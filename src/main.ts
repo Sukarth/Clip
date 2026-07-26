@@ -1783,34 +1783,35 @@ function ensureBackupDir() {
     const BACKUP_DIR = getBackupDir();
     if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
+// Auto-created backups keep their ISO-timestamp filename; a user rename breaks
+// this pattern, which is what exempts the file from max-backups pruning.
+const AUTO_BACKUP_FILE_RE = /^clip-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/;
 function getBackupFiles() {
     const BACKUP_DIR = getBackupDir();
     ensureBackupDir();
     return fs.readdirSync(BACKUP_DIR)
         .filter(f => f.endsWith('.db'))
         .map(f => {
+            const stat = fs.statSync(path.join(BACKUP_DIR, f));
             // Extract timestamp from filename format: clip-backup-YYYY-MM-DDTHH-MM-SS-SSSZ.db
             const match = f.match(/clip-backup-(.+)\.db$/);
-            let time: number;
+            let time = NaN;
 
             if (match) {
                 // Convert ISO string back (replace hyphens with colons/periods for time parts)
                 const isoString = match[1].replace(/(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3}Z)/, '$1:$2:$3.$4');
-                const parsedDate = new Date(isoString);
-                time = parsedDate.getTime();
-
-                // Fallback to file mtime if parsing fails
-                if (isNaN(time)) {
-                    time = fs.statSync(path.join(getBackupDir(), f)).mtime.getTime();
-                }
-            } else {
-                // Fallback to file mtime for files that don't match expected format
-                time = fs.statSync(path.join(getBackupDir(), f)).mtime.getTime();
+                time = new Date(isoString).getTime();
+            }
+            // Renamed/foreign files (or a failed parse) fall back to file mtime,
+            // which rename preserves, so the original backup time survives.
+            if (isNaN(time)) {
+                time = stat.mtime.getTime();
             }
 
             return {
                 file: f,
-                time: time
+                time,
+                size: stat.size,
             };
         })
         .sort((a, b) => b.time - a.time);
@@ -1848,10 +1849,11 @@ function createBackup() {
             }
         }
 
-        // Clean up old backups
-        const backups = getBackupFiles();
-        if (backups.length > clipMaxBackups) {
-            backups.slice(clipMaxBackups).forEach(b => fs.unlinkSync(path.join(getBackupDir(), b.file)));
+        // Clean up old backups. Only auto-named backups are pruned: a rename is
+        // the user saying "keep this one", so custom-named files are exempt.
+        const autoBackups = getBackupFiles().filter(b => AUTO_BACKUP_FILE_RE.test(b.file));
+        if (autoBackups.length > clipMaxBackups) {
+            autoBackups.slice(clipMaxBackups).forEach(b => fs.unlinkSync(path.join(getBackupDir(), b.file)));
         }
 
         // Best-effort encrypted cloud backup (non-blocking, guarded by sync state).
@@ -2029,6 +2031,41 @@ ipcMain.handle('delete-backup', (event, file) => {
     } catch (error) {
         console.error(`[main] Error deleting backup ${file}:`, error);
         return false;
+    }
+});
+ipcMain.handle('rename-backup', (_event, file: string, newLabel: string) => {
+    try {
+        const oldPath = resolveBackupPath(file);
+        if (!fs.existsSync(oldPath)) {
+            return { ok: false, error: 'Backup not found.' };
+        }
+        // Turn the label into a filename-safe slug that still satisfies
+        // resolveBackupPath's clip-backup-*.db pattern (so restore/delete keep
+        // working on the renamed file).
+        const slug = String(newLabel)
+            .trim()
+            .replace(/\.db$/i, '')
+            .replace(/\s+/g, '-')
+            .replace(/[^A-Za-z0-9_.-]/g, '')
+            .replace(/^[.-]+|[.-]+$/g, '')
+            .slice(0, 64);
+        if (!slug) {
+            return { ok: false, error: 'Use letters, numbers, dashes, or underscores.' };
+        }
+        const newFile = `clip-backup-${slug}.db`;
+        const newPath = resolveBackupPath(newFile);
+        if (newPath === oldPath) {
+            return { ok: true, file: newFile };
+        }
+        if (fs.existsSync(newPath)) {
+            return { ok: false, error: 'A backup with that name already exists.' };
+        }
+        fs.renameSync(oldPath, newPath);
+        console.log(`[main] Renamed backup: ${file} -> ${newFile}`);
+        return { ok: true, file: newFile };
+    } catch (error) {
+        console.error(`[main] Error renaming backup ${file}:`, error);
+        return { ok: false, error: error instanceof Error ? error.message : 'Rename failed.' };
     }
 });
 ipcMain.handle('delete-multiple-backups', (event, files) => {
@@ -2425,6 +2462,8 @@ app.whenReady().then(() => {
         }
     });
     ipcMain.handle('sync:list-backups', () => cloudSync.listBackups());
+    ipcMain.handle('sync:delete-backup', (_e, id: string) => cloudSync.deleteBackup(String(id)));
+    ipcMain.handle('sync:rename-backup', (_e, id: string, name: string) => cloudSync.renameBackup(String(id), String(name)));
     ipcMain.handle('sync:restore-backup', async (_e, id: string) => {
         // Track the temp file so it is always removed (finally), not just on the
         // success path — otherwise a failed restore leaks a multi-MB .db file.
