@@ -25,9 +25,8 @@ import { useShortcutDraft } from './hooks/useShortcutDraft';
 import { useThemeConfigManager } from './hooks/useThemeConfigManager';
 import { useToastManager } from './hooks/useToastManager';
 import {
+    DEFAULT_LIGHT_COLORS,
     WINDOW_SIZE_LIMITS,
-    normalizeThemeProfileKey,
-    sanitizeThemeConfig,
 } from '../theme-config';
 
 type SettingsSectionKey = 'General' | 'Behavior' | 'Backups' | 'Data' | 'Theme' | 'Profile' | 'About';
@@ -67,7 +66,6 @@ const App: React.FC = () => {
 
     const {
         themeConfig,
-        setThemeConfig,
         themeEditorConfig,
         setThemeEditorConfig,
         themeSchema,
@@ -76,9 +74,9 @@ const App: React.FC = () => {
         newThemeProfileName,
         setNewThemeProfileName,
         isThemeSaving,
+        activeThemeProfile,
         activeThemeProfileKey,
         editorThemeProfile,
-        themeColors,
         themeTypography,
         themeSurface,
         themeIcons,
@@ -413,32 +411,6 @@ const App: React.FC = () => {
             setSettingsDraft(nextSettings);
             persistSettings(nextSettings, true);
 
-            const profileKey = normalizeThemeProfileKey(themeEditorConfig.activeProfile);
-            const currentProfile = themeEditorConfig.profiles[profileKey] || editorThemeProfile;
-            const mergedThemeConfig = sanitizeThemeConfig({
-                ...themeConfig,
-                ...themeEditorConfig,
-                activeProfile: profileKey,
-                profiles: {
-                    ...themeEditorConfig.profiles,
-                    [profileKey]: {
-                        ...currentProfile,
-                        colors: {
-                            ...currentProfile.colors,
-                            accent: nextSettings.accentColor,
-                        },
-                        surface: {
-                            ...currentProfile.surface,
-                            borderRadius: nextSettings.borderRadius,
-                            transparency: nextSettings.transparency,
-                        },
-                    },
-                },
-            });
-            setThemeConfig(mergedThemeConfig);
-            setThemeEditorConfig(mergedThemeConfig);
-            void window.electronAPI?.saveThemeConfig?.(mergedThemeConfig);
-
             showToast('info', 'Settings reloaded from disk.');
 
             // Surface any corrections the main process made while re-reading the
@@ -456,7 +428,7 @@ const App: React.FC = () => {
         } catch (error) {
             showToast('error', `Failed to reload settings from disk: ${error instanceof Error ? error.message : String(error)}`);
         }
-    }, [editorThemeProfile, persistSettings, settings, showToast, themeConfig, themeEditorConfig]);
+    }, [persistSettings, setSettingsDraft, settings, showToast]);
 
     // File-first settings boot: after a relaunch the settings file (already
     // sanitized by the main process) wins over the localStorage cache, and any
@@ -572,41 +544,90 @@ const App: React.FC = () => {
         });
     }, [settingsDraft, settings, themeEditorConfig, themeConfig]);
 
+    // Theme mode + palette resolution. While the settings window is open the
+    // editor config drives the UI (live preview); otherwise the saved theme
+    // config wins. The theme config is the source of truth for mode/accent/
+    // radius/transparency; the Settings copies below are derived values only.
+    const themeConfigInUse = showSettings ? themeEditorConfig : themeConfig;
+    const themeProfileInUse = showSettings ? editorThemeProfile : activeThemeProfile;
+    const themeMode: Settings['theme'] = themeConfigInUse.mode ?? 'dark';
+
+    const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(
+        () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true,
+    );
+
     useEffect(() => {
-        if (!showSettings) {
+        if (themeMode !== 'system' || !window.matchMedia) {
             return;
         }
 
-        setSettingsDraft((draft) => {
-            if (!draft) {
-                return draft;
-            }
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        setSystemPrefersDark(mediaQuery.matches);
+        const handleChange = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches);
+        mediaQuery.addEventListener('change', handleChange);
+        return () => mediaQuery.removeEventListener('change', handleChange);
+    }, [themeMode]);
 
-            const syncedAccent = editorThemeProfile.colors.accent;
-            const syncedBorderRadius = editorThemeProfile.surface.borderRadius;
-            const syncedTransparency = editorThemeProfile.surface.transparency;
+    const resolvedThemeMode: 'dark' | 'light' = themeMode === 'system'
+        ? (systemPrefersDark ? 'dark' : 'light')
+        : themeMode;
 
-            if (
-                draft.accentColor === syncedAccent
-                && draft.borderRadius === syncedBorderRadius
-                && draft.transparency === syncedTransparency
-            ) {
+    // The palette every consumer (AppInlineStyles, AppDialogs, sections, ...)
+    // renders with: the profile's light palette when the resolved mode is
+    // light, its dark palette otherwise.
+    const themeColors = React.useMemo(() => (
+        resolvedThemeMode === 'light'
+            ? { ...DEFAULT_LIGHT_COLORS, ...(themeProfileInUse.lightColors ?? {}) }
+            : themeProfileInUse.colors
+    ), [resolvedThemeMode, themeProfileInUse]);
+
+    // Bridge the theme-owned values (theme mode, accent, border radius,
+    // transparency) into Settings state as derived values so existing
+    // consumers (dialogs, ThemeProvider, ...) keep working. Guarded by
+    // per-field equality so the sync can never loop.
+    useEffect(() => {
+        const derivedAccent = themeColors.accent;
+        const derivedBorderRadius = themeProfileInUse.surface.borderRadius;
+        const derivedTransparency = themeProfileInUse.surface.transparency;
+        // Mirror the RESOLVED mode ('system' collapsed to dark/light) so
+        // consumers that test `settings.theme === 'light'` (dialogs, list
+        // skeletons) follow the OS preference too.
+        const derivedTheme = themeMode === 'system' ? resolvedThemeMode : themeMode;
+
+        const matchesDerived = (value: Settings) => (
+            value.theme === derivedTheme
+            && value.accentColor === derivedAccent
+            && value.borderRadius === derivedBorderRadius
+            && value.transparency === derivedTransparency
+        );
+
+        if (!matchesDerived(settingsRef.current)) {
+            const next: Settings = {
+                ...settingsRef.current,
+                theme: derivedTheme,
+                accentColor: derivedAccent,
+                borderRadius: derivedBorderRadius,
+                transparency: derivedTransparency,
+            };
+            isInternalSettingsSyncRef.current = true;
+            setSettings(next);
+            persistSettings(next);
+        }
+
+        setSettingsDraftState((draft) => {
+            if (!draft || matchesDerived(draft)) {
                 return draft;
             }
 
             return {
                 ...draft,
-                accentColor: syncedAccent,
-                borderRadius: syncedBorderRadius,
-                transparency: syncedTransparency,
+                theme: derivedTheme,
+                accentColor: derivedAccent,
+                borderRadius: derivedBorderRadius,
+                transparency: derivedTransparency,
             };
         });
-    }, [
-        showSettings,
-        editorThemeProfile.colors.accent,
-        editorThemeProfile.surface.borderRadius,
-        editorThemeProfile.surface.transparency,
-    ]);
+    }, [themeMode, resolvedThemeMode, themeColors.accent, themeProfileInUse, persistSettings]);
 
     const refreshBackupList = useCallback(async () => {
         const list = await window.electronAPI?.listBackups?.();
@@ -972,9 +993,19 @@ const App: React.FC = () => {
 
     const resetSettings = () => {
         setDangerAction(null);
-        setSettings(DEFAULT_SETTINGS);
-        persistSettings(DEFAULT_SETTINGS);
-        setSettingsDraftState(DEFAULT_SETTINGS);
+        // theme / accentColor / borderRadius / transparency are owned by the
+        // theme config and only mirrored into Settings as derived values, so a
+        // settings reset leaves them untouched.
+        const nextSettings: Settings = {
+            ...DEFAULT_SETTINGS,
+            theme: settings.theme,
+            accentColor: settings.accentColor,
+            borderRadius: settings.borderRadius,
+            transparency: settings.transparency,
+        };
+        setSettings(nextSettings);
+        persistSettings(nextSettings);
+        setSettingsDraftState(nextSettings);
 
         showToast('success', 'Settings reset to default values');
         // Close the settings window after successful reset
@@ -1488,9 +1519,8 @@ const App: React.FC = () => {
                         themeColors={themeColors}
                         reloadThemeFromDisk={reloadThemeFromDisk}
                         editorThemeProfile={editorThemeProfile}
-                        settingsDraft={settingsDraft}
-                        settings={settings}
-                        setSettingsDraft={setSettingsDraft}
+                        setThemeEditorConfig={setThemeEditorConfig}
+                        resolvedThemeMode={resolvedThemeMode}
                         updateEditorActiveProfile={updateEditorActiveProfile}
                         isThemeSaving={isThemeSaving}
                         saveThemeEditorConfig={saveThemeEditorConfig}
@@ -1930,7 +1960,7 @@ const App: React.FC = () => {
                     />
                     <span className="clip-title" style={{ fontWeight: themeTypography.fontWeightBold, fontSize: themeTypography.titleFontSize, color: themeColors.textPrimary }}>
                         <span style={{ marginRight: 6 }}>
-                            <IconGlyph value={themeIcons.clipboard} fallback="📋" label="Clipboard" size={16} />
+                            <IconGlyph value={themeIcons.clipboard} fallback="content_paste" label="Clipboard" size={16} />
                         </span>
                         Clipboard
                         {isDev() ? (
@@ -1973,7 +2003,7 @@ const App: React.FC = () => {
                         }}
                         onClick={openSettings}
                     >
-                        <IconGlyph value={themeIcons.settings} fallback="⚙️" label="Settings" size={16} />
+                        <IconGlyph value={themeIcons.settings} fallback="settings" label="Settings" size={16} />
                     </button>
                 </div>
                 {/* Search/filter row */}
@@ -2002,7 +2032,7 @@ const App: React.FC = () => {
                             autoFocus={false}
                         />
                         <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.7, pointerEvents: 'none', fontSize: 16 }}>
-                            <IconGlyph value={themeIcons.search} fallback="🔍" label="Search" size={14} />
+                            <IconGlyph value={themeIcons.search} fallback="search" label="Search" size={14} />
                         </span>
                     </div>
                     <button
@@ -2117,6 +2147,7 @@ const App: React.FC = () => {
                     themeTypography={themeTypography}
                     themeSurface={themeSurface}
                     effectiveBorderRadius={effectiveBorderRadius}
+                    resolvedThemeMode={resolvedThemeMode}
                 />
 
                 <AppDialogs

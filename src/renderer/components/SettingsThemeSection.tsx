@@ -1,6 +1,5 @@
 import * as React from 'react';
-import type { Settings } from '../app-types';
-import type { ThemeConfig, ThemeProfile } from '../../theme-config';
+import { DEFAULT_LIGHT_COLORS, type ThemeConfig, type ThemeProfile } from '../../theme-config';
 import PrototypeSelect from './PrototypeSelect';
 
 interface SettingsThemeSectionProps {
@@ -17,9 +16,8 @@ interface SettingsThemeSectionProps {
     themeColors: ThemeProfile['colors'];
     reloadThemeFromDisk: () => void | Promise<void>;
     editorThemeProfile: ThemeProfile;
-    settingsDraft: Settings | null;
-    settings: Settings;
-    setSettingsDraft: React.Dispatch<React.SetStateAction<Settings | null>>;
+    setThemeEditorConfig: React.Dispatch<React.SetStateAction<ThemeConfig>>;
+    resolvedThemeMode: 'dark' | 'light';
     updateEditorActiveProfile: (updater: (profile: ThemeProfile) => ThemeProfile) => void;
     isThemeSaving: boolean;
     saveThemeEditorConfig: () => void | Promise<void>;
@@ -49,9 +47,8 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
     setIsThemeProfileResetDialogClosing,
     reloadThemeFromDisk,
     editorThemeProfile,
-    settingsDraft,
-    settings,
-    setSettingsDraft,
+    setThemeEditorConfig,
+    resolvedThemeMode,
     updateEditorActiveProfile,
     openThemeConfigInSystem,
     exportThemeJson,
@@ -67,6 +64,24 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
         return parts[parts.length - 1] || fallback;
     }, []);
 
+    // Which of the profile's two palettes the swatch grid edits. Defaults to
+    // the palette currently on screen (the resolved mode).
+    const [editedPalette, setEditedPalette] = React.useState<'dark' | 'light'>(resolvedThemeMode);
+
+    // Profiles saved before the dual-palette support may lack lightColors at
+    // runtime; treat them as a copy of the default light palette until edited.
+    const editedPaletteColors: ThemeProfile['colors'] = editedPalette === 'light'
+        ? { ...DEFAULT_LIGHT_COLORS, ...(editorThemeProfile.lightColors ?? {}) }
+        : editorThemeProfile.colors;
+
+    const updateEditedPaletteColor = React.useCallback((key: keyof ThemeProfile['colors'], value: string) => {
+        updateEditorActiveProfile((profile) => (
+            editedPalette === 'light'
+                ? { ...profile, lightColors: { ...DEFAULT_LIGHT_COLORS, ...(profile.lightColors ?? {}), [key]: value } }
+                : { ...profile, colors: { ...profile.colors, [key]: value } }
+        ));
+    }, [editedPalette, updateEditorActiveProfile]);
+
     return (
         <div className="space-y-3 py-3">
             <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
@@ -75,8 +90,8 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                     <span className="text-xs font-semibold text-primary uppercase tracking-wider">Theme Mode</span>
                 </div>
                 <PrototypeSelect
-                    value={settingsDraft?.theme ?? settings.theme}
-                    onChange={(value) => setSettingsDraft((prev) => ({ ...(prev ?? settings), theme: value as Settings['theme'] }))}
+                    value={themeEditorConfig.mode ?? 'dark'}
+                    onChange={(value) => setThemeEditorConfig((prev) => ({ ...prev, mode: value as ThemeConfig['mode'] }))}
                     options={[
                         { value: 'dark', label: 'Dark' },
                         { value: 'light', label: 'Light' },
@@ -109,6 +124,29 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                 </div>
             </div>
 
+            <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                    <span className="material-symbols-outlined text-primary text-sm">contrast</span>
+                    <span className="text-xs font-semibold text-primary uppercase tracking-wider">Edited Palette</span>
+                </div>
+                <div className="settings-segmented-toggle">
+                    <button
+                        type="button"
+                        className={`flex-1 ${editedPalette === 'dark' ? 'is-active' : ''}`}
+                        onClick={() => setEditedPalette('dark')}
+                    >
+                        Dark palette
+                    </button>
+                    <button
+                        type="button"
+                        className={`flex-1 ${editedPalette === 'light' ? 'is-active' : ''}`}
+                        onClick={() => setEditedPalette('light')}
+                    >
+                        Light palette
+                    </button>
+                </div>
+            </div>
+
             {colorGroups.map((group) => (
                 <div key={group.title} className="bg-surface-container-low p-4 rounded-xl space-y-3">
                     <div className="flex items-center gap-2 mb-2">
@@ -118,7 +156,7 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                     <div className={group.columns}>
                         {group.entries.map(([key, label]) => (
                             <div className="color-swatch" key={key}>
-                                <input type="color" value={editorThemeProfile.colors[key].slice(0, 7)} title={label} onChange={(e) => updateEditorActiveProfile((profile) => ({ ...profile, colors: { ...profile.colors, [key]: e.target.value } }))} />
+                                <input type="color" value={editedPaletteColors[key].slice(0, 7)} title={label} onChange={(e) => updateEditedPaletteColor(key, e.target.value)} />
                                 <span className="color-swatch-label">{label}</span>
                             </div>
                         ))}
@@ -161,11 +199,7 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                 <div className="grid grid-cols-3 gap-2">
                     <div className="space-y-1">
                         <label className="text-[10px] text-on-surface-variant">Border Radius</label>
-                        <input type="number" value={editorThemeProfile.surface.borderRadius} className="input-field w-full text-[11px]" onChange={(e) => {
-                            const value = Number(e.target.value);
-                            updateEditorActiveProfile((profile) => ({ ...profile, surface: { ...profile.surface, borderRadius: value } }));
-                            setSettingsDraft((prev) => ({ ...(prev ?? settings), borderRadius: value }));
-                        }} />
+                        <input type="number" value={editorThemeProfile.surface.borderRadius} className="input-field w-full text-[11px]" onChange={(e) => updateEditorActiveProfile((profile) => ({ ...profile, surface: { ...profile.surface, borderRadius: Number(e.target.value) } }))} />
                     </div>
                     <div className="space-y-1">
                         <label className="text-[10px] text-on-surface-variant">Item Radius</label>
@@ -173,11 +207,7 @@ const SettingsThemeSection: React.FC<SettingsThemeSectionProps> = ({
                     </div>
                     <div className="space-y-1">
                         <label className="text-[10px] text-on-surface-variant">Transparency</label>
-                        <input type="number" value={editorThemeProfile.surface.transparency} step="0.05" min="0.35" max="1" className="input-field w-full text-[11px]" onChange={(e) => {
-                            const value = Number(e.target.value);
-                            updateEditorActiveProfile((profile) => ({ ...profile, surface: { ...profile.surface, transparency: value } }));
-                            setSettingsDraft((prev) => ({ ...(prev ?? settings), transparency: value }));
-                        }} />
+                        <input type="number" value={editorThemeProfile.surface.transparency} step="0.05" min="0.35" max="1" className="input-field w-full text-[11px]" onChange={(e) => updateEditorActiveProfile((profile) => ({ ...profile, surface: { ...profile.surface, transparency: Number(e.target.value) } }))} />
                     </div>
                     <div className="space-y-1">
                         <label className="text-[10px] text-on-surface-variant">Backdrop Blur</label>

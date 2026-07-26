@@ -430,7 +430,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                             >
                                                 <IconGlyph
                                                     value={item.pinned ? themeIcons.pinFilled : themeIcons.pin}
-                                                    fallback={item.pinned ? '📍' : '📌'}
+                                                    fallback="keep"
                                                     label={item.pinned ? 'Pinned' : 'Pin'}
                                                     size={17}
                                                 />
@@ -472,7 +472,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                                 onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
                                                 onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
                                             >
-                                                <IconGlyph value={themeIcons.delete} fallback="🗑️" label="Delete" size={17} />
+                                                <IconGlyph value={themeIcons.delete} fallback="delete" label="Delete" size={17} />
                                             </button>
                                         )}
                                     </div>

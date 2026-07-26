@@ -105,6 +105,8 @@ interface AppInlineStylesProps {
     themeTypography: ThemeProfile['typography'];
     themeSurface: ThemeProfile['surface'];
     effectiveBorderRadius: number;
+    /** Resolved color mode ('system' already collapsed to dark/light). */
+    resolvedThemeMode?: 'dark' | 'light';
 }
 
 const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
@@ -113,6 +115,7 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
     themeTypography,
     themeSurface,
     effectiveBorderRadius,
+    resolvedThemeMode = 'dark',
 }) => {
     const styles = React.useMemo(
         () => {
@@ -430,28 +433,6 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     background: ${safeColors.accent};
                 }
 
-                .theme-light input, .theme-light select {
-                    background: ${safeColors.inputBackground} !important;
-                    color: ${safeColors.textPrimary} !important;
-                    border: 1px solid ${safeColors.inputBorder} !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                }
-
-                /* Only apply input-like styling to labels that have background styling (container labels) */
-                .theme-light label[style*="background: rgba(255,255,255,0.03)"],
-                .theme-light label[style*="background: rgba(255,255,255,0.05)"],
-                .theme-light label[style*="background: rgba(255,255,255,0.08)"] {
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #e5e7eb !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-                }
-
-                .theme-light input:focus, .theme-light select:focus {
-                    border-color: ${safeColors.accent} !important;
-                    box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
-                    outline: none !important;
-                }
-
                 .theme-light option {
                     background: ${safeColors.panelBackground} !important;
                     color: ${safeColors.textPrimary} !important;
@@ -468,139 +449,8 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     color: ${safeColors.textPrimary} !important;
                 }
 
-                .theme-light button:not(.no-btn, .clip-pin-btn, .clip-delete-btn) {
-                    color: ${safeColors.textSecondary} !important;
-                    border: 1px solid ${safeColors.inputBorder} !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                    transition: all 0.2s ease !important;
-                }
-
-                .theme-light button:hover:not(.clip-pin-btn, .clip-delete-btn) {
-                    border-color: ${safeColors.accent} !important;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.15) !important;
-                }
-
-                .theme-light button.clip-settings-save-btn {
-                    background: ${safeAccentColor} !important;
-                    color: #fff !important;
-                    border-color: ${safeAccentColor} !important;
-                }
-
-                .theme-light button.clip-settings-save-btn:hover {
-                    background: ${safeAccentColor} !important;
-                    background: color-mix(in srgb, ${safeAccentColor} 85%, transparent) !important;
-                    box-shadow: 0 2px 8px color-mix(in srgb, ${safeAccentColor} 30%, transparent) !important;
-                }
-
-                .theme-light h2 {
-                    color: ${safeColors.textPrimary} !important;
-                    border-bottom-color: ${safeColors.border} !important;
-                }
-
-                .theme-light h3 {
-                    color: ${safeColors.textSecondary} !important;
-                }
-
-                .theme-light span:not(.toast-message>span) {
-                    color: ${safeColors.textMuted} !important;
-                }
-
-                /* Light mode text labels - only for text labels, not container labels */
-                .theme-light label:not([style*="background:"]) {
-                    color: ${safeColors.textSecondary} !important;
-                }
-
-                /* Light mode simple class-based styling */
-
-                /* Settings inputs and selects */
-                .theme-light .settings-input,
-                .theme-light .settings-select {
-                    background: rgba(255,255,255,0.95) !important;
-                    color: #2c3e50 !important;
-                    border: 1px solid #d1d5db !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                }
-
                 #danger-area {
                     color: ${safeColors.danger} !important;
-                }
-
-                .theme-light #reset-settings-warning {
-                    color: ${safeColors.warning} !important;
-                }
-
-                .theme-light .settings-input:focus,
-                .theme-light .settings-select:focus {
-                    border-color: ${safeAccentColor} !important;
-                    box-shadow: 0 0 0 3px rgba(70, 130, 180, 0.1) !important;
-                }
-
-                /* Settings container labels (switch containers) */
-                .theme-light .settings-container {
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #e5e7eb !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-                }
-
-                /* Settings buttons */
-                .theme-light .settings-button {
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #d1d5db !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                }
-
-                .theme-light .settings-button:hover {
-                    border-color: #9ca3af !important;
-                }
-
-                /* Settings display boxes (shortcut display, backup list, etc.) */
-                .theme-light .settings-display-box {
-                    background: rgba(255,255,255,0.9) !important;
-                    color: #374151 !important;
-                    border: 1px solid #e5e7eb !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-                }
-
-                /* Danger zone styling for light mode */
-                .theme-light div[style*="background: rgba(255,65,54,0.08)"] {
-                    background: rgba(120,120,120,0.15) !important;
-                }
-
-                .theme-light div[style*="color: #ffb300"] {
-                    color: #ff4136 !important;
-                }
-
-                /* Shortcut modifier buttons */
-                .theme-light .settings-modifier-button {
-                    background: rgba(255,255,255,0.9) !important;
-                    color: #2c3e50 !important;
-                    border: 1px solid #d1d5db !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                }
-                    
-                .theme-light #settings-title {
-                    color: #575f6c !important;
-                }
-
-                .theme-light .settings-modifier-button:hover {
-                    background: rgba(255,255,255,1) !important;
-                    border-color: #9ca3af !important;
-                }
-
-                /* Light mode section backgrounds */
-                .theme-light div[style*="background: rgba(255,255,255,0.03)"] {
-                    background: rgba(255,255,255,0.7) !important;
-                    border: 1px solid #e5e7eb !important;
-                }
-
-                .theme-light div[style*="background: rgba(255,255,255,0.05)"] {
-                    background: rgba(255,255,255,0.8) !important;
-                    border: 1px solid #e5e7eb !important;
-                }
-
-                .theme-light div[style*="background: rgba(255,255,255,0.08)"] {
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #d1d5db !important;
                 }
 
                 @keyframes clip-fadein {
@@ -1808,9 +1658,200 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     outline: none !important;
                     box-shadow: inset 0 0 0 2px ${safeColors.accent} !important;
                 }
+
+                ${resolvedThemeMode === 'light' ? `
+                /* Light-mode overrides for the hardcoded dark utility classes
+                   and settings controls. Emitted after the dark definitions so
+                   the later rules win; dark-mode output is untouched. */
+                .bg-surface { background: #f4f6f9; }
+                .bg-surface-container { background: #e9ecf1; }
+                .bg-surface-container\\/90 { background: rgba(233, 236, 241, 0.9); }
+                .bg-surface-container-low { background: #eef1f5; }
+                .bg-surface-container-high { background: #e2e6ec; }
+                .bg-surface-container-highest { background: #d8dde4; }
+                .hover\\:bg-surface-container-high:hover { background: #e2e6ec; }
+                .hover\\:bg-surface-container-highest:hover { background: #d8dde4; }
+                .text-on-surface { color: #1c1e21 !important; }
+                .text-on-surface-variant { color: #49525d !important; }
+                .text-primary { color: #2b5d8a !important; }
+                .hover\\:text-primary:hover { color: #2b5d8a !important; }
+                .hover\\:text-on-surface:hover { color: #1c1e21 !important; }
+                .bg-primary-container { background: #2b5d8a; }
+                .text-on-primary { color: #f4f8ff !important; }
+                #mainContainer {
+                    background: #f4f6f9;
+                    color: #1c1e21;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: #c1c7cf; }
+                .clip-settings-scroll {
+                    scrollbar-color: #c1c7cf #e6e9ee;
+                }
+                .clip-settings-scroll::-webkit-scrollbar-thumb {
+                    background: #c1c7cf;
+                    border-color: #e6e9ee;
+                }
+                .settings-input-ui,
+                .settings-select-ui {
+                    border: 1px solid #c9ced6 !important;
+                    background: #ffffff !important;
+                    color: #1c1e21 !important;
+                }
+                .settings-input-ui:focus,
+                .settings-select-ui:focus {
+                    border-color: #2b5d8a;
+                }
+                .input-field {
+                    background: #ffffff !important;
+                    border: 1px solid #c9ced6 !important;
+                    color: #1c1e21 !important;
+                }
+                .input-field:focus {
+                    background: #ffffff !important;
+                    box-shadow: 0 0 0 2px rgba(43, 93, 138, 0.25) !important;
+                }
+                .input-field::placeholder { color: #6b7280 !important; }
+                .custom-select-trigger {
+                    background: #ffffff;
+                    border: 1px solid #c9ced6;
+                    color: #1c1e21;
+                }
+                .custom-select-trigger:hover { background: #e8ecf1; }
+                .custom-select-trigger span { color: #1c1e21; }
+                .custom-select-trigger .material-symbols-outlined { color: #49525d; }
+                .custom-select-options {
+                    background: #ffffff;
+                    border: 1px solid #c9ced6;
+                    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+                }
+                .custom-select-options::-webkit-scrollbar-thumb {
+                    background: #c1c7cf;
+                    border-color: #ffffff;
+                }
+                .custom-select-option { color: #49525d; }
+                .custom-select-option:hover { background: #e8ecf1; color: #1c1e21; }
+                .custom-select-option.selected { background: rgba(43, 93, 138, 0.12); color: #2b5d8a; }
+                .number-input-wrapper {
+                    background: #ffffff;
+                    border: 1px solid #c9ced6;
+                }
+                .number-input-wrapper input { color: #1c1e21 !important; }
+                .number-input-wrapper button { background: #e8ecf1; color: #49525d; }
+                .number-input-wrapper button:hover { background: #d8dde4; color: #1c1e21; }
+                .number-input-wrapper button:active { background: #d8dde4; }
+                .toggle-slider { background-color: #d0d6de; }
+                .toggle-slider:before { background-color: #ffffff; }
+                .toggle-switch input:checked + .toggle-slider { background-color: #2b5d8a; }
+                .toggle-switch input:checked + .toggle-slider:before { background-color: #f4f8ff; }
+                .nav-btn.bg-primary-container\\/20 {
+                    background: rgba(43, 93, 138, 0.14) !important;
+                    background-color: rgba(43, 93, 138, 0.14) !important;
+                }
+                .json-file-card-title .material-symbols-outlined { color: #2b5d8a; }
+                .json-file-card-title h3 { color: #1c1e21; }
+                .json-file-card-title p { color: #49525d; }
+                .json-file-pill {
+                    background: #ffffff;
+                    border: 1px solid #c9ced6;
+                }
+                .json-file-pill:hover { background: #e8ecf1; }
+                .json-file-pill-main .material-symbols-outlined { color: #2b5d8a; }
+                .json-file-pill-text strong { color: #1c1e21; }
+                .json-file-pill-text span { color: #49525d !important; }
+                .json-file-pill-copy { background: rgba(43, 93, 138, 0.12); color: #2b5d8a; }
+                .json-action-btn {
+                    background: #ffffff;
+                    border: 1px solid #c9ced6;
+                    color: #1c1e21;
+                }
+                .json-action-btn:hover {
+                    background: #e8ecf1;
+                    border-color: #b6bdc7;
+                    color: #1c1e21;
+                }
+                .settings-card {
+                    border: 1px solid #c9ced6;
+                    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(238, 241, 245, 0.98) 100%);
+                    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+                }
+                .settings-card-button:hover {
+                    background: linear-gradient(180deg, rgba(238, 241, 245, 0.98) 0%, rgba(226, 230, 236, 0.98) 100%);
+                }
+                .settings-card-kicker { color: #2b5d8a; }
+                .settings-card-title,
+                .settings-item-title { color: #1c1e21; }
+                .settings-item-description { color: #49525d; }
+                .settings-field-label { color: #49525d; }
+                .settings-inline-note { color: #6b7280; }
+                .settings-status-text { color: #6b7280; }
+                .settings-chip-button,
+                .settings-icon-button,
+                .settings-secondary-button {
+                    background: #e8ecf1 !important;
+                    color: #1c1e21 !important;
+                }
+                .settings-primary-button {
+                    background: #2b5d8a !important;
+                    color: #f4f8ff !important;
+                }
+                .settings-number-input {
+                    background: #ffffff;
+                    border: 1px solid #c9ced6;
+                }
+                .settings-number-input input { color: #1c1e21 !important; }
+                .settings-number-input button { background: #e8ecf1; color: #49525d; }
+                .settings-number-input button:hover:not(:disabled) { background: #d8dde4; color: #1c1e21; }
+                .settings-list-action {
+                    background: #ffffff !important;
+                    color: #1c1e21 !important;
+                }
+                .settings-json-pill {
+                    border: 1px solid #c9ced6 !important;
+                    background: #ffffff !important;
+                    color: #1c1e21 !important;
+                }
+                .settings-json-pill-label { color: #2b5d8a; }
+                .settings-info-box {
+                    background: #e8ecf1;
+                    color: #49525d;
+                    border: 1px solid #c9ced6;
+                }
+                .settings-link-button { color: #2b5d8a; }
+                .settings-chevron { color: #2b5d8a; }
+                .settings-shortcut-button {
+                    background: #ffffff;
+                    border-color: #c9ced6;
+                    color: #49525d;
+                }
+                .settings-shortcut-button.is-active {
+                    background: #2b5d8a;
+                    border-color: #2b5d8a;
+                    color: #f4f8ff;
+                }
+                .shortcut-modifier-btn {
+                    background: #ffffff;
+                    border-color: #c9ced6;
+                    color: #49525d;
+                }
+                .shortcut-modifier-btn:hover { background: #e8ecf1; border-color: #9aa3ad; }
+                .shortcut-modifier-btn.active {
+                    background: #2b5d8a;
+                    border-color: #2b5d8a;
+                    color: #f4f8ff;
+                }
+                .settings-segmented-toggle { background: #e2e6ec; }
+                .settings-segmented-toggle button { color: #49525d; }
+                .settings-segmented-toggle button.is-active { background: #ffffff; color: #1c1e21; }
+                .view-toggle-container { background: #e2e6ec; }
+                .view-toggle-indicator { background: #ffffff; }
+                .view-toggle-btn { color: #6b7280; }
+                .view-toggle-btn.active { color: #1c1e21; }
+                .view-toggle-btn:not(.active) { color: #6b7280; }
+                .view-toggle-btn:not(.active):hover { color: #49525d; }
+                .color-swatch-label { color: #49525d; }
+                ` : ''}
             `;
         },
-        [effectiveBorderRadius, settings, themeColors, themeSurface, themeTypography],
+        [effectiveBorderRadius, resolvedThemeMode, settings, themeColors, themeSurface, themeTypography],
     );
 
     return <style>{styles}</style>;
