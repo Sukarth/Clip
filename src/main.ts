@@ -37,11 +37,10 @@ logError('--- Clip main process started ---');
 
 // Set app name for Windows (affects process name and window titles)
 if (process.platform === 'win32') {
-    // Only set AUMID explicitly in dev mode or Windows taskbar icon grouping gets confused
-    // when running a naked .exe without an installed Start Menu shortcut.
-    if (!app.isPackaged) {
-        app.setAppUserModelId(process.execPath);
-    }
+    // Use a stable app id so Windows groups the taskbar button under Clip and
+    // uses the window's icon. With process.execPath here, dev runs grouped
+    // under electron.exe and showed the default Electron taskbar icon.
+    app.setAppUserModelId('com.sukarth.clip');
     app.setName('Clip');
 }
 
@@ -189,10 +188,57 @@ function usesWindowsKey(shortcut: string) {
     return /(^|\+)(Win|Windows|Super|Meta)(\+|$)/i.test(shortcut);
 }
 
+// Strict accelerator validation. Previously any non-empty string was accepted
+// verbatim, so a typo like "Conreereretrol+Shift+V" silently became "Shift+V"
+// downstream (unknown tokens dropped), and pure garbage could register an
+// unusable hotkey and leave the app unopenable. Now: every token must be a
+// known modifier or exactly one known main key, else the WHOLE accelerator is
+// rejected and the default is used instead.
+const SHORTCUT_MODIFIERS: Record<string, string> = {
+    control: 'Control', ctrl: 'Control',
+    commandorcontrol: 'CommandOrControl', cmdorctrl: 'CommandOrControl',
+    alt: 'Alt', altgr: 'AltGr', option: 'Alt', shift: 'Shift',
+    super: 'Super', meta: 'Super', command: 'Super', cmd: 'Super',
+    win: 'Win', windows: 'Windows',
+};
+const SHORTCUT_NAMED_KEYS: Record<string, string> = {
+    space: 'Space', tab: 'Tab', backspace: 'Backspace',
+    delete: 'Delete', del: 'Delete', insert: 'Insert',
+    return: 'Return', enter: 'Enter', escape: 'Escape', esc: 'Esc',
+    up: 'Up', down: 'Down', left: 'Left', right: 'Right',
+    home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown',
+    plus: 'Plus',
+};
+
+/** Returns the canonical accelerator string, or null if anything is invalid. */
+function validateAccelerator(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const tokens = raw.split('+').map((t) => t.trim()).filter(Boolean);
+    if (tokens.length < 2 || tokens.length > 5) return null;
+
+    const mods: string[] = [];
+    let mainKey: string | null = null;
+    for (const token of tokens) {
+        const lower = token.toLowerCase();
+        const mod = SHORTCUT_MODIFIERS[lower];
+        if (mod) {
+            if (!mods.includes(mod)) mods.push(mod);
+            continue;
+        }
+        if (mainKey) return null; // more than one main key
+        if (/^[a-z0-9]$/i.test(token)) { mainKey = token.toUpperCase(); continue; }
+        if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(token)) { mainKey = token.toUpperCase(); continue; }
+        const named = SHORTCUT_NAMED_KEYS[lower];
+        if (named) { mainKey = named; continue; }
+        if (token.length === 1 && /^[`~!@#$%^&*()\-_=[\]{};':",./<>?\\|]$/.test(token)) { mainKey = token; continue; }
+        return null; // unknown token invalidates the whole accelerator
+    }
+    if (!mainKey || mods.length === 0) return null;
+    return [...mods, mainKey].join('+');
+}
+
 function sanitizeShortcut(shortcut: string) {
-    if (typeof shortcut !== 'string') return SAFE_SHORTCUT_FALLBACK;
-    const normalized = shortcut.trim();
-    return normalized.length > 0 ? normalized : SAFE_SHORTCUT_FALLBACK;
+    return validateAccelerator(shortcut) ?? SAFE_SHORTCUT_FALLBACK;
 }
 
 function setTemporaryClipboardItem(item: ClipboardHistoryItem | null) {
@@ -892,6 +938,134 @@ function writeSettingsSchemaFile() {
     }
 }
 
+// --- Corrupt-file quarantine + startup notices ------------------------------
+// Messages queued here are fetched once by the renderer after it mounts and
+// shown as toasts, so file recovery is never silent.
+const startupNotices: { type: 'info' | 'error'; message: string }[] = [];
+function pushStartupNotice(type: 'info' | 'error', message: string) {
+    startupNotices.push({ type, message });
+    console.log(`[main] startup notice (${type}): ${message}`);
+}
+
+const MAX_QUARANTINED_FILES = 10;
+function getQuarantineDir() {
+    return path.join(getAppDataPath(), 'corrupted');
+}
+/**
+ * Move a broken config file into <appData>/corrupted/, keeping at most
+ * MAX_QUARANTINED_FILES (oldest are deleted). Returns the new path or null.
+ */
+function quarantineCorruptFile(filePath: string): string | null {
+    try {
+        const dir = getQuarantineDir();
+        fs.mkdirSync(dir, { recursive: true });
+        const base = path.basename(filePath).replace(/\.json$/i, '');
+        const target = path.join(dir, `${base}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+        fs.renameSync(filePath, target);
+        // Prune oldest beyond the cap.
+        const entries = fs.readdirSync(dir)
+            .filter((f) => f.endsWith('.json'))
+            .map((f) => ({ f, mtime: fs.statSync(path.join(dir, f)).mtime.getTime() }))
+            .sort((a, b) => b.mtime - a.mtime);
+        entries.slice(MAX_QUARANTINED_FILES).forEach((e) => {
+            try { fs.unlinkSync(path.join(dir, e.f)); } catch { /* best-effort */ }
+        });
+        return target;
+    } catch (error) {
+        console.error('[main] Failed to quarantine corrupt file:', error);
+        return null;
+    }
+}
+
+function getSettingsLastGoodPath() {
+    return path.join(getAppDataPath(), 'clip-settings.last-good.json');
+}
+
+// Bounds mirror the JSON schema (getSettingsSchema). Numbers/booleans are
+// coerced or clamped ("soft" fixes); an invalid enum or non-object document
+// means the file wasn't produced by the app and is treated as corrupt.
+function normalizeSettingsDocument(raw: any): { settings: any; changed: boolean; corrupt: boolean; notes: string[] } {
+    const notes: string[] = [];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return { settings: null, changed: false, corrupt: true, notes: ['Settings file is not a settings object.'] };
+    }
+    const defaults = createDefaultSettingsDocument() as Record<string, any>;
+    const out: Record<string, any> = {};
+    let changed = false;
+    let corrupt = false;
+
+    const num = (key: string, min: number, max: number, integer = true) => {
+        const parsed = Number(raw[key]);
+        if (!Number.isFinite(parsed)) {
+            out[key] = defaults[key];
+            if (raw[key] !== undefined) { changed = true; notes.push(`"${key}" was not a number; reset to ${defaults[key]}.`); }
+            return;
+        }
+        const clamped = Math.min(max, Math.max(min, integer ? Math.floor(parsed) : parsed));
+        out[key] = clamped;
+        if (clamped !== parsed) { changed = true; notes.push(`"${key}" was out of range; corrected to ${clamped}.`); }
+    };
+    const bool = (key: string) => {
+        const v = raw[key];
+        out[key] = v === undefined ? defaults[key] : !!v;
+        if (v !== undefined && typeof v !== 'boolean') changed = true;
+    };
+    const oneOf = (key: string, allowed: string[]) => {
+        const v = raw[key];
+        if (v === undefined) { out[key] = defaults[key]; return; }
+        if (typeof v === 'string' && allowed.includes(v)) { out[key] = v; return; }
+        corrupt = true;
+        notes.push(`"${key}" has an invalid value (${JSON.stringify(v)}).`);
+        out[key] = defaults[key];
+    };
+
+    num('maxItems', 10, 500);
+    oneOf('windowHideBehavior', ['hide', 'tray']);
+    bool('showInTaskbar');
+    bool('enableBackups');
+    num('backupInterval', 60 * 1000, 24 * 60 * 60 * 1000);
+    num('maxBackups', 1, 50);
+    num('borderRadius', 0, 40);
+    num('transparency', 0.35, 1, false);
+    oneOf('theme', ['dark', 'light', 'system']);
+    bool('showNotifications');
+    bool('startWithSystem');
+    bool('storeImagesInClipboard');
+    bool('pinFavoriteItems');
+    bool('deleteConfirm');
+    num('windowWidth', WINDOW_SIZE_LIMITS.width.min, WINDOW_SIZE_LIMITS.width.max);
+    num('windowHeight', WINDOW_SIZE_LIMITS.height.min, WINDOW_SIZE_LIMITS.height.max);
+
+    // accentColor: keep only plausible CSS color strings.
+    const accent = raw.accentColor;
+    if (typeof accent === 'string' && /^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\)|[a-z]{3,30})$/i.test(accent.trim())) {
+        out.accentColor = accent.trim();
+    } else {
+        out.accentColor = defaults.accentColor;
+        if (accent !== undefined) { changed = true; notes.push('"accentColor" was not a valid color; reset to default.'); }
+    }
+
+    // globalShortcut: reject the whole accelerator if any token is unknown.
+    const validShortcut = validateAccelerator(raw.globalShortcut);
+    if (validShortcut) {
+        out.globalShortcut = validShortcut;
+        if (validShortcut !== raw.globalShortcut) changed = true;
+    } else {
+        out.globalShortcut = defaults.globalShortcut ?? SAFE_SHORTCUT_FALLBACK;
+        if (raw.globalShortcut !== undefined) {
+            changed = true;
+            notes.push(`"globalShortcut" (${JSON.stringify(raw.globalShortcut)}) is not a valid shortcut; reset to ${out.globalShortcut}.`);
+        }
+    }
+
+    // Drop unknown keys (schema is additionalProperties: false). $schema is re-added on write.
+    for (const key of Object.keys(raw)) {
+        if (key !== '$schema' && !(key in out)) { changed = true; notes.push(`Unknown setting "${key}" removed.`); }
+    }
+
+    return { settings: out, changed, corrupt, notes };
+}
+
 function readSettingsFromFile() {
     const settingsPath = getSettingsPath();
     if (!fs.existsSync(settingsPath)) return null;
@@ -901,14 +1075,8 @@ function readSettingsFromFile() {
     } catch (error) {
         console.error('[main] Failed to parse settings file; quarantining corrupt file.', error);
         // Quarantine the corrupt file before the caller writes fresh defaults so
-        // the user's (recoverable) data isn't silently overwritten. Mirrors the
-        // theme-config corrupt path (see readThemeConfigFromFile).
-        try {
-            const backupName = `clip-settings.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-            fs.renameSync(settingsPath, path.join(getAppDataPath(), backupName));
-        } catch (renameError) {
-            console.error('[main] Failed to quarantine corrupt settings file:', renameError);
-        }
+        // the user's (recoverable) data isn't silently overwritten.
+        quarantineCorruptFile(settingsPath);
         return null;
     }
 }
@@ -978,8 +1146,8 @@ function readThemeConfigFromFile() {
     } catch (error) {
         console.error('[main] Failed to parse theme file; trying DB restore.', error);
         try {
-            const backupName = `clip-theme.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-            fs.renameSync(themePath, path.join(getAppDataPath(), backupName));
+            quarantineCorruptFile(themePath);
+            pushStartupNotice('error', 'Your theme file was invalid and was moved to the "corrupted" folder; the last saved theme was restored.');
         } catch (renameError) {
             console.error('[main] Failed to quarantine corrupt theme file:', renameError);
         }
@@ -1156,31 +1324,68 @@ function sendPasteWithRetries(preferredHwnd: number | null, attempt = 1) {
     });
 }
 
-// Load settings from local storage (for startup behavior)
+function writeSettingsDocument(settings: any) {
+    const serialized = JSON.stringify({ $schema: getSettingsSchemaUri(), ...settings }, null, 2);
+    const settingsPath = getSettingsPath();
+    const tmpPath = `${settingsPath}.tmp`;
+    fs.writeFileSync(tmpPath, serialized, 'utf8');
+    fs.renameSync(tmpPath, settingsPath);
+    // Keep a last-known-good copy so a corrupt file can be recovered from the
+    // user's own settings instead of factory defaults.
+    try { fs.writeFileSync(getSettingsLastGoodPath(), serialized, 'utf8'); } catch { /* best-effort */ }
+}
+
+/** Read + validate settings, recovering via last-good -> defaults. */
+function loadValidatedSettings(): any {
+    const fileExisted = fs.existsSync(getSettingsPath());
+    const raw = readSettingsFromFile(); // parse failure quarantines + returns null
+    let recoveredFromParseFailure = fileExisted && raw === null;
+
+    if (raw !== null) {
+        const { settings, changed, corrupt, notes } = normalizeSettingsDocument(raw);
+        if (!corrupt) {
+            if (changed) {
+                pushStartupNotice('info', `Some settings were invalid and have been corrected: ${notes.join(' ')}`);
+            }
+            return settings;
+        }
+        // Semantically corrupt (bad enums / not an object): quarantine and recover.
+        quarantineCorruptFile(getSettingsPath());
+        recoveredFromParseFailure = true;
+        pushStartupNotice('error', `Your settings file was invalid (${notes.join(' ')}) and was moved to the "corrupted" folder.`);
+    }
+
+    if (recoveredFromParseFailure) {
+        // Try the last-known-good copy before falling back to defaults.
+        try {
+            if (fs.existsSync(getSettingsLastGoodPath())) {
+                const lastGood = JSON.parse(fs.readFileSync(getSettingsLastGoodPath(), 'utf8'));
+                const { settings, corrupt } = normalizeSettingsDocument(lastGood);
+                if (!corrupt) {
+                    pushStartupNotice('info', 'Settings were restored from the last good version.');
+                    return settings;
+                }
+            }
+        } catch (error) {
+            console.error('[main] Failed to read last-good settings:', error);
+        }
+        pushStartupNotice('error', 'Settings could not be recovered; defaults were restored.');
+    }
+
+    return createDefaultSettingsDocument();
+}
+
+// Load settings from the settings file (validated) for startup behavior
 function loadStartupSettings() {
     try {
         writeSettingsSchemaFile();
-
-        const settings = readSettingsFromFile();
-        if (settings) {
-            applySettingsRuntime(settings);
-            fs.writeFileSync(
-                getSettingsPath(),
-                JSON.stringify({ $schema: getSettingsSchemaUri(), ...settings }, null, 2),
-                'utf8'
-            );
-            return;
-        }
-
-        const fallbackSettings = createDefaultSettingsDocument();
-        fs.writeFileSync(
-            getSettingsPath(),
-            JSON.stringify({ $schema: getSettingsSchemaUri(), ...fallbackSettings }, null, 2),
-            'utf8'
-        );
-        applySettingsRuntime(fallbackSettings);
+        const settings = loadValidatedSettings();
+        applySettingsRuntime(settings);
+        // Write the normalized document back so the file always matches what
+        // the app actually uses (e.g. maxItems -33333 becomes 10 on disk too).
+        writeSettingsDocument(settings);
     } catch (error) {
-        console.log('[main] Could not load startup settings, using defaults');
+        console.log('[main] Could not load startup settings, using defaults', error);
     }
 }
 
@@ -1262,6 +1467,13 @@ function toggleItemPinned(id: number, pinned: boolean) {
     const result = db.prepare('UPDATE history SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0, id);
     invalidateHistoryCache();
     return result;
+}
+
+// Unpin every item (used when the pinning feature is turned off)
+function unpinAllItems(): number {
+    const result = db.prepare('UPDATE history SET pinned = 0 WHERE pinned = 1').run();
+    invalidateHistoryCache();
+    return Number(result.changes) || 0;
 }
 
 // Delete clipboard item by id
@@ -1541,6 +1753,17 @@ function createMainWindow() {
             ? devServerUrl
             : `file://${path.resolve(__dirname, '../renderer/index.html')}`
     );
+
+    // In dev, a dead Vite server must not leave a blank zombie process holding
+    // the database and single-instance lock: bail out instead.
+    if (process.env.NODE_ENV === 'development') {
+        mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+            if (url && url.startsWith(devServerUrl)) {
+                console.error(`[main] Dev server unreachable (${code} ${desc}); quitting instead of lingering.`);
+                app.exit(1);
+            }
+        });
+    }
 
     // Security: route window.open / target=_blank and any in-app navigation away
     // from arbitrary origins. External http(s) links open in the user's browser;
@@ -1965,6 +2188,11 @@ function restoreBackup(backupFile: string) {
         throw copyError;
     }
 
+    // Materialize the restored state into the main .db file right away and drop
+    // any cached pre-restore history, so nothing stale can be served or copied.
+    try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best-effort */ }
+    invalidateHistoryCache();
+
     // Reset the cursor + device id so the next sync re-reconciles from scratch
     // and this install registers as its own device — rather than hijacking the
     // backup's origin device.
@@ -2001,6 +2229,7 @@ ipcMain.handle('restore-backup', async (event, file) => {
     try {
         resolveBackupPath(file);
         restoreBackup(file);
+        invalidateHistoryCache();
 
         // Small delay to ensure database operations are complete
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -2113,6 +2342,13 @@ ipcMain.handle('import-db', async (event, buffer) => {
             db = null;
         }
 
+        // Same as restoreBackup: stale sidecars from the pre-import database
+        // must not be replayed over the imported file on reopen.
+        for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+            try { if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar); }
+            catch (sidecarError) { console.error(`[main] Failed to remove DB sidecar ${sidecar}:`, sidecarError); }
+        }
+
         // Write the imported database file
         fs.writeFileSync(dbPath, incoming);
 
@@ -2120,6 +2356,8 @@ ipcMain.handle('import-db', async (event, buffer) => {
         db = new Database(dbPath);
         db.pragma('journal_mode = WAL');
         ensureDatabaseSchema(db);
+        ensureSyncMapTable();
+        invalidateHistoryCache();
 
         // Small delay to ensure database operations are complete
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -2143,6 +2381,8 @@ ipcMain.handle('import-db', async (event, buffer) => {
                 db = new Database(dbPath);
                 db.pragma('journal_mode = WAL');
                 ensureDatabaseSchema(db);
+                ensureSyncMapTable();
+                invalidateHistoryCache();
                 console.log('[main] Database restored from backup after import failure');
             }
         } catch (restoreError) {
@@ -2158,14 +2398,43 @@ ipcMain.on('set-backup-settings', (_event, { enableBackups, backupInterval, maxB
     clipMaxBackups = maxBackups;
     setupAutoBackup();
 });
+
+// Persisted timestamp of the last automatic backup, so the schedule is based
+// on "time since the last backup" rather than "time since the timer was
+// (re)started" — previously every settings save reset the countdown, which is
+// why a 5-minute interval could take 7-8 minutes to produce a backup.
+function getLastAutoBackupAt(): number {
+    try {
+        const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get('last_auto_backup_at') as { value?: string } | undefined;
+        const n = Number(row?.value);
+        return Number.isFinite(n) ? n : 0;
+    } catch { return 0; }
+}
+function setLastAutoBackupAt(ts: number) {
+    try {
+        db.prepare('INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, ?)')
+            .run('last_auto_backup_at', String(ts), Date.now());
+    } catch { /* best-effort */ }
+}
 let backupTimer: NodeJS.Timeout | null = null;
 function setupAutoBackup() {
     if (backupTimer) clearInterval(backupTimer);
-    if (clipEnableBackups) {
-        backupTimer = setInterval(() => {
-            createBackup();
-        }, clipBackupInterval || 15 * 60 * 1000);
-    }
+    if (!clipEnableBackups) return;
+    // Check every 30 s whether a backup is due instead of one long interval:
+    // the countdown survives settings saves and app restarts.
+    backupTimer = setInterval(() => {
+        try {
+            if (!clipEnableBackups || !db) return;
+            const interval = clipBackupInterval || 15 * 60 * 1000;
+            const now = Date.now();
+            if (now - getLastAutoBackupAt() >= interval) {
+                setLastAutoBackupAt(now);
+                createBackup();
+            }
+        } catch (error) {
+            console.error('[main] Auto-backup tick failed:', error);
+        }
+    }, 30 * 1000);
 }
 setupAutoBackup();
 
@@ -2675,26 +2944,17 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('reload-settings-from-disk', () => {
-        // applySettingsRuntime() clamps the values that drive main-process state
-        // (window size, maxItems, shortcut). The raw parsed document is returned
-        // to the renderer unmodified; per-field clamping/normalization of the
-        // returned object is handled renderer-side. No dedicated settings
-        // normalizer exists here to reuse, so we intentionally don't add one.
-        const fromFile = readSettingsFromFile();
-        if (!fromFile) {
-            const fallback = createDefaultSettingsDocument();
-            applySettingsRuntime(fallback);
-            handleShortcutChangeQueued(backendShortcut);
-            return fallback;
-        }
-
-        applySettingsRuntime(fromFile);
-        if (Number.isFinite(Number(fromFile.maxItems))) {
-            maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(fromFile.maxItems))));
+        // Full validation on reload: hand-edited values are clamped/corrected
+        // (and written back normalized), never returned raw to the renderer.
+        const settings = loadValidatedSettings();
+        applySettingsRuntime(settings);
+        if (Number.isFinite(Number(settings.maxItems))) {
+            maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(settings.maxItems))));
             invalidateHistoryCache();
         }
+        try { writeSettingsDocument(settings); } catch { /* keep going with in-memory settings */ }
         handleShortcutChangeQueued(backendShortcut);
-        return fromFile;
+        return settings;
     });
 
     ipcMain.handle('create-theme-profile', (_event, profileName) => {
@@ -2854,6 +3114,13 @@ app.whenReady().then(() => {
         });
     });
 
+    ipcMain.handle('unpin-all-items', async (event) => {
+        const changed = unpinAllItems();
+        const history = await getClipboardHistoryAsync();
+        event.sender.send('clipboard-history', history);
+        return changed;
+    });
+
     ipcMain.on('delete-clipboard-item', (event, id) => {
         const row = db.prepare('SELECT type, content FROM history WHERE id = ?').get(id) as { type: string; content: string } | undefined;
         deleteClipboardItem(id);
@@ -2976,6 +3243,17 @@ app.whenReady().then(() => {
             try { globalShortcut.unregisterAll(); } catch { }
             try { if (tray) { tray.destroy(); tray = null; } } catch { }
             stopAhk();
+            const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+            if (isDev) {
+                // app.relaunch() is broken under `npm run dev`: this process
+                // exiting makes concurrently kill the Vite server, so the
+                // relaunched instance loads a dead URL and lingers as a blank
+                // zombie that still holds the database and single-instance
+                // lock. Just quit; the dev script is restarted by hand.
+                console.log('[main] Dev mode: skipping relaunch, quitting for manual restart');
+                app.exit(0);
+                return;
+            }
             // No need to close the main window explicitly, app.relaunch will handle it.
             app.relaunch();
             app.exit(0); // Exit cleanly
@@ -2984,28 +3262,38 @@ app.whenReady().then(() => {
 
     ipcMain.on('save-settings-to-file', (_event, settings) => {
         try {
-            applySettingsRuntime(settings);
-            if (settings && Number.isFinite(Number(settings.maxItems))) {
-                maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(settings.maxItems))));
+            // Normalize before anything touches disk or runtime, so out-of-range
+            // or malformed values can never round-trip through the file.
+            const { settings: normalized } = normalizeSettingsDocument(settings || {});
+            applySettingsRuntime(normalized);
+            if (Number.isFinite(Number(normalized.maxItems))) {
+                maxHistoryItems = Math.min(500, Math.max(10, Math.floor(Number(normalized.maxItems))));
                 invalidateHistoryCache();
             }
-            const nextSettings = {
-                $schema: getSettingsSchemaUri(),
-                ...(settings || {}),
-            };
-            // JSON.stringify throws on invalid/circular input (caught below), so a
-            // malformed renderer object never reaches disk. Write to a temp file
-            // then rename over the target so a crash mid-write can't leave a
-            // truncated/corrupt settings file.
-            const settingsPath = getSettingsPath();
-            const serialized = JSON.stringify(nextSettings, null, 2);
-            const tmpPath = `${settingsPath}.tmp`;
-            fs.writeFileSync(tmpPath, serialized, 'utf8');
-            fs.renameSync(tmpPath, settingsPath);
+            // writeSettingsDocument is atomic (tmp file + rename) and refreshes
+            // the last-known-good copy used for corrupt-file recovery.
+            writeSettingsDocument(normalized);
             handleShortcutChangeQueued(backendShortcut);
         } catch (error) {
             console.error('[main] Failed to save settings to file:', error);
         }
+    });
+
+    // Validated settings for the renderer's boot sequence: the file (not the
+    // renderer's localStorage cache) is the source of truth after a relaunch.
+    ipcMain.handle('get-settings', () => {
+        try {
+            return loadValidatedSettings();
+        } catch (error) {
+            console.error('[main] get-settings failed:', error);
+            return createDefaultSettingsDocument();
+        }
+    });
+
+    // One-shot delivery of recovery/validation notices collected during boot.
+    ipcMain.handle('get-startup-notices', () => {
+        const notices = startupNotices.splice(0, startupNotices.length);
+        return notices;
     });
 });
 
@@ -3022,4 +3310,15 @@ app.on('before-quit', () => {
         clipboardPollTimer = null;
     }
     stopAhk(); // Ensure AHK process is terminated when quitting the app
+    // Checkpoint + close the DB so the main .db file is complete on disk at
+    // exit (not split across a -wal sidecar) and no handle lingers.
+    try {
+        if (db) {
+            db.pragma('wal_checkpoint(TRUNCATE)');
+            db.close();
+            db = null;
+        }
+    } catch (error) {
+        console.error('[main] Failed to close database on quit:', error);
+    }
 });

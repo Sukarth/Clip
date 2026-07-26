@@ -56,6 +56,9 @@ interface ElectronAPI {
     getSettingsPaths: () => Promise<{ configPath: string; schemaPath: string }>;
     openSettingsConfigFile: () => Promise<{ ok: boolean; error?: string; path?: string }>;
     reloadSettingsFromDisk: () => Promise<any>;
+    getSettings: () => Promise<any>;
+    getStartupNotices: () => Promise<{ type: 'info' | 'error'; message: string }[]>;
+    unpinAllItems: () => Promise<number>;
     createThemeProfile: (profileName: string) => Promise<ThemeConfig>;
     deleteThemeProfile: (profileKey: string) => Promise<ThemeConfig>;
     setActiveThemeProfile: (profileKey: string) => Promise<ThemeConfig>;
