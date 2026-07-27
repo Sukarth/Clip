@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     auth: {
         getState: () => ipcRenderer.invoke('auth:get-state'),
         login: () => ipcRenderer.invoke('auth:login'),
+        cancelLogin: () => ipcRenderer.invoke('auth:cancel-login'),
         logout: () => ipcRenderer.invoke('auth:logout'),
         onChanged: (callback) => {
             const listener = (_event, state) => callback(state);

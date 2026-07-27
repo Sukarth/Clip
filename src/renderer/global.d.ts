@@ -74,6 +74,7 @@ interface ElectronAPI {
     auth: {
         getState: () => Promise<AuthState>;
         login: () => Promise<AuthState>;
+        cancelLogin: () => Promise<boolean>;
         logout: () => Promise<AuthState>;
         onChanged: (callback: (state: AuthState) => void) => (() => void) | void;
     };
@@ -112,6 +113,8 @@ interface SyncStatusView {
     lastSync: number | null;
     lastError: string | null;
     syncing: boolean;
+    /** Device-registration problem (e.g. device limit reached). Not Pro-gated. */
+    deviceError: string | null;
     usage?: SyncUsageView | null;
 }
 

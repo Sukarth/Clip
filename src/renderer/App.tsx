@@ -248,13 +248,23 @@ const App: React.FC = () => {
 
     // Cloud sync state
     const [syncStatus, setSyncStatus] = useState<SyncStatusView | null>(null);
+    // Device registration isn't Pro-gated, so its errors (e.g. hitting the device
+    // limit) have to be shown to free users too — hence separate from syncStatus,
+    // which stays null for non-Pro so no sync UI can read stale values from it.
+    const [deviceError, setDeviceError] = useState<string | null>(null);
+    const accountRef = useRef(account);
+    useEffect(() => { accountRef.current = account; }, [account]);
     const [syncModal, setSyncModal] = useState<{ open: boolean; mode: 'enter' | 'reset'; busy: boolean; error: string | null }>({ open: false, mode: 'enter', busy: false, error: null });
     const refreshSync = useCallback(async () => {
-        try { setSyncStatus(await window.electronAPI.sync.getStatus()); } catch { /* ignore */ }
+        try {
+            const status = await window.electronAPI.sync.getStatus();
+            setDeviceError(status.deviceError ?? null);
+            setSyncStatus(accountRef.current.isPro ? status : null);
+        } catch { /* ignore */ }
     }, []);
     useEffect(() => {
-        if (account.loggedIn && account.isPro) void refreshSync();
-        else setSyncStatus(null);
+        if (account.loggedIn) void refreshSync();
+        else { setSyncStatus(null); setDeviceError(null); }
     }, [account.loggedIn, account.isPro, refreshSync]);
 
     const openPassphrase = (mode: 'enter' | 'reset') => setSyncModal({ open: true, mode, busy: false, error: null });
@@ -307,6 +317,15 @@ const App: React.FC = () => {
             showToast('error', `Sync failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     };
+
+    // Background syncs run on their own 20s timer in the main process, so an open
+    // Profile tab would otherwise show a frozen "Synced HH:MM", usage figure and
+    // syncing flag until the user pressed a button. Poll while it's on screen.
+    useEffect(() => {
+        if (!showSettings || activeSettingsSection !== 'Profile' || !account.loggedIn) return;
+        const id = setInterval(() => { void refreshSync(); }, 5000);
+        return () => clearInterval(id);
+    }, [showSettings, activeSettingsSection, account.loggedIn, refreshSync]);
 
     // Cloud backups
     const [cloudBackups, setCloudBackups] = useState<CloudBackupView[]>([]);
@@ -1599,6 +1618,13 @@ const App: React.FC = () => {
                             )}
                         </div>
 
+                        {account.loggedIn && deviceError && (
+                            <div className="bg-surface-container-low p-3 rounded-xl flex items-start gap-2">
+                                <span className="material-symbols-outlined text-sm" style={{ color: '#e0a458' }}>warning</span>
+                                <p className="text-[11px] text-on-surface-variant">{deviceError}</p>
+                            </div>
+                        )}
+
                         <div className="bg-surface-container-low p-4 rounded-xl space-y-3">
                             <div className="flex items-center gap-2 mb-1">
                                 <span className="material-symbols-outlined text-primary text-sm">sync</span>
@@ -1629,22 +1655,29 @@ const App: React.FC = () => {
                                     <p className="text-xs text-on-surface-variant text-center">Sign in to enable cloud sync</p>
                                     <button
                                         type="button"
-                                        disabled={authBusy}
                                         onClick={async () => {
+                                            // While a sign-in is pending the same button cancels it,
+                                            // so a browser closed mid-flow doesn't strand the user
+                                            // on "Opening browser…" for the full 5-minute timeout.
+                                            if (authBusy) {
+                                                void window.electronAPI.auth.cancelLogin?.();
+                                                return;
+                                            }
                                             setAuthBusy(true);
                                             try {
                                                 const s = await window.electronAPI.auth.login();
                                                 setAccount(s);
                                                 showToast('success', `Signed in as ${s.email ?? 'your account'}.`);
                                             } catch (e) {
-                                                showToast('error', e instanceof Error ? e.message : 'Sign-in failed.');
+                                                const message = e instanceof Error ? e.message : 'Sign-in failed.';
+                                                showToast(message === 'Sign-in cancelled.' ? 'info' : 'error', message);
                                             } finally {
                                                 setAuthBusy(false);
                                             }
                                         }}
-                                        className="w-full mt-2 py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold hover:brightness-110 transition-all border-0 disabled:opacity-60"
+                                        className="w-full mt-2 py-2 px-3 bg-primary-container text-on-primary rounded-lg text-xs font-semibold hover:brightness-110 transition-all border-0"
                                     >
-                                        {authBusy ? 'Opening browser…' : 'Sign In'}
+                                        {authBusy ? 'Opening browser… (cancel)' : 'Sign In'}
                                     </button>
                                 </div>
                             )}

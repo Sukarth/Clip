@@ -62,6 +62,7 @@ let windowHeight: number = WINDOW_SIZE_LIMITS.height.default;
 let cachedAppDataPath: string | null = null;
 let activeThemeConfig = createDefaultThemeConfig();
 let suppressBlurHideUntil = 0;
+let profileRefreshTimer: NodeJS.Timeout | null = null;
 
 // --- PERFORMANCE OPTIMIZATIONS: Data Caching ---
 let cachedClipboardHistory: any[] = [];
@@ -2237,6 +2238,16 @@ function restoreBackup(backupFile: string) {
     // and this install registers as its own device — rather than hijacking the
     // backup's origin device.
     setAppState('sync_cursor', '');
+    // Drop the restored sync_map too. It is the *source* device's shadow state
+    // (content hash -> server client_id + version). Keeping it would make this
+    // install claim another device's client ids and push diffs against versions
+    // it never wrote, producing stale-version rejections and ghost clips. An
+    // empty map plus an empty cursor means the next sync rebuilds honestly.
+    try {
+        db.prepare('DELETE FROM sync_map').run();
+    } catch (error) {
+        console.error('[main] Failed to clear sync_map after restore:', error);
+    }
     // We intentionally do NOT deregister the previous device on the server here:
     // this is a synchronous restore path and deregistration requires a network
     // round-trip. The orphaned remote "device" row ages out via the server-side
@@ -2773,7 +2784,7 @@ app.whenReady().then(() => {
     // keep it fresh — independent of Pro / cloud sync. Also poll the profile so
     // name / avatar / plan changes made on the website show up without a restart.
     cloudSync.startDeviceHeartbeat();
-    setInterval(() => { void cloudAuth.refreshProfile(); }, 90 * 1000);
+    profileRefreshTimer = setInterval(() => { void cloudAuth.refreshProfile(); }, 90 * 1000);
 
     // Handle startup behavior based on command line arguments and settings
     const isStartHidden = process.argv.includes('--start-hidden') || process.argv.includes('--hidden');
@@ -2813,6 +2824,7 @@ app.whenReady().then(() => {
         cloudSync.startDeviceHeartbeat(); // registers this device immediately
         return state;
     });
+    ipcMain.handle('auth:cancel-login', () => cloudAuth.cancelLogin());
     ipcMain.handle('auth:logout', async () => {
         cloudSync.stopAutoSync();
         cloudSync.stopDeviceHeartbeat();
@@ -3452,6 +3464,20 @@ app.on('before-quit', () => {
         clearInterval(clipboardPollTimer);
         clipboardPollTimer = null;
     }
+
+    // Quitting means "this device went offline", NOT "sign this device out".
+    // Stop the cloud timers so no request is in flight while we tear down the
+    // DB, but deliberately leave the session, the sync key and the server-side
+    // device row intact — the account page infers offline from a stale
+    // last_seen_at once the heartbeat stops. Only an explicit sign-out (or a
+    // remote removal) deregisters.
+    try { cloudSync.stopAutoSync(); } catch { /* best-effort */ }
+    try { cloudSync.stopDeviceHeartbeat(); } catch { /* best-effort */ }
+    if (profileRefreshTimer) {
+        clearInterval(profileRefreshTimer);
+        profileRefreshTimer = null;
+    }
+
     stopAhk(); // Ensure AHK process is terminated when quitting the app
     // Checkpoint + close the DB so the main .db file is complete on disk at
     // exit (not split across a -wal sidecar) and no handle lingers.

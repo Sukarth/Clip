@@ -29,6 +29,15 @@ let activeServer: http.Server | null = null;
 // rejected before it can spawn another loopback server. activeServer alone can't
 // guard this: it's only assigned inside the async listen() callback.
 let loginInProgress = false;
+// Set while a login is pending so cancelLogin() can settle it from outside.
+let cancelActiveLogin: (() => void) | null = null;
+
+/** Abandon a pending sign-in. No-op when none is running. */
+export function cancelLogin(): boolean {
+    if (!cancelActiveLogin) return false;
+    cancelActiveLogin();
+    return true;
+}
 
 const LOGGED_OUT: AuthState = {
     loggedIn: false,
@@ -299,6 +308,7 @@ export function login(): Promise<AuthState> {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            cancelActiveLogin = null;
             try {
                 server.close();
             } catch {
@@ -308,6 +318,11 @@ export function login(): Promise<AuthState> {
             loginInProgress = false;
             fn();
         };
+
+        // Lets the UI abandon a sign-in that will never complete (browser closed,
+        // stuck on the site, wrong account) without waiting out the timeout.
+        cancelActiveLogin = () =>
+            finish(() => reject(new Error('Sign-in cancelled.')));
 
         const server = http.createServer((req, res) => {
             const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -327,6 +342,12 @@ export function login(): Promise<AuthState> {
                 req.on('end', () => {
                     const params = new URLSearchParams(body);
                     if (params.get('state') !== state) {
+                        // Deliberately does NOT settle the promise. A stale tab
+                        // from an earlier, timed-out attempt can deliver to a
+                        // port the OS has since handed back to us; letting that
+                        // (or any local probe) cancel a live sign-in would be
+                        // worse than ignoring it. The user can cancel explicitly.
+                        console.warn('[auth] ignoring /deliver with mismatched state');
                         res.writeHead(400);
                         res.end('bad state');
                         return;
@@ -341,8 +362,14 @@ export function login(): Promise<AuthState> {
                         (decodeJwt(accessToken)?.email as string) ??
                         (params.get('email') ?? '');
                     if (!accessToken || !refreshToken) {
+                        // The state matched, so this really is our handoff — it
+                        // just arrived broken. Fail now instead of leaving the
+                        // caller waiting out the five-minute timeout.
                         res.writeHead(400);
                         res.end('missing tokens');
+                        finish(() =>
+                            reject(new Error('Sign-in did not return a session. Please try again.'))
+                        );
                         return;
                     }
                     const newSession: StoredSession = {

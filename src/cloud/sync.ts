@@ -61,6 +61,8 @@ export interface SyncStatus {
     lastSync: number | null;
     lastError: string | null;
     syncing: boolean;
+    /** Device-registration problem (e.g. device limit reached). Not sync-specific. */
+    deviceError: string | null;
 }
 
 const MAX_CLIP_BYTES = 1024 * 1024;
@@ -75,6 +77,10 @@ let keyVerified = false;
 let syncing = false;
 let lastSync: number | null = null;
 let lastError: string | null = null;
+// Kept separate from lastError: device registration is not Pro-gated and runs
+// even with sync off, so its failures must survive a sync cycle overwriting
+// lastError (and must be showable to free users).
+let deviceError: string | null = null;
 let autoTimer: NodeJS.Timeout | null = null;
 
 export function initSync(h: SyncHost): void {
@@ -108,7 +114,7 @@ export function isUnlocked(): boolean {
 }
 
 export function getStatus(): SyncStatus {
-    return { enabled: isEnabled(), unlocked: isUnlocked(), lastSync, lastError, syncing };
+    return { enabled: isEnabled(), unlocked: isUnlocked(), lastSync, lastError, syncing, deviceError };
 }
 
 export function lock(): void {
@@ -272,7 +278,21 @@ export async function registerDevice(): Promise<{ ok: boolean; removed?: boolean
     } catch {
         return { ok: false };
     }
-    if (!res || !res.ok) return { ok: false };
+    if (!res) return { ok: false };
+    if (!res.ok) {
+        // A rejected registration used to be silent, so hitting the device cap
+        // looked like "my app just never appears in the devices list". Keep the
+        // server's message so the UI can tell the user what to do about it.
+        if (res.status === 409 || res.status === 429) {
+            const body = (await res.json().catch(() => ({}))) as { error?: string };
+            deviceError = body.error
+                || 'This device could not be registered. Please try again later.';
+        } else if (res.status !== 401 && res.status !== 402) {
+            deviceError = null;
+        }
+        return { ok: false };
+    }
+    deviceError = null;
     const d = (await res.json().catch(() => ({}))) as { deviceId?: string; removed?: boolean };
     if (d.removed) {
         // This device was signed out from the web — stand down locally.
@@ -348,6 +368,7 @@ export function resetLocalSyncState(): void {
     host.setState('sync_last_sync', '');
     lastSync = null;
     lastError = null;
+    deviceError = null;
 }
 
 // --- Push -------------------------------------------------------------------
