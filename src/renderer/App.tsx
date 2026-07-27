@@ -900,53 +900,61 @@ const App: React.FC = () => {
         window.electronAPI?.setStartWithSystem?.(settings.startWithSystem);
     }, [settings.startWithSystem]);
 
-    // Export/import settings logic
-    const handleExportSettings = () => {
+    // Export/import settings logic. The file pickers are opened by the main
+    // process (parented to this window) so the clipboard doesn't hide-on-blur
+    // the moment the native dialog takes focus.
+    const JSON_FILE_FILTERS = [{ name: 'JSON', extensions: ['json'] }];
+
+    const handleExportSettings = async () => {
         // theme/accentColor/borderRadius/transparency are in-memory mirrors of
         // the theme config (clip-theme.json), not part of the settings file.
         const { theme, accentColor, borderRadius, transparency, ...persistedSettings } = settings;
         void theme; void accentColor; void borderRadius; void transparency;
-        const data = JSON.stringify(persistedSettings, null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'clip-settings.json';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast('success', 'Settings exported successfully');
-    }; const handleImportSettings = () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json,application/json';
-        input.onchange = (e: any) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (ev: any) => {
-                try {
-                    const imported = JSON.parse(ev.target.result);
-                    if (imported && typeof imported === 'object') {
-                        // Older exports may still carry theme mirror keys; those
-                        // belong to clip-theme.json and must not override the
-                        // live theme-derived values.
-                        for (const legacyKey of ['theme', 'accentColor', 'borderRadius', 'transparency']) {
-                            delete imported[legacyKey];
-                        }
-                        const nextSettings = { ...settingsRef.current, ...imported } as Settings;
-                        setSettingsDraft(nextSettings);
-                        showToast('success', 'Settings imported successfully');
-                    } else {
-                        showToast('error', 'Invalid settings file format');
-                    }
-                } catch (error) {
-                    showToast('error', `Failed to parse settings file: ${error instanceof Error ? error.message : 'Unknown error'}`);
-                }
-            };
-            reader.readAsText(file);
-        };
-        input.click();
-    };    // Settings modal logic
+        try {
+            const result = await window.electronAPI?.exportFileDialog?.({
+                data: JSON.stringify(persistedSettings, null, 2),
+                defaultName: 'clip-settings.json',
+                filters: JSON_FILE_FILTERS,
+            });
+            if (!result || result.canceled) return;
+            if (result.ok) {
+                showToast('success', 'Settings exported successfully');
+            } else {
+                showToast('error', `Export failed: ${result.error ?? 'Unknown error'}`);
+            }
+        } catch (error) {
+            showToast('error', `Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    };
+
+    const handleImportSettings = async () => {
+        try {
+            const result = await window.electronAPI?.importFileDialog?.({ filters: JSON_FILE_FILTERS });
+            if (!result || result.canceled) return;
+            if (!result.ok || !result.data) {
+                showToast('error', `Import failed: ${result.error ?? 'Unknown error'}`);
+                return;
+            }
+
+            const imported = JSON.parse(new TextDecoder().decode(new Uint8Array(result.data)));
+            if (!imported || typeof imported !== 'object' || Array.isArray(imported)) {
+                showToast('error', 'Invalid settings file format');
+                return;
+            }
+
+            // Older exports may still carry theme mirror keys; those belong to
+            // clip-theme.json and must not override the live theme values.
+            for (const legacyKey of ['theme', 'accentColor', 'borderRadius', 'transparency']) {
+                delete imported[legacyKey];
+            }
+            setSettingsDraft({ ...settingsRef.current, ...imported } as Settings);
+            showToast('success', 'Settings imported successfully');
+        } catch (error) {
+            showToast('error', `Failed to parse settings file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    };
+
+    // Settings modal logic
     const openSettings = () => {
         setSettingsDraftState(settings);
         setThemeEditorConfig(themeConfig);

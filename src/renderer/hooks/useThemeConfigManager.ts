@@ -275,14 +275,19 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
         try {
             const text = await window.electronAPI?.exportThemeConfig?.();
             if (!text) return;
-            const blob = new Blob([text], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'clip-theme.json';
-            a.click();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-            showToast('success', 'Theme JSON exported.');
+            // Main-process save dialog: a renderer-side download would blur the
+            // window and trigger hide-on-blur.
+            const result = await window.electronAPI?.exportFileDialog?.({
+                data: text,
+                defaultName: 'clip-theme.json',
+                filters: [{ name: 'JSON', extensions: ['json'] }],
+            });
+            if (!result || result.canceled) return;
+            if (result.ok) {
+                showToast('success', 'Theme JSON exported.');
+            } else {
+                showToast('error', `Failed to export theme JSON: ${result.error ?? 'Unknown error'}`);
+            }
         } catch (error) {
             showToast('error', `Failed to export theme JSON: ${error instanceof Error ? error.message : String(error)}`);
         }

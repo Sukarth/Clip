@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification, screen, shell, safeStorage } from 'electron';
+import { app, BrowserWindow, globalShortcut, clipboard, nativeImage, ipcMain, Tray, Menu, Notification, screen, shell, safeStorage, dialog } from 'electron';
 import * as path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -1200,8 +1200,24 @@ function suppressBlurHide(ms: number) {
     suppressBlurHideUntil = Math.max(suppressBlurHideUntil, Date.now() + ms);
 }
 
+// Native file dialogs (save/open pickers) steal focus from the main window for
+// an unbounded time, so hide-on-blur must stay suppressed while any dialog is
+// open — a fixed timeout can't cover that. The short tail after close covers
+// the focus hand-back to the window.
+let nativeDialogDepth = 0;
+
+async function withNativeDialog<T>(fn: () => Promise<T>): Promise<T> {
+    nativeDialogDepth++;
+    try {
+        return await fn();
+    } finally {
+        nativeDialogDepth--;
+        suppressBlurHide(400);
+    }
+}
+
 function isBlurHideSuppressed() {
-    return Date.now() < suppressBlurHideUntil;
+    return nativeDialogDepth > 0 || Date.now() < suppressBlurHideUntil;
 }
 
 function hideMainWindowImmediate() {
@@ -2296,14 +2312,9 @@ ipcMain.handle('delete-multiple-backups', (event, files) => {
         return 0;
     }
 });
-ipcMain.handle('export-db', () => {
-    const dbPath = getDatabasePath();
-    return fs.readFileSync(dbPath);
-});
-ipcMain.handle('import-db', async (event, buffer) => {
+async function importDatabaseFromBuffer(incoming: Buffer): Promise<boolean> {
     const dbPath = getDatabasePath();
     const backupPath = `${dbPath}.bak`;
-    const incoming = Buffer.from(buffer);
 
     if (!isSqliteBuffer(incoming)) {
         console.error('[main] import-db rejected: incoming file is not a valid SQLite database');
@@ -2373,7 +2384,111 @@ ipcMain.handle('import-db', async (event, buffer) => {
 
         return false;
     }
+}
+
+function getDialogParent(): BrowserWindow | undefined {
+    return mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+}
+
+function sanitizeDialogFilters(raw: any): Electron.FileFilter[] | undefined {
+    if (!Array.isArray(raw)) return undefined;
+    const filters = raw.filter((f) =>
+        f && typeof f.name === 'string'
+        && Array.isArray(f.extensions)
+        && f.extensions.every((e: any) => typeof e === 'string'));
+    return filters.length ? filters : undefined;
+}
+
+// File pickers run in the main process, parented to the window, so hide-on-blur
+// stays suppressed (via withNativeDialog) instead of hiding the clipboard the
+// moment the picker takes focus.
+ipcMain.handle('dialog-export-file', async (_event, options) => {
+    const data = options?.data;
+    if (typeof data !== 'string' && !(data instanceof Uint8Array) && !(data instanceof ArrayBuffer)) {
+        return { ok: false, error: 'No data to export' };
+    }
+    const saveOptions: Electron.SaveDialogOptions = {
+        defaultPath: typeof options?.defaultName === 'string' ? options.defaultName : 'export.json',
+        filters: sanitizeDialogFilters(options?.filters),
+    };
+    const parent = getDialogParent();
+    const result = await withNativeDialog(() =>
+        (parent ? dialog.showSaveDialog(parent, saveOptions) : dialog.showSaveDialog(saveOptions)));
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    try {
+        const buffer = typeof data === 'string'
+            ? Buffer.from(data, 'utf8')
+            : Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+        fs.writeFileSync(result.filePath, buffer);
+        return { ok: true, path: result.filePath };
+    } catch (error) {
+        console.error('[main] dialog-export-file failed:', error);
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
 });
+
+ipcMain.handle('dialog-import-file', async (_event, options) => {
+    const openOptions: Electron.OpenDialogOptions = {
+        properties: ['openFile'],
+        filters: sanitizeDialogFilters(options?.filters),
+    };
+    const parent = getDialogParent();
+    const result = await withNativeDialog(() =>
+        (parent ? dialog.showOpenDialog(parent, openOptions) : dialog.showOpenDialog(openOptions)));
+    if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true };
+    const filePath = result.filePaths[0];
+    try {
+        return { ok: true, name: path.basename(filePath), data: fs.readFileSync(filePath) };
+    } catch (error) {
+        console.error('[main] dialog-import-file failed:', error);
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+});
+
+ipcMain.handle('dialog-export-db', async () => {
+    const saveOptions: Electron.SaveDialogOptions = {
+        defaultPath: `clip-backup-${new Date().toISOString().substring(0, 10)}.db`,
+        filters: [{ name: 'SQLite Database', extensions: ['db'] }],
+    };
+    const parent = getDialogParent();
+    const result = await withNativeDialog(() =>
+        (parent ? dialog.showSaveDialog(parent, saveOptions) : dialog.showSaveDialog(saveOptions)));
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    try {
+        // Flush the WAL first so the exported file contains every clip; the raw
+        // db file on disk can lag behind by everything still in the -wal.
+        try {
+            if (db) db.pragma('wal_checkpoint(TRUNCATE)');
+        } catch (checkpointError) {
+            console.error('[main] WAL checkpoint before export failed:', checkpointError);
+        }
+        fs.copyFileSync(getDatabasePath(), result.filePath);
+        return { ok: true, path: result.filePath };
+    } catch (error) {
+        console.error('[main] dialog-export-db failed:', error);
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+});
+
+ipcMain.handle('dialog-import-db', async () => {
+    const openOptions: Electron.OpenDialogOptions = {
+        properties: ['openFile'],
+        filters: [{ name: 'SQLite Database', extensions: ['db'] }],
+    };
+    const parent = getDialogParent();
+    const result = await withNativeDialog(() =>
+        (parent ? dialog.showOpenDialog(parent, openOptions) : dialog.showOpenDialog(openOptions)));
+    if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true };
+    try {
+        const incoming = fs.readFileSync(result.filePaths[0]);
+        const success = await importDatabaseFromBuffer(incoming);
+        return { ok: success, error: success ? undefined : 'The selected file is not a valid Clip database' };
+    } catch (error) {
+        console.error('[main] dialog-import-db failed:', error);
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+});
+
 ipcMain.on('set-backup-settings', (_event, { enableBackups, backupInterval, maxBackups }) => {
     clipEnableBackups = enableBackups;
     clipBackupInterval = backupInterval;
@@ -2880,6 +2995,9 @@ app.whenReady().then(() => {
                 persistThemeConfig(activeThemeConfig);
             }
 
+            // The external editor takes focus; don't let that hide the window
+            // and throw away the open settings modal.
+            suppressBlurHide(2000);
             const error = await shell.openPath(configPath);
             if (error) {
                 return { ok: false, error, path: configPath };
@@ -2910,6 +3028,7 @@ app.whenReady().then(() => {
                 fs.writeFileSync(configPath, JSON.stringify(doc, null, 2), 'utf8');
             }
 
+            suppressBlurHide(2000);
             const error = await shell.openPath(configPath);
             if (error) {
                 return { ok: false, error, path: configPath };

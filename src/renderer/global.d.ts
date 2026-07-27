@@ -32,8 +32,16 @@ interface ElectronAPI {
     deleteBackup: (file: string) => Promise<boolean>;
     renameBackup: (file: string, newLabel: string) => Promise<{ ok: boolean; file?: string; error?: string }>;
     deleteMultipleBackups: (files: string[]) => Promise<number>;
-    exportDb: () => Promise<Uint8Array>;
-    importDb: (buffer: ArrayBuffer) => Promise<boolean>;
+    exportFileDialog: (options: {
+        data: string | Uint8Array;
+        defaultName: string;
+        filters?: { name: string; extensions: string[] }[];
+    }) => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
+    importFileDialog: (options?: {
+        filters?: { name: string; extensions: string[] }[];
+    }) => Promise<{ ok: boolean; canceled?: boolean; name?: string; data?: Uint8Array; error?: string }>;
+    exportDbDialog: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
+    importDbDialog: () => Promise<{ ok: boolean; canceled?: boolean; error?: string }>;
     deleteClipboardItem: (id: number) => void;
     trimClipboardItems: (maxItems: number) => Promise<boolean>;
     onForceRefresh: (callback: () => void) => (() => void) | void;

@@ -32,8 +32,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteBackup: (file) => ipcRenderer.invoke('delete-backup', file),
     renameBackup: (file, newLabel) => ipcRenderer.invoke('rename-backup', file, newLabel),
     deleteMultipleBackups: (files) => ipcRenderer.invoke('delete-multiple-backups', files),
-    exportDb: () => ipcRenderer.invoke('export-db'),
-    importDb: (buffer) => ipcRenderer.invoke('import-db', buffer),
+    exportFileDialog: (options) => ipcRenderer.invoke('dialog-export-file', options),
+    importFileDialog: (options) => ipcRenderer.invoke('dialog-import-file', options),
+    exportDbDialog: () => ipcRenderer.invoke('dialog-export-db'),
+    importDbDialog: () => ipcRenderer.invoke('dialog-import-db'),
     deleteClipboardItem: (id) => ipcRenderer.send('delete-clipboard-item', id),
     trimClipboardItems: (maxItems) => ipcRenderer.invoke('trim-clipboard-items', maxItems),
     onForceRefresh: (callback) => {

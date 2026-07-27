@@ -67,18 +67,12 @@ const SettingsDataSection: React.FC<SettingsDataSectionProps> = ({
 
                 <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={async () => {
                     try {
-                        const data = await window.electronAPI?.exportDb?.();
-                        if (data) {
-                            const bytes = new Uint8Array(data.byteLength);
-                            bytes.set(data);
-                            const blob = new Blob([bytes.buffer], { type: 'application/octet-stream' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = `clip-backup-${new Date().toISOString().substring(0, 10)}.db`;
-                            a.click();
-                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                        const result = await window.electronAPI?.exportDbDialog?.();
+                        if (!result || result.canceled) return;
+                        if (result.ok) {
                             showToast('success', 'Database exported successfully');
+                        } else {
+                            showToast('error', `Export failed: ${result.error ?? 'Unknown error'}`);
                         }
                     } catch (error) {
                         logger.error('Export error', error instanceof Error ? error.message : String(error));
@@ -92,27 +86,19 @@ const SettingsDataSection: React.FC<SettingsDataSectionProps> = ({
                     <span className="material-symbols-outlined text-on-surface-variant text-base group-hover:translate-x-1 transition-transform">chevron_right</span>
                 </button>
 
-                <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = '.db,application/octet-stream';
-                    input.onchange = async (ev: any) => {
-                        const file = ev.target.files[0];
-                        if (!file) return;
-                        try {
-                            const buffer = await file.arrayBuffer();
-                            const success = await window.electronAPI?.importDb?.(buffer);
-                            if (success) {
-                                showToast('success', 'Database imported successfully!');
-                            } else {
-                                showToast('error', 'Failed to import database');
-                            }
-                        } catch (error) {
-                            logger.error('Import error', error instanceof Error ? error.message : String(error));
-                            showToast('error', 'Import failed');
+                <button className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-surface-container-high transition-all group bg-transparent border-0" type="button" onClick={async () => {
+                    try {
+                        const result = await window.electronAPI?.importDbDialog?.();
+                        if (!result || result.canceled) return;
+                        if (result.ok) {
+                            showToast('success', 'Database imported successfully!');
+                        } else {
+                            showToast('error', result.error ?? 'Failed to import database');
                         }
-                    };
-                    input.click();
+                    } catch (error) {
+                        logger.error('Import error', error instanceof Error ? error.message : String(error));
+                        showToast('error', 'Import failed');
+                    }
                 }}>
                     <div className="flex items-center gap-3">
                         <span className="material-symbols-outlined text-on-surface-variant">system_update_alt</span>
