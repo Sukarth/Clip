@@ -393,7 +393,7 @@ const ClipboardList: React.FC<ClipboardListProps> = ({
                                         {!isTemporary && settings.pinFavoriteItems && (
                                             <button
                                                 type="button"
-                                                className="clip-pin-btn"
+                                                className={`clip-pin-btn${item.pinned ? ' pinned' : ''}`}
                                                 tabIndex={0}
                                                 style={{
                                                     background: 'none',

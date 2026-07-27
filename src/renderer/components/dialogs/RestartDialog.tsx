@@ -60,34 +60,39 @@ const RestartDialog: React.FC<RestartDialogProps> = ({
                             ? 'Backup restored successfully! Do you want to restart the app now?'
                             : 'Operation successful! Do you want to restart the app now?'}
                 </div>
-                <button
-                    style={{
-                        background: settings.accentColor,
-                        color: '#222',
-                        border: `1px solid ${settings.accentColor}`,
-                        borderRadius: 6,
-                        padding: '6px 18px',
-                        marginRight: 10,
-                        fontWeight: 600,
-                    }}
-                    onClick={onRestartNow}
-                >
-                    Yes, Restart Now
-                </button>
-                <button
-                    data-dialog-autofocus
-                    style={{
-                        background: '#222',
-                        color: '#fff',
-                        border: '1px solid #444',
-                        borderRadius: 6,
-                        padding: '6px 18px',
-                        fontWeight: 600,
-                    }}
-                    onClick={onRestartLater}
-                >
-                    Later
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                        style={{
+                            flex: 1,
+                            background: settings.accentColor,
+                            color: '#06131f',
+                            border: `1px solid ${settings.accentColor}`,
+                            borderRadius: 8,
+                            padding: '9px 16px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                        }}
+                        onClick={onRestartNow}
+                    >
+                        Yes, Restart Now
+                    </button>
+                    <button
+                        data-dialog-autofocus
+                        style={{
+                            flex: 1,
+                            background: settings.theme === 'light' ? '#ffffff' : '#2a2a2a',
+                            color: settings.theme === 'light' ? '#1c1e21' : '#fff',
+                            border: `1px solid ${settings.theme === 'light' ? '#c9ced6' : '#444'}`,
+                            borderRadius: 8,
+                            padding: '9px 16px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                        }}
+                        onClick={onRestartLater}
+                    >
+                        Later
+                    </button>
+                </div>
             </div>
         </div>
     );

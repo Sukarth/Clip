@@ -1919,54 +1919,65 @@ const App: React.FC = () => {
 
                 <div
                     className="clip-header"
-                    title="Drag to move"
                     style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5vh', position: 'relative', zIndex: 3, cursor: 'default' }}
-                    onMouseDown={(event) => {
-                        if (showSettings) return;
-                        if (event.button !== 0) return;
-                        const target = event.target as HTMLElement | null;
-                        if (
-                            target?.closest('button') ||
-                            target?.closest('input') ||
-                            target?.closest('select') ||
-                            target?.closest('.clip-title')
-                        ) {
-                            return;
-                        }
-                        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                        dragStateRef.current.dragging = true;
-                        dragStateRef.current.dragStarted = false;
-                        dragStateRef.current.offsetX = event.clientX - rect.left;
-                        dragStateRef.current.offsetY = event.clientY - rect.top;
-                        dragStateRef.current.startClientX = event.clientX;
-                        dragStateRef.current.startClientY = event.clientY;
-                        lastDragEmitRef.current = 0;
-                    }}
                 >
                     <div
-                        aria-hidden="true"
+                        title="Drag to move"
                         style={{
                             position: 'absolute',
-                            top: 4,
+                            top: 0,
                             left: '50%',
                             transform: 'translateX(-50%)',
-                            width: 42,
-                            height: 5,
-                            borderRadius: 999,
-                            background: 'rgba(255,255,255,0.22)',
+                            width: 64,
+                            height: 16,
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            justifyContent: 'center',
                             cursor: 'grab',
-                            pointerEvents: 'none',
+                            pointerEvents: 'auto',
                         }}
-                    />
-                    <span className="clip-title" style={{ fontWeight: themeTypography.fontWeightBold, fontSize: themeTypography.titleFontSize, color: themeColors.textPrimary }}>
-                        <span style={{ marginRight: 6 }}>
-                            <IconGlyph value={themeIcons.clipboard} fallback="content_paste" label="Clipboard" size={16} />
-                        </span>
-                        Clipboard
+                        onMouseDown={(event) => {
+                            if (showSettings) return;
+                            if (event.button !== 0) return;
+                            const headerElement = (event.currentTarget as HTMLElement).closest('.clip-header') as HTMLElement | null;
+                            const rect = (headerElement ?? (event.currentTarget as HTMLElement)).getBoundingClientRect();
+                            dragStateRef.current.dragging = true;
+                            dragStateRef.current.dragStarted = false;
+                            dragStateRef.current.offsetX = event.clientX - rect.left;
+                            dragStateRef.current.offsetY = event.clientY - rect.top;
+                            dragStateRef.current.startClientX = event.clientX;
+                            dragStateRef.current.startClientY = event.clientY;
+                            lastDragEmitRef.current = 0;
+                        }}
+                    >
+                        <div
+                            aria-hidden="true"
+                            style={{
+                                width: 42,
+                                height: 5,
+                                marginTop: 4,
+                                borderRadius: 999,
+                                background: 'rgba(255,255,255,0.22)',
+                            }}
+                        />
+                    </div>
+                    <span className="clip-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: themeTypography.fontWeightBold, fontSize: themeTypography.titleFontSize, color: themeColors.textPrimary }}>
+                        <svg width={22} height={22} viewBox="0 0 48 48" fill="none" role="img" aria-label="Clip logo">
+                            <defs>
+                                <linearGradient id="headerClipGrad" x1="0" y1="0" x2="1" y2="1">
+                                    <stop offset="0" stopColor="#bfe4ff" />
+                                    <stop offset="1" stopColor="#4682b4" />
+                                </linearGradient>
+                            </defs>
+                            <rect x="5" y="19" width="24" height="24" rx="6" fill="#1e2024" stroke="rgba(255,255,255,0.14)" />
+                            <rect x="11" y="13" width="24" height="24" rx="6" fill="#23262c" stroke="rgba(255,255,255,0.18)" />
+                            <rect x="19" y="5" width="24" height="24" rx="6" fill="url(#headerClipGrad)" />
+                            <path d="M25 17.3l2.1 2.1 4.4-4.6" stroke="#06131f" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span>Clip</span>
                         {isDev() ? (
                             <span
                                 style={{
-                                    marginLeft: 6,
                                     cursor: 'pointer',
                                     display: 'inline-flex',
                                     alignItems: 'center',
@@ -2014,7 +2025,7 @@ const App: React.FC = () => {
                             type="text"
                             value={search}
                             onChange={e => handleSearchChange(e.target.value)}
-                            placeholder="Search clipboard..."
+                            placeholder="Search for a clip..."
                             style={{
                                 width: '100%',
                                 height: '100%',

@@ -61,7 +61,9 @@ const DangerAreaDialog: React.FC<DangerAreaDialogProps> = ({
                 <div
                     style={{
                         marginBottom: 18,
-                        color: dangerAction === 'clear' ? '#ff4136' : '#ffb300',
+                        color: dangerAction === 'clear'
+                            ? '#c94f4f'
+                            : settings.theme === 'light' ? '#8a6d00' : '#ffb300',
                         fontWeight: 600,
                         fontSize: 17,
                     }}
@@ -70,7 +72,7 @@ const DangerAreaDialog: React.FC<DangerAreaDialogProps> = ({
                         <>
                             Clear ALL clipboard history? This action cannot be undone.
                             {syncClearsAllDevices && (
-                                <div style={{ fontSize: 13, fontWeight: 500, marginTop: 10, color: '#ffb300' }}>
+                                <div style={{ fontSize: 13, fontWeight: 500, marginTop: 10, color: settings.theme === 'light' ? '#8a6d00' : '#ffb300' }}>
                                     Cloud sync is on, so this also clears your synced clipboard
                                     history on every device you&apos;re signed in to.
                                 </div>
@@ -80,35 +82,40 @@ const DangerAreaDialog: React.FC<DangerAreaDialogProps> = ({
                         'Reset ALL settings to default?'
                     )}
                 </div>
-                <button
-                    style={{
-                        background: dangerAction === 'clear' ? '#ff4136' : '#ffb300',
-                        color: '#222',
-                        border: `1px solid ${dangerAction === 'clear' ? '#ff4136' : '#ffb300'}`,
-                        borderRadius: 6,
-                        padding: '6px 18px',
-                        marginRight: 10,
-                        fontWeight: 600,
-                    }}
-                    onClick={dangerAction === 'clear' ? onConfirmClearAll : onConfirmResetSettings}
-                >
-                    Yes
-                </button>
-                <button
-                    className="no-btn"
-                    data-dialog-autofocus
-                    style={{
-                        background: '#222',
-                        color: dangerAction === 'clear' ? '#ff4136' : '#ffb300',
-                        border: `1px solid ${dangerAction === 'clear' ? '#ff4136' : '#ffb300'}`,
-                        borderRadius: 6,
-                        padding: '6px 18px',
-                        fontWeight: 600,
-                    }}
-                    onClick={onClose}
-                >
-                    No
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                        style={{
+                            flex: 1,
+                            background: '#c94f4f',
+                            color: '#fff',
+                            border: '1px solid #c94f4f',
+                            borderRadius: 8,
+                            padding: '9px 16px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                        }}
+                        onClick={dangerAction === 'clear' ? onConfirmClearAll : onConfirmResetSettings}
+                    >
+                        Yes
+                    </button>
+                    <button
+                        className="no-btn"
+                        data-dialog-autofocus
+                        style={{
+                            flex: 1,
+                            background: settings.theme === 'light' ? '#ffffff' : '#2a2a2a',
+                            color: settings.theme === 'light' ? '#1c1e21' : '#fff',
+                            border: `1px solid ${settings.theme === 'light' ? '#c9ced6' : '#444'}`,
+                            borderRadius: 8,
+                            padding: '9px 16px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                        }}
+                        onClick={onClose}
+                    >
+                        No
+                    </button>
+                </div>
             </div>
         </div>
     );

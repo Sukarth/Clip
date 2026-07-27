@@ -82,39 +82,42 @@ const BackupRestoreDialog: React.FC<BackupRestoreDialogProps> = ({
                         {kind === 'cloud' ? ' The backup is downloaded and decrypted on this device first.' : ''}
                     </div>
                 </div>
-                <button
-                    style={{
-                        background: settings.accentColor,
-                        color: '#06131f',
-                        border: `1px solid ${settings.accentColor}`,
-                        borderRadius: 6,
-                        padding: '8px 18px',
-                        marginRight: 10,
-                        fontWeight: 600,
-                        cursor: busy ? 'wait' : 'pointer',
-                        opacity: busy ? 0.7 : 1,
-                    }}
-                    disabled={busy}
-                    onClick={onConfirmRestore}
-                >
-                    {busy ? 'Restoring…' : 'Yes, Restore'}
-                </button>
-                <button
-                    data-dialog-autofocus
-                    style={{
-                        background: '#222',
-                        color: '#fff',
-                        border: `1px solid ${themeColors.border}`,
-                        borderRadius: 6,
-                        padding: '8px 18px',
-                        fontWeight: 600,
-                        cursor: busy ? 'default' : 'pointer',
-                    }}
-                    disabled={busy}
-                    onClick={onCancel}
-                >
-                    Cancel
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                        style={{
+                            flex: 1,
+                            background: settings.accentColor,
+                            color: '#06131f',
+                            border: `1px solid ${settings.accentColor}`,
+                            borderRadius: 8,
+                            padding: '9px 16px',
+                            fontWeight: 600,
+                            cursor: busy ? 'wait' : 'pointer',
+                            opacity: busy ? 0.7 : 1,
+                        }}
+                        disabled={busy}
+                        onClick={onConfirmRestore}
+                    >
+                        {busy ? 'Restoring…' : 'Yes, Restore'}
+                    </button>
+                    <button
+                        data-dialog-autofocus
+                        style={{
+                            flex: 1,
+                            background: settings.theme === 'light' ? '#ffffff' : '#2a2a2a',
+                            color: settings.theme === 'light' ? '#1c1e21' : '#fff',
+                            border: `1px solid ${settings.theme === 'light' ? '#c9ced6' : '#444'}`,
+                            borderRadius: 8,
+                            padding: '9px 16px',
+                            fontWeight: 600,
+                            cursor: busy ? 'default' : 'pointer',
+                        }}
+                        disabled={busy}
+                        onClick={onCancel}
+                    >
+                        Cancel
+                    </button>
+                </div>
             </div>
         </div>
     );

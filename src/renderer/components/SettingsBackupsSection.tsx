@@ -273,20 +273,53 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                         const isChecked = selectedBackups.has(backup.file);
                         return (
                             <div key={backup.file} className="flex items-center gap-3 p-3 bg-surface-container-high rounded-lg">
-                                <input
-                                    type="checkbox"
-                                    checked={isChecked}
+                                <button
+                                    type="button"
+                                    role="checkbox"
+                                    aria-checked={isChecked}
                                     aria-label={`Select ${localBackupLabel(backup)}`}
-                                    onChange={(e) => {
+                                    className="backup-checkbox"
+                                    onClick={() => {
                                         setSelectedBackups((prev) => {
                                             const next = new Set(prev);
-                                            if (e.target.checked) next.add(backup.file);
-                                            else next.delete(backup.file);
+                                            if (next.has(backup.file)) next.delete(backup.file);
+                                            else next.add(backup.file);
                                             return next;
                                         });
                                     }}
-                                    style={{ accentColor: current.accentColor, width: 14, height: 14, cursor: 'pointer', flexShrink: 0 }}
-                                />
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            setSelectedBackups((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(backup.file)) next.delete(backup.file);
+                                                else next.add(backup.file);
+                                                return next;
+                                            });
+                                        }
+                                    }}
+                                    style={{
+                                        width: 16,
+                                        height: 16,
+                                        boxSizing: 'border-box',
+                                        borderRadius: 5,
+                                        padding: 0,
+                                        cursor: 'pointer',
+                                        flexShrink: 0,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        ...(isChecked
+                                            ? { background: current.accentColor, border: `1.5px solid ${current.accentColor}` }
+                                            : {}),
+                                    }}
+                                >
+                                    {isChecked && (
+                                        <span className="material-symbols-outlined" style={{ fontSize: 12, lineHeight: 1, color: '#06131f' }}>
+                                            check
+                                        </span>
+                                    )}
+                                </button>
                                 {isRenaming ? renameEditor : (
                                     <>
                                         <div className="flex-1 min-w-0">
@@ -316,18 +349,18 @@ const SettingsBackupsSection: React.FC<SettingsBackupsSectionProps> = ({
                     <div className="flex items-center justify-end gap-3">
                         <button
                             type="button"
-                            className="text-[11px] text-on-surface-variant bg-transparent border-0 hover:underline"
+                            className="px-3 py-1.5 bg-surface-container-high text-on-surface-variant rounded-lg text-[11px] font-medium hover:bg-surface-container-highest transition-all border-0"
                             onClick={() => setSelectedBackups(new Set())}
                         >
                             Clear selection
                         </button>
                         <button
                             type="button"
-                            className="py-1.5 px-3 rounded-lg text-[11px] font-semibold border-0"
-                            style={{ background: '#ff4136', color: '#fff' }}
+                            className="py-2 px-3 bg-error/10 border border-error/30 text-error rounded-lg text-xs font-medium hover:bg-error/20 transition-all flex items-center justify-center gap-2"
                             onClick={() => setBackupDeleteAction('multiple')}
                         >
-                            Delete selected ({selectedBackups.size})
+                            <span className="material-symbols-outlined text-sm">delete_sweep</span>
+                            <span>Delete selected ({selectedBackups.size})</span>
                         </button>
                     </div>
                 )}

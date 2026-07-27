@@ -146,9 +146,10 @@ const SyncPassphraseDialog: React.FC<SyncPassphraseDialogProps> = ({
                         onClick={onCancel}
                         disabled={busy}
                         style={{
-                            background: 'transparent',
-                            color: dark ? '#ccc' : '#333',
-                            border: `1px solid ${dark ? '#444' : '#ccc'}`,
+                            flex: 1,
+                            background: dark ? '#2a2a2a' : '#ffffff',
+                            color: dark ? '#fff' : '#1c1e21',
+                            border: `1px solid ${dark ? '#444' : '#c9ced6'}`,
                             borderRadius: 8,
                             padding: '9px 16px',
                             fontWeight: 600,

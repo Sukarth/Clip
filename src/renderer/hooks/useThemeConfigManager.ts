@@ -12,6 +12,16 @@ interface UseThemeConfigManagerArgs {
     showToast: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
+// The color mode (dark/light/system) autosaves immediately and is deliberately
+// exempt from the unsaved-changes flow: switching modes should feel instant and
+// never prompt to save, and "close without saving" must not flip the mode back.
+// Stripping `mode` before comparing keeps mode-only diffs invisible to the
+// snapshot logic.
+function stripThemeConfigMode(config: ThemeConfig): Omit<ThemeConfig, 'mode'> {
+    const { mode: _mode, ...rest } = sanitizeThemeConfig(config);
+    return rest;
+}
+
 export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) {
     const [themeConfig, setThemeConfig] = React.useState<ThemeConfig>(() => createDefaultThemeConfig());
     const [themeEditorConfig, setThemeEditorConfig] = React.useState<ThemeConfig>(() => createDefaultThemeConfig());
@@ -79,7 +89,10 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
             autosaveTimeoutRef.current = null;
         }
 
-        const sanitizedSnapshot = sanitizeThemeConfig(snapshot);
+        // Mode changes persist immediately and are exempt from "close without
+        // saving": revert everything else but keep the currently selected mode.
+        const currentMode = themeEditorConfig.mode ?? themeConfig.mode ?? snapshot.mode;
+        const sanitizedSnapshot = sanitizeThemeConfig({ ...snapshot, mode: currentMode });
         const driftedOnDisk = JSON.stringify(sanitizeThemeConfig(themeConfig)) !== JSON.stringify(sanitizedSnapshot);
 
         if (!driftedOnDisk) {
@@ -100,7 +113,7 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
             setThemeEditorConfig(sanitizedSnapshot);
             showToast('error', `Failed to revert theme changes: ${error instanceof Error ? error.message : String(error)}`);
         }
-    }, [showToast, themeConfig]);
+    }, [showToast, themeConfig, themeEditorConfig]);
 
     // Whether the persisted theme config has diverged from the baseline captured
     // when the editor opened. Because theme edits autosave to disk, comparing the
@@ -110,9 +123,11 @@ export function useThemeConfigManager({ showToast }: UseThemeConfigManagerArgs) 
     const hasThemeEditorChangesSinceOpen = React.useCallback(() => {
         const snapshot = openThemeSnapshotRef.current;
         if (!snapshot) return false;
+        // `mode` is excluded so a dark/light/system switch alone never counts
+        // as an unsaved change (it persists immediately via autosave).
         return (
-            JSON.stringify(sanitizeThemeConfig(themeConfig)) !== JSON.stringify(sanitizeThemeConfig(snapshot))
-            || JSON.stringify(sanitizeThemeConfig(themeEditorConfig)) !== JSON.stringify(sanitizeThemeConfig(snapshot))
+            JSON.stringify(stripThemeConfigMode(themeConfig)) !== JSON.stringify(stripThemeConfigMode(snapshot))
+            || JSON.stringify(stripThemeConfigMode(themeEditorConfig)) !== JSON.stringify(stripThemeConfigMode(snapshot))
         );
     }, [themeConfig, themeEditorConfig]);
 

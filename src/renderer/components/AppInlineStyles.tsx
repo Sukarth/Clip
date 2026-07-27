@@ -1659,18 +1659,54 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                     box-shadow: inset 0 0 0 2px ${safeColors.accent} !important;
                 }
 
+                /* List row action buttons: explicit palette color so the
+                   material icon spans never fall back to the UA's default
+                   black button color (invisible-ish in dark mode). */
+                .clip-pin-btn,
+                .clip-delete-btn {
+                    color: ${safeColors.textSecondary};
+                    transition: color 0.2s, opacity 0.2s;
+                }
+                .clip-pin-btn:hover,
+                .clip-pin-btn:focus-visible {
+                    color: ${safeColors.accent};
+                }
+                .clip-delete-btn:hover,
+                .clip-delete-btn:focus-visible {
+                    color: ${safeColors.danger};
+                }
+                /* Pinned state renders the icon filled via the variable font's
+                   FILL axis (the loaded Material Symbols font is variable with
+                   FILL 0..1). */
+                .clip-pin-btn.pinned .material-symbols-outlined {
+                    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+                }
+
+                /* Custom checkbox used in the backups list. */
+                .backup-checkbox {
+                    border: 1.5px solid rgba(255, 255, 255, 0.35);
+                    background: transparent;
+                    transition: background 0.15s ease, border-color 0.15s ease;
+                }
+
                 ${resolvedThemeMode === 'light' ? `
                 /* Light-mode overrides for the hardcoded dark utility classes
                    and settings controls. Emitted after the dark definitions so
                    the later rules win; dark-mode output is untouched. */
-                .bg-surface { background: #f4f6f9; }
-                .bg-surface-container { background: #e9ecf1; }
-                .bg-surface-container\\/90 { background: rgba(233, 236, 241, 0.9); }
-                .bg-surface-container-low { background: #eef1f5; }
-                .bg-surface-container-high { background: #e2e6ec; }
-                .bg-surface-container-highest { background: #d8dde4; }
-                .hover\\:bg-surface-container-high:hover { background: #e2e6ec; }
-                .hover\\:bg-surface-container-highest:hover { background: #d8dde4; }
+                .bg-surface { background: #f2f4f7; }
+                .bg-surface-container { background: #dfe4ea; }
+                .bg-surface-container\\/90 { background: rgba(223, 228, 234, 0.9); }
+                .bg-surface-container-low { background: #e4e9ef; }
+                .bg-surface-container-high { background: #d2d9e1; }
+                .bg-surface-container-highest { background: #c6cedb; }
+                .hover\\:bg-surface-container-high:hover { background: #d2d9e1; }
+                .hover\\:bg-surface-container-highest:hover { background: #c6cedb; }
+                .text-warning { color: #8a6d00 !important; }
+                .text-error { color: #b3403a !important; }
+                .text-success { color: #2e7d4f !important; }
+                .hover\\:text-error:hover { color: #b3403a !important; }
+                .hover\\:text-warning:hover { color: #8a6d00 !important; }
+                .backup-checkbox { border-color: #9aa4b1; }
                 .text-on-surface { color: #1c1e21 !important; }
                 .text-on-surface-variant { color: #49525d !important; }
                 .text-primary { color: #2b5d8a !important; }
@@ -1679,7 +1715,7 @@ const AppInlineStyles: React.FC<AppInlineStylesProps> = ({
                 .bg-primary-container { background: #2b5d8a; }
                 .text-on-primary { color: #f4f8ff !important; }
                 #mainContainer {
-                    background: #f4f6f9;
+                    background: #f2f4f7;
                     color: #1c1e21;
                 }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: #c1c7cf; }

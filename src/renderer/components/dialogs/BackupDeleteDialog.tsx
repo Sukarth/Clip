@@ -61,7 +61,7 @@ const BackupDeleteDialog: React.FC<BackupDeleteDialogProps> = ({
                 <div
                     style={{
                         marginBottom: 18,
-                        color: '#ff4136',
+                        color: '#c94f4f',
                         fontWeight: 600,
                         fontSize: 17,
                         lineHeight: 1.4,
@@ -83,36 +83,39 @@ const BackupDeleteDialog: React.FC<BackupDeleteDialogProps> = ({
                         This action cannot be undone.
                     </div>
                 </div>
-                <button
-                    style={{
-                        background: '#ff4136',
-                        color: '#fff',
-                        border: '1px solid #ff4136',
-                        borderRadius: 6,
-                        padding: '8px 18px',
-                        marginRight: 10,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                    }}
-                    onClick={onConfirmDelete}
-                >
-                    Yes, Delete
-                </button>
-                <button
-                    data-dialog-autofocus
-                    style={{
-                        background: '#222',
-                        color: '#fff',
-                        border: `1px solid ${themeColors.border}`,
-                        borderRadius: 6,
-                        padding: '8px 18px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                    }}
-                    onClick={onCancel}
-                >
-                    Cancel
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                        style={{
+                            flex: 1,
+                            background: '#c94f4f',
+                            color: '#fff',
+                            border: '1px solid #c94f4f',
+                            borderRadius: 8,
+                            padding: '9px 16px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                        }}
+                        onClick={onConfirmDelete}
+                    >
+                        Yes, Delete
+                    </button>
+                    <button
+                        data-dialog-autofocus
+                        style={{
+                            flex: 1,
+                            background: settings.theme === 'light' ? '#ffffff' : '#2a2a2a',
+                            color: settings.theme === 'light' ? '#1c1e21' : '#fff',
+                            border: `1px solid ${settings.theme === 'light' ? '#c9ced6' : '#444'}`,
+                            borderRadius: 8,
+                            padding: '9px 16px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                        }}
+                        onClick={onCancel}
+                    >
+                        Cancel
+                    </button>
+                </div>
             </div>
         </div>
     );
