@@ -54,16 +54,15 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                 <div className="flex items-center justify-between py-2">
                     <div>
                         <h3 className="font-medium text-on-surface text-sm">Store Images</h3>
-                        <p className="text-[11px] text-on-surface-variant">Save copied images to history</p>
+                        <p className="text-[11px] text-on-surface-variant">Save copied images to history. Changing this doesn't affect items already in your history.</p>
                     </div>
                     <Switch checked={current.storeImagesInClipboard} onChange={(value) => update({ storeImagesInClipboard: value })} accentColor="#abccff" />
                 </div>
-                <p className="text-[11px] text-on-surface-variant">Changing this doesn't affect items already in your history.</p>
 
                 <div className="flex items-center justify-between py-2">
                     <div>
                         <h3 className="font-medium text-on-surface text-sm">Pin Favorite Items</h3>
-                        <p className="text-[11px] text-on-surface-variant">Allow pinning frequently used items</p>
+                        <p className="text-[11px] text-on-surface-variant">Allow pinning frequently used items. Existing items are unaffected when turning this on.</p>
                     </div>
                     <Switch
                         checked={current.pinFavoriteItems}
@@ -77,7 +76,6 @@ const SettingsBehaviorSection: React.FC<SettingsBehaviorSectionProps> = ({
                         accentColor="#abccff"
                     />
                 </div>
-                <p className="text-[11px] text-on-surface-variant">Existing items are unaffected when turning this on.</p>
             </div>
 
             <div className="bg-surface-container-low p-4 rounded-xl space-y-3">

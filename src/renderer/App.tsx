@@ -902,7 +902,11 @@ const App: React.FC = () => {
 
     // Export/import settings logic
     const handleExportSettings = () => {
-        const data = JSON.stringify(settings, null, 2);
+        // theme/accentColor/borderRadius/transparency are in-memory mirrors of
+        // the theme config (clip-theme.json), not part of the settings file.
+        const { theme, accentColor, borderRadius, transparency, ...persistedSettings } = settings;
+        void theme; void accentColor; void borderRadius; void transparency;
+        const data = JSON.stringify(persistedSettings, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -923,6 +927,12 @@ const App: React.FC = () => {
                 try {
                     const imported = JSON.parse(ev.target.result);
                     if (imported && typeof imported === 'object') {
+                        // Older exports may still carry theme mirror keys; those
+                        // belong to clip-theme.json and must not override the
+                        // live theme-derived values.
+                        for (const legacyKey of ['theme', 'accentColor', 'borderRadius', 'transparency']) {
+                            delete imported[legacyKey];
+                        }
                         const nextSettings = { ...settingsRef.current, ...imported } as Settings;
                         setSettingsDraft(nextSettings);
                         showToast('success', 'Settings imported successfully');
@@ -1975,30 +1985,6 @@ const App: React.FC = () => {
                             <path d="M25 17.3l2.1 2.1 4.4-4.6" stroke="#06131f" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                         <span>Clip</span>
-                        {isDev() ? (
-                            <span
-                                style={{
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    opacity: 0.85,
-                                    verticalAlign: 'middle',
-                                    position: 'relative'
-                                }}
-                                title={`Cache: ${itemsCache.length} items, age: ${Math.round((Date.now() - lastCacheUpdate) / 1000)}s`}
-                            >
-                                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                    <path
-                                        d="M7 7v6a3 3 0 0 0 6 0V6a4 4 0 0 0-8 0v7a5 5 0 0 0 10 0V7"
-                                        stroke="#9C27B0"
-                                        strokeWidth="2"
-                                        fill="none"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    />
-                                </svg>
-                            </span>
-                        ) : null}
                     </span>
                     <button
                         className="clip-settings-btn"
