@@ -82,6 +82,23 @@ let lastError: string | null = null;
 // lastError (and must be showable to free users).
 let deviceError: string | null = null;
 let autoTimer: NodeJS.Timeout | null = null;
+let debounceTimer: NodeJS.Timeout | null = null;
+
+// Notified whenever the values getStatus() reports change, so the renderer can
+// be told rather than having to poll for them.
+let statusListener: (() => void) | null = null;
+
+export function setStatusListener(fn: (() => void) | null): void {
+    statusListener = fn;
+}
+
+function emitStatus(): void {
+    try {
+        statusListener?.();
+    } catch (error) {
+        console.error('[sync] status listener threw:', error);
+    }
+}
 
 export function initSync(h: SyncHost): void {
     host = h;
@@ -121,6 +138,7 @@ export function lock(): void {
     key = null;
     keyVerified = false;
     host?.saveKey(null);
+    emitStatus();
 }
 
 function hashOf(type: string, content: string): string {
@@ -283,6 +301,7 @@ export async function registerDevice(): Promise<{ ok: boolean; removed?: boolean
         // A rejected registration used to be silent, so hitting the device cap
         // looked like "my app just never appears in the devices list". Keep the
         // server's message so the UI can tell the user what to do about it.
+        const before = deviceError;
         if (res.status === 409 || res.status === 429) {
             const body = (await res.json().catch(() => ({}))) as { error?: string };
             deviceError = body.error
@@ -290,9 +309,13 @@ export async function registerDevice(): Promise<{ ok: boolean; removed?: boolean
         } else if (res.status !== 401 && res.status !== 402) {
             deviceError = null;
         }
+        if (before !== deviceError) emitStatus();
         return { ok: false };
     }
-    deviceError = null;
+    if (deviceError !== null) {
+        deviceError = null;
+        emitStatus();
+    }
     const d = (await res.json().catch(() => ({}))) as { deviceId?: string; removed?: boolean };
     if (d.removed) {
         // This device was signed out from the web — stand down locally.
@@ -322,8 +345,14 @@ let deviceTimer: NodeJS.Timeout | null = null;
 /**
  * Keep the device record fresh (last-seen) and detect a remote sign-out, on a
  * slow timer that runs whenever the user is signed in — independent of sync.
+ *
+ * This is now the ONLY caller of registerDevice on a timer (the sync cycle used
+ * to call it too), so it alone bounds how long "sign out this device" takes to
+ * take effect. 3 minutes trades a little revocation latency for a third of the
+ * request volume; the website's online/offline indicator uses a matching
+ * 10-minute window.
  */
-export function startDeviceHeartbeat(intervalMs = 60 * 1000): void {
+export function startDeviceHeartbeat(intervalMs = 3 * 60 * 1000): void {
     stopDeviceHeartbeat();
     void registerDevice();
     deviceTimer = setInterval(() => {
@@ -594,6 +623,7 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; error
     if (syncing) return { pushed: 0, pulled: 0, error: 'busy' };
 
     syncing = true;
+    emitStatus();
     try {
         // BUG 1: an auto-unlocked (OS-cached) key is trusted blindly. If another
         // device ran resetPassphrase, the server now has a new salt/verifier and
@@ -636,8 +666,10 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; error
             }
         }
 
-        const dev = await registerDevice();
-        if (dev.removed) throw new Error('This device was signed out remotely.');
+        // NOTE: this used to call registerDevice() every cycle to detect a remote
+        // sign-out. The device heartbeat already does that on its own timer, so
+        // doing it here too tripled device-endpoint traffic for no extra safety —
+        // it only changed detection latency, which the heartbeat bounds anyway.
         // Pull BEFORE push: mapping existing cloud content locally first lets
         // pushPhase's content-hash dedupe recognize it, so we don't re-upload
         // content that's already in the cloud under a fresh clientId (duplicate
@@ -664,14 +696,23 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; error
         return { pushed: 0, pulled: 0, error: lastError };
     } finally {
         syncing = false;
+        emitStatus();
     }
 }
 
-export function startAutoSync(intervalMs = 20000): void {
+/**
+ * Slow safety-net tick. Syncing used to run on a fixed 20s timer, which meant a
+ * pull request every 20s forever even with the window hidden and nothing
+ * changing — the single largest source of request volume in the app. The real
+ * triggers are now `requestSync()` (something changed locally) and
+ * `syncOnDemand()` (the user opened the window); this interval only exists to
+ * eventually notice remote changes on a machine nobody touches.
+ */
+export function startAutoSync(idleIntervalMs = 10 * 60 * 1000): void {
     stopAutoSync();
     autoTimer = setInterval(() => {
         if (isEnabled() && isUnlocked()) void syncNow();
-    }, intervalMs);
+    }, idleIntervalMs);
 }
 
 export function stopAutoSync(): void {
@@ -679,6 +720,37 @@ export function stopAutoSync(): void {
         clearInterval(autoTimer);
         autoTimer = null;
     }
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+    }
+}
+
+/**
+ * Something changed locally (clip copied, deleted, pinned) — sync shortly.
+ * Debounced so a burst of changes costs one cycle rather than one each, and so
+ * a paste storm can't turn into a request storm.
+ */
+export function requestSync(delayMs = 3000): void {
+    if (!isEnabled() || !isUnlocked()) return;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void syncNow();
+    }, delayMs);
+}
+
+/**
+ * Sync right now because the user is about to look at the list (window summon).
+ * Supersedes any pending debounce.
+ */
+export function syncOnDemand(): void {
+    if (!isEnabled() || !isUnlocked()) return;
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+    }
+    void syncNow();
 }
 
 /** Fetch current cloud usage for display. Returns null if unavailable. */

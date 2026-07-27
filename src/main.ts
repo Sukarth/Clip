@@ -62,7 +62,6 @@ let windowHeight: number = WINDOW_SIZE_LIMITS.height.default;
 let cachedAppDataPath: string | null = null;
 let activeThemeConfig = createDefaultThemeConfig();
 let suppressBlurHideUntil = 0;
-let profileRefreshTimer: NodeJS.Timeout | null = null;
 
 // --- PERFORMANCE OPTIMIZATIONS: Data Caching ---
 let cachedClipboardHistory: any[] = [];
@@ -1960,6 +1959,7 @@ function pollClipboard() {
             setTemporaryClipboardItem(null);
             const item = { type: 'text' as const, content: text, timestamp: Date.now() };
             insertClipboardItem(item);
+            cloudSync.requestSync();
             console.log('[main] New text detected:', text);
             if (mainWindow && mainWindow.isVisible()) {
                 mainWindow.webContents.send('clipboard-item', item);
@@ -1986,6 +1986,7 @@ function pollClipboard() {
                 setTemporaryClipboardItem(null);
                 const item = { type: 'image' as const, content: imageDataUrl, timestamp: Date.now() };
                 insertClipboardItem(item);
+                cloudSync.requestSync();
                 console.log('[main] New image detected');
                 if (mainWindow && mainWindow.isVisible()) {
                     mainWindow.webContents.send('clipboard-item', item);
@@ -2697,10 +2698,15 @@ function showMainWindow(preferredTargetHwnd?: number | null) {
     mainWindow.webContents.send('window-will-show');
     // On summon, promptly reflect account changes made elsewhere: detect a
     // remote "sign out this device" (→ sign out locally) and pick up any
-    // profile / plan changes made on the website.
+    // profile / plan changes made on the website. This is now the only profile
+    // refresh — the old 90s poll was pure overhead, since plan/name/avatar
+    // changes only matter once the user is actually looking at the app.
     if (cloudAuth.isLoggedIn()) {
         void cloudSync.registerDevice();
         void cloudAuth.refreshProfile();
+        // The user is about to look at the list: make it current now rather
+        // than waiting for the slow idle tick.
+        cloudSync.syncOnDemand();
     }
 
     // Show and focus the window immediately for smoother animation
@@ -2779,12 +2785,22 @@ app.whenReady().then(() => {
     });
     ensureSyncMapTable();
     cloudSync.initSync(buildSyncHost());
+    // Push status changes to the renderer instead of having it poll for them.
+    // `usage` is deliberately omitted — it needs a network round-trip and moves
+    // slowly, so the renderer fetches it via sync:get-status only when it's
+    // actually on screen.
+    cloudSync.setStatusListener(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sync-status', cloudSync.getStatus());
+        }
+    });
     cloudSync.startAutoSync();
     // Register this device (for the account's "Devices & sessions" list) and
     // keep it fresh — independent of Pro / cloud sync. Also poll the profile so
     // name / avatar / plan changes made on the website show up without a restart.
     cloudSync.startDeviceHeartbeat();
-    profileRefreshTimer = setInterval(() => { void cloudAuth.refreshProfile(); }, 90 * 1000);
+    // Profile changes are picked up on window summon (see showMainWindow); there
+    // is deliberately no polling timer for them.
 
     // Handle startup behavior based on command line arguments and settings
     const isStartHidden = process.argv.includes('--start-hidden') || process.argv.includes('--hidden');
@@ -3254,6 +3270,7 @@ app.whenReady().then(() => {
         // A user-initiated "clear all" is a real deletion: propagate it so other
         // devices clear too (distinct from local cap-eviction, which does not).
         cloudSync.notePendingDeletionAll();
+        cloudSync.requestSync();
         clipboard.clear();
         lastText = '';
         lastImageDataUrl = '';
@@ -3263,6 +3280,7 @@ app.whenReady().then(() => {
 
     ipcMain.on('toggle-item-pinned', (event, { id, pinned }) => {
         toggleItemPinned(id, pinned);
+        cloudSync.requestSync();
         // Use async to avoid blocking
         getClipboardHistoryAsync().then(history => {
             event.reply('clipboard-history', history);
@@ -3271,6 +3289,7 @@ app.whenReady().then(() => {
 
     ipcMain.handle('unpin-all-items', async (event) => {
         const changed = unpinAllItems();
+        if (changed > 0) cloudSync.requestSync();
         const history = await getClipboardHistoryAsync();
         event.sender.send('clipboard-history', history);
         return changed;
@@ -3281,7 +3300,10 @@ app.whenReady().then(() => {
         deleteClipboardItem(id);
         // Record as a genuine user deletion so the next sync tombstones it
         // cloud-wide (cap-eviction/trim intentionally do not do this).
-        if (row) cloudSync.notePendingDeletion(row.type, row.content);
+        if (row) {
+            cloudSync.notePendingDeletion(row.type, row.content);
+            cloudSync.requestSync();
+        }
         if (row) {
             if (row.type === 'text') {
                 try {
@@ -3473,10 +3495,6 @@ app.on('before-quit', () => {
     // remote removal) deregisters.
     try { cloudSync.stopAutoSync(); } catch { /* best-effort */ }
     try { cloudSync.stopDeviceHeartbeat(); } catch { /* best-effort */ }
-    if (profileRefreshTimer) {
-        clearInterval(profileRefreshTimer);
-        profileRefreshTimer = null;
-    }
 
     stopAhk(); // Ensure AHK process is terminated when quitting the app
     // Checkpoint + close the DB so the main .db file is complete on disk at

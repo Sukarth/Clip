@@ -90,6 +90,8 @@ interface ElectronAPI {
         restoreBackup: (id: string) => Promise<{ ok: boolean; error?: string }>;
         deleteBackup: (id: string) => Promise<{ ok: boolean; error?: string }>;
         renameBackup: (id: string, name: string) => Promise<{ ok: boolean; error?: string }>;
+        /** Main pushes status changes; `usage` is absent (fetch via getStatus). */
+        onStatus: (callback: (status: SyncStatusView) => void) => (() => void) | void;
     };
     isDevelopment: () => boolean;
 }

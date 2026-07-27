@@ -103,6 +103,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         restoreBackup: (id) => ipcRenderer.invoke('sync:restore-backup', id),
         deleteBackup: (id) => ipcRenderer.invoke('sync:delete-backup', id),
         renameBackup: (id, name) => ipcRenderer.invoke('sync:rename-backup', id, name),
+        onStatus: (callback) => {
+            const listener = (_event, status) => callback(status);
+            ipcRenderer.on('sync-status', listener);
+            return () => ipcRenderer.removeListener('sync-status', listener);
+        },
     },
     isDevelopment: () => {
         // Check multiple indicators for development mode

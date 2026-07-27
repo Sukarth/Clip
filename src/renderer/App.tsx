@@ -318,13 +318,32 @@ const App: React.FC = () => {
         }
     };
 
-    // Background syncs run on their own 20s timer in the main process, so an open
-    // Profile tab would otherwise show a frozen "Synced HH:MM", usage figure and
-    // syncing flag until the user pressed a button. Poll while it's on screen.
+    // Tracks whether the Profile tab is on screen, so the status listener below
+    // only pays for a usage lookup when someone can actually see it.
+    const settingsOpenRef = useRef(false);
+
+    // Main pushes status the moment it changes, so nothing here polls. The
+    // pushed payload has no `usage` (that needs a network call), so keep the
+    // last known figure and re-fetch it only when a sync actually finishes.
     useEffect(() => {
-        if (!showSettings || activeSettingsSection !== 'Profile' || !account.loggedIn) return;
-        const id = setInterval(() => { void refreshSync(); }, 5000);
-        return () => clearInterval(id);
+        const dispose = window.electronAPI.sync.onStatus?.((status) => {
+            setDeviceError(status.deviceError ?? null);
+            if (!accountRef.current.isPro) return;
+            setSyncStatus((prev) => {
+                if (prev?.syncing && !status.syncing && settingsOpenRef.current) {
+                    void refreshSync();
+                }
+                return { ...status, usage: prev?.usage ?? null };
+            });
+        });
+        return () => { if (typeof dispose === 'function') dispose(); };
+    }, [refreshSync]);
+
+    // Refresh once when the Profile tab opens, so usage and last-sync are current.
+    useEffect(() => {
+        const onProfile = showSettings && activeSettingsSection === 'Profile';
+        settingsOpenRef.current = onProfile;
+        if (onProfile && account.loggedIn) void refreshSync();
     }, [showSettings, activeSettingsSection, account.loggedIn, refreshSync]);
 
     // Cloud backups
