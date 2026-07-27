@@ -178,7 +178,21 @@ export async function getAccessToken(): Promise<string | null> {
     return session?.accessToken ?? null;
 }
 
-async function fetchProfile(): Promise<void> {
+/**
+ * Throttle window: the profile is re-read on every window summon and on every
+ * renderer getState(), both of which the user can trigger as fast as the global
+ * shortcut repeats. Plan/name/avatar change approximately never, so coalescing
+ * repeat reads costs nothing and stops summon-spam becoming request-spam.
+ * `force` bypasses it for sign-in, where the value must be current.
+ */
+const PROFILE_MIN_GAP_MS = 60 * 1000;
+let lastProfileFetchAt = 0;
+
+async function fetchProfile(force = false): Promise<void> {
+    if (!force && lastProfileFetchAt && Date.now() - lastProfileFetchAt < PROFILE_MIN_GAP_MS) {
+        return;
+    }
+
     const token = await getAccessToken();
     if (!token) {
         cachedIsPro = false;
@@ -187,6 +201,7 @@ async function fetchProfile(): Promise<void> {
         cachedAvatar = null;
         return;
     }
+    lastProfileFetchAt = Date.now();
     try {
         // RLS returns only the caller's own row.
         const res = await fetch(
@@ -243,6 +258,11 @@ export async function getAuthState(refresh = true): Promise<AuthState> {
         isPro: cachedIsPro,
         plan: cachedPlan,
     };
+}
+
+/** Clears the profile throttle so the next read is guaranteed fresh. */
+export function invalidateProfileCache(): void {
+    lastProfileFetchAt = 0;
 }
 
 export async function logout(): Promise<void> {
@@ -392,7 +412,7 @@ export function login(): Promise<AuthState> {
                     res.writeHead(200, { 'content-type': 'text/plain' });
                     res.end('ok');
                     // Load Pro status, notify the app, then resolve.
-                    fetchProfile().finally(() => {
+                    fetchProfile(true).finally(() => {
                         emit();
                         finish(() =>
                             resolve({

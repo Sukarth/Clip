@@ -327,6 +327,48 @@ export async function registerDevice(): Promise<{ ok: boolean; removed?: boolean
     return { ok: true };
 }
 
+/**
+ * Same as registerDevice but rate-limited, for triggers the user controls
+ * directly (window summon). Without this, hammering the global shortcut is a
+ * request amplifier.
+ */
+let lastDeviceCallAt = 0;
+
+export async function registerDeviceThrottled(minGapMs = 60 * 1000): Promise<void> {
+    if (Date.now() - lastDeviceCallAt < minGapMs) return;
+    lastDeviceCallAt = Date.now();
+    await registerDevice();
+}
+
+/**
+ * Tell the server this device is going away, so the website shows it Offline
+ * immediately instead of waiting for its last heartbeat to age out. Best
+ * effort and deliberately short-timeout: it runs during quit, where blocking
+ * matters more than certainty. The heartbeat's staleness remains the fallback
+ * for crashes and kills, where nothing gets sent at all.
+ */
+export async function markOffline(deviceId: string, timeoutMs = 1200): Promise<void> {
+    if (!deviceId) return;
+    try {
+        await api(
+            '/api/sync/device',
+            { method: 'POST', body: JSON.stringify({ deviceId, offline: true }) },
+            timeoutMs
+        );
+    } catch {
+        /* best effort — never block or fail a quit */
+    }
+}
+
+/**
+ * Read the device id while the database is still open. Quit closes the DB
+ * before the offline beacon is sent, so the caller has to capture this first.
+ */
+export function getDeviceId(): string | null {
+    if (!host) return null;
+    return host.getState('sync_device_id') || null;
+}
+
 /** Remove this device's server record (called on local sign-out). */
 export async function deregisterDevice(): Promise<void> {
     if (!host) return;
@@ -623,6 +665,7 @@ export async function syncNow(): Promise<{ pushed: number; pulled: number; error
     if (syncing) return { pushed: 0, pulled: 0, error: 'busy' };
 
     syncing = true;
+    lastSyncStartedAt = Date.now();
     emitStatus();
     try {
         // BUG 1: an auto-unlocked (OS-cached) key is trusted blindly. If another
@@ -727,30 +770,49 @@ export function stopAutoSync(): void {
 }
 
 /**
- * Something changed locally (clip copied, deleted, pinned) — sync shortly.
- * Debounced so a burst of changes costs one cycle rather than one each, and so
- * a paste storm can't turn into a request storm.
+ * Floor between two sync cycles, whatever asks for them. Summoning the window
+ * triggers a sync, and the global shortcut can be pressed as fast as a key
+ * repeats — without this, holding Esc+shortcut (or a stuck key, or a script)
+ * would turn straight into request spam. Server-side rate limits would
+ * eventually catch that, but as user-visible errors, which is the wrong place
+ * to solve it.
  */
-export function requestSync(delayMs = 3000): void {
+const MIN_SYNC_GAP_MS = 10 * 1000;
+let lastSyncStartedAt = 0;
+
+/**
+ * Arm the (single) pending sync. `minDelayMs` is the caller's own debounce; the
+ * gap floor is applied on top. Re-arming converges on roughly the same absolute
+ * target rather than pushing it further out each time, so repeated triggers
+ * coalesce into one cycle instead of starving it.
+ */
+function scheduleSync(minDelayMs: number): void {
     if (!isEnabled() || !isUnlocked()) return;
+    const sinceLast = Date.now() - lastSyncStartedAt;
+    const wait = Math.max(minDelayMs, MIN_SYNC_GAP_MS - sinceLast, 0);
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
         debounceTimer = null;
         void syncNow();
-    }, delayMs);
+    }, wait);
 }
 
 /**
- * Sync right now because the user is about to look at the list (window summon).
- * Supersedes any pending debounce.
+ * Something changed locally (clip copied, deleted, pinned). Debounced so a
+ * burst of changes costs one cycle rather than one each.
+ */
+export function requestSync(delayMs = 3000): void {
+    scheduleSync(delayMs);
+}
+
+/**
+ * The user is about to look at the list (window summon) — sync as soon as the
+ * gap floor allows, which is immediately when idle. Deliberately schedules
+ * rather than dropping when throttled, so a summon never silently loses an
+ * update; it just arrives a few seconds later.
  */
 export function syncOnDemand(): void {
-    if (!isEnabled() || !isUnlocked()) return;
-    if (debounceTimer) {
-        clearTimeout(debounceTimer);
-        debounceTimer = null;
-    }
-    void syncNow();
+    scheduleSync(0);
 }
 
 /** Fetch current cloud usage for display. Returns null if unavailable. */

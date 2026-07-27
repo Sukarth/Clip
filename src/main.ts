@@ -1740,9 +1740,12 @@ function ensureTray(mainWindow: BrowserWindow) {
                             mainWindow.close();
                         }
                         app.quit();
+                        // Last-resort kill if app.quit() doesn't take. Must stay
+                        // comfortably above the before-quit offline-beacon budget
+                        // (1.2s) or it would cut every tray quit short.
                         setTimeout(() => {
                             try { process.exit(0); } catch { }
-                        }, 1000);
+                        }, 3000);
                     }, 200);
                 }
             },
@@ -2701,8 +2704,11 @@ function showMainWindow(preferredTargetHwnd?: number | null) {
     // profile / plan changes made on the website. This is now the only profile
     // refresh — the old 90s poll was pure overhead, since plan/name/avatar
     // changes only matter once the user is actually looking at the app.
+    // All three are throttled internally: the global shortcut can be pressed as
+    // fast as a key repeats, and summoning the window must not be a way to
+    // generate unbounded requests.
     if (cloudAuth.isLoggedIn()) {
-        void cloudSync.registerDevice();
+        void cloudSync.registerDeviceThrottled();
         void cloudAuth.refreshProfile();
         // The user is about to look at the list: make it current now rather
         // than waiting for the slow idle tick.
@@ -3481,18 +3487,14 @@ app.on('activate', () => {
     if (!mainWindow) createMainWindow();
 });
 
-app.on('before-quit', () => {
+// Idempotent: before-quit runs it again on the second pass after the offline
+// beacon, and a hard-exit fallback may race it.
+function shutdownTeardown() {
     if (clipboardPollTimer) {
         clearInterval(clipboardPollTimer);
         clipboardPollTimer = null;
     }
 
-    // Quitting means "this device went offline", NOT "sign this device out".
-    // Stop the cloud timers so no request is in flight while we tear down the
-    // DB, but deliberately leave the session, the sync key and the server-side
-    // device row intact — the account page infers offline from a stale
-    // last_seen_at once the heartbeat stops. Only an explicit sign-out (or a
-    // remote removal) deregisters.
     try { cloudSync.stopAutoSync(); } catch { /* best-effort */ }
     try { cloudSync.stopDeviceHeartbeat(); } catch { /* best-effort */ }
 
@@ -3507,5 +3509,35 @@ app.on('before-quit', () => {
         }
     } catch (error) {
         console.error('[main] Failed to close database on quit:', error);
+    }
+}
+
+// Guards the one-shot offline beacon: before-quit fires again once we re-issue
+// app.quit(), and that second pass must not defer again.
+let offlineBeaconSent = false;
+
+app.on('before-quit', (event) => {
+    // Quitting means "this device went offline", NOT "sign this device out".
+    // Telling the server directly makes the website flip to Offline at once
+    // instead of waiting ~10 minutes for the last heartbeat to age out. The
+    // session, the sync key and the device row all stay intact; only an
+    // explicit sign-out (or a remote removal) deregisters.
+    const beacon = !offlineBeaconSent && cloudAuth.isLoggedIn();
+    // Must be read BEFORE teardown closes the database.
+    const deviceId = beacon ? cloudSync.getDeviceId() : null;
+
+    // Always tear down first and synchronously. The beacon needs the network,
+    // so it defers the exit — and a deferred exit must never leave the database
+    // open, because a hard-exit fallback could fire in the meantime.
+    shutdownTeardown();
+
+    if (beacon && deviceId) {
+        offlineBeaconSent = true;
+        event.preventDefault();
+        // A slow or dead connection must not stop the app closing.
+        void Promise.race([
+            cloudSync.markOffline(deviceId),
+            new Promise((resolve) => setTimeout(resolve, 1200)),
+        ]).finally(() => app.quit());
     }
 });
