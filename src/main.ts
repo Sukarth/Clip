@@ -258,6 +258,40 @@ function setTemporaryClipboardItem(item: ClipboardHistoryItem | null) {
     invalidateHistoryCache();
 }
 
+// The temporary slot holds the image currently on the clipboard while image
+// storage is off. When the user turns storage on, that image is still what they
+// copied — persist it rather than leaving it in a state the setting no longer
+// describes. Returns true when an item was promoted.
+function promoteTemporaryImageToHistory(): boolean {
+    // Checked before `db` so this can never touch the database handle during
+    // early startup — a temporary item only exists once polling is running.
+    const temp = temporaryClipboardItem;
+    if (!temp || temp.type !== 'image' || !temp.content) return false;
+    if (!db) return false;
+
+    try {
+        insertClipboardItem({
+            type: 'image',
+            content: temp.content,
+            timestamp: temp.timestamp || Date.now(),
+        });
+    } catch (error) {
+        console.error('[main] Failed to promote temporary image to history:', error);
+        return false;
+    }
+
+    // lastImageDataUrl already equals this image, so the poller won't see it as
+    // newly copied and insert a duplicate.
+    setTemporaryClipboardItem(null);
+    console.log('[main] Promoted temporary image to a saved history item');
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('clipboard-history', getClipboardHistory());
+    }
+
+    return true;
+}
+
 function ahkShortcutString(shortcut: string): string | null {
     const toAhkMainKey = (mainKey: string) => {
         const key = mainKey.trim();
@@ -1049,6 +1083,8 @@ function readSettingsFromFile() {
 function applySettingsRuntime(settings: any) {
     if (!settings || typeof settings !== 'object') return;
 
+    const imageStorageWasOff = !storeImagesInClipboard;
+
     windowHideBehavior = settings.windowHideBehavior === 'tray' ? 'tray' : 'hide';
     showInTaskbar = !!settings.showInTaskbar;
     showNotifications = !!settings.showNotifications;
@@ -1064,6 +1100,12 @@ function applySettingsRuntime(settings: any) {
 
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.setSkipTaskbar(!showInTaskbar);
+    }
+
+    // Runs after maxHistoryItems is applied so the promoted item is trimmed
+    // against the limit the user just saved, not the previous one.
+    if (imageStorageWasOff && storeImagesInClipboard) {
+        promoteTemporaryImageToHistory();
     }
 }
 
